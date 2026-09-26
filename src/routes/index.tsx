@@ -56,8 +56,8 @@ function ProjectHome() {
   return (
     <>
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-start justify-between gap-6 px-7 pt-6 pb-4">
-          <div>
+        <header className="flex flex-wrap items-start justify-between gap-4 px-7 pt-6 pb-4 sm:gap-6">
+          <div className="min-w-0">
             <div className="label-mono">
               {project.name} · {project.missing ? "folder missing" : project.branch}
               {project.ahead ? ` · ${project.ahead} ahead` : ""}
@@ -68,7 +68,9 @@ function ProjectHome() {
             <h1 className="mt-1 font-display text-[44px] leading-[0.9] tracking-wide">
               {project.name}
             </h1>
-            <div className="mt-1 font-mono text-[11px] text-dim">{project.path}</div>
+            <div className="mt-1 break-all font-mono text-[11px] leading-snug text-dim">
+              {project.path}
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-2 self-center">
             <Link to="/tasks/new" className="btn-amber px-4 py-2 text-[13px]">

@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { Menu, X } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { isActive, useAde } from "@/lib/ade/store";
 
 const NAV = [
@@ -12,9 +13,14 @@ const NAV = [
 export function Shell({ children }: { children: ReactNode }) {
   const { state, selectProject } = useAde();
   const navigate = useNavigate();
+  const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setNavOpen(false);
+        return;
+      }
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -28,21 +34,40 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
-      <div className="flex h-9 shrink-0 items-center justify-between bg-ink/90 px-4 text-paper">
-        <span className="font-mono text-[11px] uppercase tracking-[0.18em]">
-          ADE · local-first agent workspace
-        </span>
-        <span className="flex items-center gap-4 font-mono text-[11px] text-paper/60">
+      <div className="flex h-9 shrink-0 items-center justify-between bg-ink/90 px-3 text-paper sm:px-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setNavOpen((v) => !v)}
+            aria-expanded={navOpen}
+            aria-controls="ade-sidebar"
+            aria-label={navOpen ? "Close projects menu" : "Open projects menu"}
+            className="-ml-1 grid size-7 shrink-0 place-items-center rounded text-paper/70 hover:bg-white/10 hover:text-paper focus-visible:outline-2 focus-visible:outline-amber lg:hidden"
+          >
+            {navOpen ? (
+              <X className="size-4" aria-hidden />
+            ) : (
+              <Menu className="size-4" aria-hidden />
+            )}
+          </button>
+          <span className="truncate font-mono text-[11px] uppercase tracking-[0.18em]">
+            ADE · local-first agent workspace
+          </span>
+        </div>
+        <span className="flex shrink-0 items-center gap-4 font-mono text-[11px] text-paper/60">
           {state.hydrated && !state.serviceAvailable && (
             <span className="text-amber">Local service disconnected</span>
           )}
-          <span>⌘K new task</span>
+          <span className="hidden sm:inline">⌘K new task</span>
         </span>
       </div>
 
       <div className="flex min-h-0 flex-1">
         <aside
-          className="flex w-56 shrink-0 flex-col border-r border-line bg-panel"
+          id="ade-sidebar"
+          className={`fixed top-9 bottom-0 left-0 z-40 w-64 shrink-0 flex-col overflow-y-auto border-r border-line bg-panel transition-transform duration-200 lg:static lg:z-auto lg:flex lg:w-56 lg:translate-x-0 ${
+            navOpen ? "flex translate-x-0" : "hidden -translate-x-full"
+          }`}
           aria-label="Projects"
         >
           <div className="px-4 pt-5 pb-2">
@@ -62,25 +87,28 @@ export function Shell({ children }: { children: ReactNode }) {
                 <button
                   key={p.id}
                   onClick={() => {
+                    setNavOpen(false);
                     selectProject(p.id);
                     navigate({ to: "/" });
                   }}
                   aria-current={active ? "true" : undefined}
-                  className={`w-full rounded-md px-3 py-2 text-left transition-colors ${active ? "bg-amber/10 ring-1 ring-amber/25" : "hover:bg-ink/[0.04]"}`}
+                  className={`w-full overflow-hidden rounded-md px-3 py-2 text-left transition-colors ${active ? "bg-amber/10 ring-1 ring-amber/25" : "hover:bg-ink/[0.04]"}`}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
                     <span
                       className={`size-2 shrink-0 rounded-full ${running ? "bg-teal" : "bg-dim"}`}
                       aria-hidden
                     />
-                    <span className={`text-[13px] ${active ? "font-medium" : ""}`}>{p.name}</span>
+                    <span className={`min-w-0 truncate text-[13px] ${active ? "font-medium" : ""}`}>
+                      {p.name}
+                    </span>
                     {sessions.length > 0 && (
-                      <span className="ml-auto font-mono text-[10px] text-dim">
+                      <span className="ml-auto shrink-0 font-mono text-[10px] text-dim">
                         {sessions.length}
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 pl-4 font-mono text-[10px] text-dim">
+                  <div className="mt-1 break-all font-mono text-[10px] leading-snug text-dim">
                     {p.path}
                     {p.missing ? " · missing" : ""}
                   </div>
@@ -103,6 +131,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 to={n.to}
                 activeOptions={{ exact: n.to === "/" }}
                 activeProps={{ className: "bg-ink/[0.06] font-medium" }}
+                onClick={() => setNavOpen(false)}
                 className="block rounded-md px-3 py-1.5 text-[13px] hover:bg-ink/[0.04]"
               >
                 {n.label}
@@ -118,6 +147,16 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </aside>
+
+        {navOpen && (
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Close projects menu"
+            onClick={() => setNavOpen(false)}
+            className="fixed top-9 right-0 bottom-0 left-0 z-30 bg-ink/40 lg:hidden"
+          />
+        )}
 
         {children}
       </div>

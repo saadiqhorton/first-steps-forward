@@ -41,7 +41,7 @@ function Processes() {
       <div className="space-y-6 px-7 pb-8">
         {grouped.map(({ project, procs }) => (
           <section key={project.id} aria-labelledby={`proc-${project.id}`}>
-            <div id={`proc-${project.id}`} className="label-mono mb-2">
+            <div id={`proc-${project.id}`} className="label-mono mb-2 break-all">
               {project.name} · {project.path}
             </div>
             <div className="card-panel divide-y divide-line">
