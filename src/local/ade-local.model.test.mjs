@@ -37,7 +37,7 @@ const { handleLocalApi } = await import("./ade-local.mjs");
 
 const apiRequest = (urlPath, body) => ({
   url: `http://127.0.0.1:3000${urlPath}`,
-  method: "POST",
+  method: body === undefined ? "GET" : "POST",
   headers: { entries: () => [["host", "127.0.0.1:3000"]] },
   text: async () => JSON.stringify(body ?? {}),
 });
@@ -93,6 +93,39 @@ test("set-model sanitizes, applies, clears, and respects completed sessions", as
 
   const missing = await call("/api/sessions/nope/model", { model: "gpt-5.5" });
   assert.equal(missing.status, 404);
+});
+
+test("built-in folder browser lists directories one level at a time", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "ade-browse-"));
+  mkdirSync(path.join(root, "alpha"));
+  mkdirSync(path.join(root, "beta"));
+  mkdirSync(path.join(root, ".secret-dir"));
+  writeFileSync(path.join(root, "file.txt"), "not a folder");
+
+  const listed = await call(`/api/browse?path=${encodeURIComponent(root)}`);
+  assert.equal(listed.status, 200);
+  assert.equal(listed.json.path, root);
+  assert.deepEqual(
+    listed.json.dirs.map((d) => d.name),
+    ["alpha", "beta"],
+  );
+  assert.ok(listed.json.dirs[0].path.startsWith(root));
+  // Dotfolders stay hidden unless explicitly requested; files never appear.
+  const withHidden = await call(`/api/browse?path=${encodeURIComponent(root)}&hidden=1`);
+  assert.deepEqual(
+    withHidden.json.dirs.map((d) => d.name),
+    [".secret-dir", "alpha", "beta"],
+  );
+
+  // Parent navigation and error paths.
+  const parent = await call(`/api/browse?path=${encodeURIComponent(root)}/alpha`);
+  assert.equal(parent.json.path, path.join(root, "alpha"));
+  assert.equal(parent.json.parent, root);
+  const missingPath = await call("/api/browse?path=/definitely/not/here-xyz");
+  assert.equal(missingPath.status, 400);
+  assert.match(missingPath.json.error, /does not exist/);
+
+  rmSync(root, { recursive: true, force: true });
 });
 
 test("unknown agents have no model listing", async () => {

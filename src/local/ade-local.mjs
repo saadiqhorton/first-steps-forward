@@ -651,6 +651,36 @@ async function handle(req, res) {
         now: now(),
       });
     }
+    if (req.method === "GET" && parts[0] === "browse") {
+      // Read-only directory listing for ADE's built-in folder picker. Same
+      // loopback/origin guards as every other route; never exposes file
+      // contents, only directory names one level at a time.
+      const query = new URL(req.url, "http://127.0.0.1").searchParams;
+      const requested = query.get("path") || os.homedir();
+      const expanded = requested.startsWith("~")
+        ? path.join(os.homedir(), requested.slice(1))
+        : path.resolve(requested);
+      let real;
+      try {
+        real = await fs.realpath(expanded);
+      } catch {
+        return json(res, 400, { error: "That path does not exist." });
+      }
+      const stat = await fs.stat(real);
+      if (!stat.isDirectory()) return json(res, 400, { error: "That path is not a directory." });
+      const showHidden = query.get("hidden") === "1";
+      const dirents = await fs.readdir(real, { withFileTypes: true });
+      const dirs = dirents
+        .filter((entry) => entry.isDirectory() && (showHidden || !entry.name.startsWith(".")))
+        .map((entry) => ({ name: entry.name, path: path.join(real, entry.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const parent = path.dirname(real);
+      return json(res, 200, {
+        path: real,
+        parent: parent === real ? null : parent,
+        dirs,
+      });
+    }
     if (req.method === "GET" && parts[0] === "pick-folder") {
       const choices =
         process.platform === "darwin"

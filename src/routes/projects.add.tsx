@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { FolderBrowser } from "@/components/ade/FolderBrowser";
 import { useAde } from "@/lib/ade/store";
 
 export const Route = createFileRoute("/projects/add")({
@@ -13,17 +14,23 @@ function AddProject() {
   const [custom, setCustom] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
   const name = path.split(/[\\/]/).filter(Boolean).pop() ?? "";
   const finalName = custom || name;
+  // Prefer the OS's own dialog when a picker tool is installed; otherwise
+  // fall back to ADE's built-in browser so the button always works.
   const browse = async () => {
     setError("");
     try {
-      const r = await fetch("/api/pick-folder");
-      const v = await r.json();
-      if (!r.ok) throw new Error(v.error);
-      if (v.path) setPath(v.path);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const response = await fetch("/api/pick-folder");
+      const value = await response.json();
+      if (response.ok && value.path) {
+        setPath(value.path);
+        return;
+      }
+      throw new Error(value.error ?? "Native picker unavailable");
+    } catch {
+      setBrowsing(true);
     }
   };
   const submit = async () => {
@@ -89,6 +96,15 @@ function AddProject() {
           </button>
         </div>
       </div>
+      {browsing && (
+        <FolderBrowser
+          onClose={() => setBrowsing(false)}
+          onPick={(picked) => {
+            setPath(picked);
+            setBrowsing(false);
+          }}
+        />
+      )}
     </main>
   );
 }
