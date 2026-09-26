@@ -45,6 +45,14 @@ function Agents() {
                   </span>
                 </div>
                 <p className="mt-1 text-[12px] text-dim">{a.authMethod}</p>
+                {a.providers && a.providers.length > 0 && (
+                  <p className="mt-1 text-[12px]">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+                      Connected providers:{" "}
+                    </span>
+                    {a.providers.join(", ")}
+                  </p>
+                )}
                 <p className="mt-2 text-[12px] leading-relaxed text-dim">{a.authNote}</p>
                 {!a.installed && (
                   <a

@@ -27,16 +27,18 @@ function NewTask() {
   const [signing, setSigning] = useState<Agent | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [ackDirty, setAckDirty] = useState(false);
   const agent = state.agents.find((a) => a.id === agentId);
   const usable = !!agent?.installed && agent.signedIn;
   const overlapping = state.sessions.some(
     (s) => s.projectId === project.id && ["working", "verifying"].includes(s.status),
   );
+  const dirty = project.uncommittedFiles.length > 0;
   const canStart =
     !!project.id &&
     request.trim().length > 3 &&
     usable &&
-    !project.uncommittedFiles.length &&
+    (!dirty || ackDirty) &&
     !overlapping &&
     !busy;
   const submit = async () => {
@@ -98,6 +100,7 @@ function NewTask() {
                     setProjectId(p.id);
                     setAgentId(p.defaultAgent);
                     setModel("");
+                    setAckDirty(false);
                   }}
                   className={`rounded-md px-3 py-1.5 text-[13px] ring-1 ${p.id === project.id ? "bg-amber/15 ring-amber/40 font-medium" : "bg-panel ring-line"}`}
                 >
@@ -182,16 +185,32 @@ function NewTask() {
           />
           {!!project.uncommittedFiles.length && (
             <div className="rounded-lg border border-amber/40 bg-amber/10 p-4">
-              <div className="text-[13px] font-semibold">Uncommitted work is protected</div>
+              <div className="text-[13px] font-semibold">
+                Uncommitted work detected — it will be protected, not blocked
+              </div>
               <p className="mt-1 text-[12px] leading-relaxed">
-                ADE will not launch an agent against a dirty working tree. Commit or stash these
-                changes first. ADE never auto-stashes, resets, or restores files.
+                You can start the task anyway. ADE records these files as your pre-existing changes,
+                tells the agent to work around them (never revert, stash, commit, or overwrite
+                them), and marks them "yours" in the diff so you can tell your edits from the
+                agent's. ADE never auto-stashes, resets, or restores files.
               </p>
               <ul className="mt-2 font-mono text-[11px] text-dim">
                 {project.uncommittedFiles.map((f) => (
                   <li key={f}>{f}</li>
                 ))}
               </ul>
+              <label className="mt-3 flex items-start gap-2 text-[12px] leading-snug">
+                <input
+                  type="checkbox"
+                  checked={ackDirty}
+                  onChange={(e) => setAckDirty(e.target.checked)}
+                  className="mt-0.5 accent-amber"
+                />
+                <span>
+                  I understand the agent will run alongside my uncommitted changes and I'll review
+                  the diff before committing anything.
+                </span>
+              </label>
             </div>
           )}
           {overlapping && (

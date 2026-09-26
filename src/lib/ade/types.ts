@@ -8,7 +8,7 @@ export interface Agent {
   version?: string;
   signedIn: boolean;
   account?: string;
-  provider?: string;
+  providers?: string[];
   authMethod: string;
   authNote: string;
   carriesConversation: boolean;
@@ -53,6 +53,8 @@ export interface FileChange {
   added: number;
   removed: number;
   hunk: string[];
+  /** True when this file was already dirty before the agent's first turn. */
+  preExisting?: boolean;
 }
 export interface Message {
   id: string;
@@ -95,6 +97,8 @@ export interface Session {
   completedAt?: number;
   agentSessionId?: string;
   model?: string;
+  /** Files dirty before the agent's first turn — shown as pre-existing. */
+  baselineFiles?: string[];
   failureKind?:
     | "provider_quota"
     | "model_not_found"
@@ -112,6 +116,7 @@ export interface Session {
     relevantFiles: string[];
     tools: string;
     dirtyWorktree: boolean;
+    uncommittedFiles?: string[];
   };
   queuedMessages?: string[];
 }

@@ -26,7 +26,17 @@ export function DiffView({ changes }: { changes: FileChange[] }) {
                 <span className="font-mono text-[10px] text-dim" aria-hidden>
                   {isOpen ? "▾" : "▸"}
                 </span>
-                <span className="flex-1 truncate font-mono text-[12px]">{c.path}</span>
+                <span className="flex-1 truncate font-mono text-[12px]">
+                  {c.path}
+                  {c.preExisting && (
+                    <span
+                      className="ml-2 rounded bg-amber/15 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-amber-deep"
+                      title="Already dirty before the agent ran — your uncommitted work"
+                    >
+                      yours
+                    </span>
+                  )}
+                </span>
                 <span className="font-mono text-[10px]">
                   <span className="text-teal">+{c.added}</span>{" "}
                   <span className="text-danger">−{c.removed}</span>

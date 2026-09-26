@@ -20,6 +20,13 @@ export const pi = {
    * list alone wrongly reported "not signed in" for accounts authenticated
    * via other providers (e.g. `opencode-go`).
    */
+  /**
+   * Pi is multi-provider: it may hold API keys, subscriptions, or gateway
+   * credentials for several providers at once. Enumerate every provider in
+   * Pi's own credential store (keys only — values are never read or logged)
+   * and report all of them that report ready, so ADE never narrows Pi to a
+   * single provider or forces one at run time.
+   */
   async detectAuth(run) {
     let candidates = ["openai-codex", "openai", "anthropic", "google", "opencode-go"];
     try {
@@ -29,22 +36,30 @@ export const pi = {
       const configured = Object.keys(store ?? {}).filter((key) => typeof key === "string" && key);
       if (configured.length) candidates = configured;
     } catch {}
-    for (const provider of candidates) {
-      const result = await run(
-        "pi",
-        ["auth", "check", "--provider", provider, "--json", "--no-refresh"],
-        {
-          timeout: 7000,
-        },
-      );
-      try {
-        if (JSON.parse(result.stdout).status === "ready")
-          return { signedIn: true, account: `Pi · ${provider}`, provider };
-      } catch {}
-    }
-    return { signedIn: false };
+    const ready = [];
+    await Promise.all(
+      candidates.map(async (provider) => {
+        const result = await run(
+          "pi",
+          ["auth", "check", "--provider", provider, "--json", "--no-refresh"],
+          {
+            timeout: 7000,
+          },
+        );
+        try {
+          if (JSON.parse(result.stdout).status === "ready") ready.push(provider);
+        } catch {}
+      }),
+    );
+    ready.sort();
+    if (!ready.length) return { signedIn: false };
+    return {
+      signedIn: true,
+      providers: ready,
+      account: ready.length === 1 ? `Pi · ${ready[0]}` : `Pi · ${ready.length} providers`,
+    };
   },
-  command({ prompt, session, continuing, dataDir, provider, model }) {
+  command({ prompt, session, continuing, dataDir, providers, model }) {
     const sessionFile = `${dataDir}/sessions/${session.id}.jsonl`;
     return [
       "pi",
@@ -55,10 +70,16 @@ export const pi = {
         "--no-extensions",
         "--tools",
         "read,edit,write,grep,find,ls",
-        // A `provider/model` id embeds the provider, so --provider is omitted
-        // when a model is chosen. Otherwise pass the detected provider so the
-        // default stays explicit.
-        ...(model ? ["--model", model] : provider ? ["--provider", provider] : []),
+        // A `provider/model` id embeds the provider, so --model wins outright.
+        // With exactly one ready provider, pin it so Pi's own default can't
+        // resolve to something unauthenticated. With several, stay out of the
+        // way: Pi resolves its own default across the providers the user set
+        // up, and the model picker can always name an explicit provider/model.
+        ...(model
+          ? ["--model", model]
+          : providers?.length === 1
+            ? ["--provider", providers[0]]
+            : []),
         "--session",
         sessionFile,
         ...(continuing ? ["--continue"] : []),

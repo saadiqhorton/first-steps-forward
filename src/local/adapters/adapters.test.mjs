@@ -87,11 +87,22 @@ test("adapters omit the model flag entirely when no model is chosen", () => {
     session,
     continuing: false,
     dataDir: "/tmp/ade",
-    provider: "opencode-go",
+    providers: ["opencode-go"],
   })[1];
   assert.ok(!piArgs.includes("--model"));
-  // Without a model the detected provider is still passed explicitly.
+  // With exactly one ready provider it is pinned explicitly so Pi's own
+  // default cannot resolve to an unauthenticated provider.
   assert.ok(piArgs.includes("--provider") && piArgs.includes("opencode-go"));
+  // With several ready providers ADE stays out of the way and lets Pi
+  // resolve its own default across the providers the user set up.
+  const piMultiArgs = pi.command({
+    prompt: "Go",
+    session,
+    continuing: false,
+    dataDir: "/tmp/ade",
+    providers: ["opencode-go", "anthropic"],
+  })[1];
+  assert.ok(!piMultiArgs.includes("--provider"));
 });
 
 test("adapters pass the chosen model with each CLI's own flag spelling", () => {
@@ -116,7 +127,7 @@ test("adapters pass the chosen model with each CLI's own flag spelling", () => {
     session,
     continuing: false,
     dataDir: "/tmp/ade",
-    provider: "opencode-go",
+    providers: ["opencode-go"],
     model: "opencode-go/gpt-5.6-luna",
   })[1];
   assert.equal(piArgs[piArgs.indexOf("--model") + 1], "opencode-go/gpt-5.6-luna");
@@ -137,7 +148,7 @@ test("Codex resume carries the model flag and Pi drops --provider when a model i
     session: { id: "s", agentSessionId: "pi-1" },
     continuing: true,
     dataDir: "/tmp/ade",
-    provider: "opencode-go",
+    providers: ["opencode-go"],
     model: "opencode-go/gpt-5.6-luna",
   })[1];
   // provider/id is embedded in the model id; --provider must not compete.

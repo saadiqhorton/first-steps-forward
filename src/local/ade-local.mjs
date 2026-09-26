@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -201,12 +201,6 @@ async function projectInfo(project) {
   project.ahead = aheadRes.code === 0 ? Number(aheadRes.stdout.trim()) || 0 : 0;
   return safeProject(project);
 }
-async function snapshotDigest(project) {
-  const snapshot = await getDiff(project);
-  return createHash("sha256")
-    .update(JSON.stringify({ files: snapshot.files, changes: snapshot.changes }))
-    .digest("hex");
-}
 async function getDiff(project) {
   const tracked = await git(project, ["diff", "HEAD", "--no-ext-diff", "--unified=3"]);
   const names = await git(project, ["status", "--porcelain=v1", "-uall"]);
@@ -291,7 +285,7 @@ function agentCommand(session, project, prompt, continuing) {
     session,
     continuing,
     dataDir: DATA_DIR,
-    provider: state.agents.find((a) => a.id === session.agentId)?.provider,
+    providers: state.agents.find((a) => a.id === session.agentId)?.providers,
     model: session.model,
   });
 }
@@ -320,6 +314,9 @@ async function buildManifest(session, project) {
     relevantFiles: candidates.slice(0, 60),
     tools: agent?.tools ?? "agent's default CLI tools",
     dirtyWorktree: (project.uncommittedFiles ?? []).length > 0,
+    ...(project.uncommittedFiles?.length
+      ? { uncommittedFiles: project.uncommittedFiles.slice(0, 40) }
+      : {}),
   };
 }
 async function runAgent(session, prompt, continuing = false) {
@@ -339,6 +336,14 @@ async function runAgent(session, prompt, continuing = false) {
   session.status = "working";
   await save();
   await projectInfo(project);
+  // Refresh the preserved-changes baseline at the start of every turn so it
+  // reflects the tree as it is right now (the user may edit between turns).
+  if (project.uncommittedFiles.length) {
+    const baseline = await getDiff(project);
+    session.baselineFiles = baseline.files.map((f) => f.path);
+  } else {
+    delete session.baselineFiles;
+  }
   session.manifest = await buildManifest(session, project);
   addLog(
     session,
@@ -348,7 +353,10 @@ async function runAgent(session, prompt, continuing = false) {
     `Context manifest: project ${project.name} (${project.branch}); task: ${session.request}` +
     (session.criteria ? `; acceptance criteria: ${session.criteria}` : "") +
     `; model: ${session.model ?? "agent default"}` +
-    `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}`;
+    `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}` +
+    (session.manifest.uncommittedFiles
+      ? `; the user has uncommitted changes in these files: ${session.manifest.uncommittedFiles.join(", ")} — never revert, stash, commit, or overwrite them; work around them`
+      : "");
   const safetyPreamble =
     "Safety instructions: Work only in this project. Do not deploy, publish, send external communications, modify shared or production systems, or delete data. If such an action is necessary, stop and ask the user instead. Preserve existing files unless the requested code change requires editing them. ";
   const [bin, args] = agentCommand(
@@ -407,8 +415,15 @@ async function runAgent(session, prompt, continuing = false) {
     if (stdoutBuffer.trim()) parseAgentOutput(session, stdoutBuffer);
     children.delete(session.id);
     delete session.pid;
+    // Refresh the live diff on every exit path and flag files that were
+    // already dirty before this turn as pre-existing (the user's), so the
+    // diff view separates their work from the agent's.
+    const flagBaseline = (changes) => {
+      const baseline = new Set(session.baselineFiles ?? []);
+      return changes.map((c) => (baseline.has(c.path) ? { ...c, preExisting: true } : c));
+    };
     if (session.status === "stopped") {
-      session.workingTreeSnapshot = await snapshotDigest(project);
+      session.changes = flagBaseline((await getDiff(project)).changes);
       await save();
       return;
     }
@@ -452,7 +467,7 @@ async function runAgent(session, prompt, continuing = false) {
     }
     session.summary = session.messages.filter((m) => m.role === "agent").at(-1)?.text;
     session.updatedAt = now();
-    session.workingTreeSnapshot = await snapshotDigest(project);
+    session.changes = flagBaseline((await getDiff(project)).changes);
     session.checks = [
       {
         name: "Project checks",
@@ -641,7 +656,9 @@ async function handle(req, res) {
         for (const s of state.sessions.filter(
           (item) => item.projectId === p.id && item.status !== "complete",
         ))
-          s.changes = diff.changes;
+          s.changes = diff.changes.map((c) =>
+            s.baselineFiles?.includes(c.path) ? { ...c, preExisting: true } : c,
+          );
       }
       return json(res, 200, {
         projects: state.projects.map(safeProject),
@@ -830,10 +847,11 @@ async function handle(req, res) {
         return json(res, 409, {
           error: `The folder ${project.path} no longer exists on disk. Remove the project from ADE (Remove button) and re-add it.`,
         });
-      if (project.uncommittedFiles.length)
-        return json(res, 409, {
-          error: `This project has uncommitted changes (${project.uncommittedFiles.slice(0, 5).join(", ")}). Commit or stash them first. ADE will not start an agent against a dirty working tree.`,
-        });
+      // Uncommitted work does not block a task: ADE records it as the
+      // baseline, tells the agent to preserve it, and flags those files as
+      // pre-existing in the diff view so the user can tell their edits from
+      // the agent's.
+      const baseline = project.uncommittedFiles.length ? await getDiff(project) : null;
       if (
         state.sessions.some(
           (s) => s.projectId === project.id && ["working", "verifying"].includes(s.status),
@@ -859,7 +877,8 @@ async function handle(req, res) {
             at: now(),
           },
         ],
-        changes: [],
+        changes: baseline ? baseline.changes.map((c) => ({ ...c, preExisting: true })) : [],
+        ...(baseline ? { baselineFiles: baseline.files.map((f) => f.path) } : {}),
         checks: [{ name: "Project checks", status: "not_run", detail: "Not run yet." }],
         logs: [],
         createdAt: now(),
@@ -885,15 +904,10 @@ async function handle(req, res) {
       if (s.status === "complete")
         return json(res, 409, { error: "Reopen this session before sending a message." });
       const project = state.projects.find((p) => p.id === s.projectId);
-      if (
-        !children.has(s.id) &&
-        s.workingTreeSnapshot &&
-        (await snapshotDigest(project)) !== s.workingTreeSnapshot
-      )
-        return json(res, 409, {
-          error:
-            "The project working tree changed since this agent turn. Review those edits before sending another turn; ADE will not overwrite or reset them.",
-        });
+      // Follow-ups stay non-blocking: the user may keep editing between
+      // turns. runAgent re-reads the working tree at the start of each turn
+      // and refreshes the preserved-changes baseline, so the agent always
+      // sees current reality.
       if (children.has(s.id)) {
         (s.queuedMessages ??= []).push(text);
         addMessage(s, "user", text);
@@ -928,10 +942,6 @@ async function handle(req, res) {
       if (s.status === "complete")
         return json(res, 409, { error: "Reopen this session before switching agents." });
       await projectInfo(project);
-      if (project.uncommittedFiles.length)
-        return json(res, 409, {
-          error: "Commit or stash the working tree before switching agents.",
-        });
       const from = state.agents.find((a) => a.id === s.agentId);
       s.createdBy = s.agentId;
       s.agentId = target.id;
