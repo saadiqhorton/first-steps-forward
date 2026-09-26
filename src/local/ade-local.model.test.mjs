@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -44,6 +44,7 @@ const {
   refreshDevProcess,
   classifyTurnFailure,
   executeChecks,
+  buildManifest,
 } = await import("./ade-local.mjs");
 
 const apiRequest = (urlPath, body) => ({
@@ -342,5 +343,119 @@ test("refresh normalizes stale launch args while the record is not running", asy
   res = await refreshDevProcess(project);
   assert.deepEqual(proc.args, ["run", "dev"]);
   assert.equal(res.changed, true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("dev-control skill file is generated at startup with private perms and full guidance", () => {
+  const skillPath = path.join(home, ".ade", "skills", "ade-dev-control", "SKILL.md");
+  const skill = readFileSync(skillPath, "utf8");
+  for (const needle of [
+    "api/projects/$PID/dev/start",
+    "api/projects/$PID/dev/stop",
+    'curl -fsS "$ADE/api/projects/$PID/dev"',
+    '"starting", "running", "stopped"',
+    "re-scans package.json",
+    "409",
+    "404",
+    "nohup",
+    "workspace-write",
+    "press Start in ADE",
+    "devControl.baseUrl",
+  ]) {
+    assert.ok(skill.includes(needle), `skill should mention ${needle}`);
+  }
+  // Private, like the other ~/.ade files.
+  assert.equal(statSync(skillPath).mode & 0o777, 0o600);
+});
+
+test("project dev control: 404 guidance, inline re-scan on start, 409 while running, idempotent stop", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-devctl-"));
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "x" }));
+  const reg = await call("/api/projects", { path: dir });
+  assert.equal(reg.status, 201);
+  const pid = reg.json.project.id;
+
+  // No dev script even after the inline re-scan -> 404 with instructions
+  // (and nothing is spawned).
+  const miss = await call(`/api/projects/${pid}/dev/start`, {});
+  assert.equal(miss.status, 404);
+  assert.match(miss.json.error, /No dev script/);
+  assert.match(miss.json.guidance, /nohup/);
+  assert.match(miss.json.guidance, /tell the user/);
+
+  // Status before any record exists.
+  const st0 = await call(`/api/projects/${pid}/dev`);
+  assert.equal(st0.status, 200);
+  assert.equal(st0.json.found, false);
+
+  try {
+    // Mid-turn scaffold: scripts.dev + a tiny server appear. Start must
+    // detect them INLINE — a route without the re-scan would still 404.
+    writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ name: "x", scripts: { dev: "node server.js" } }),
+    );
+    writeFileSync(
+      path.join(dir, "server.js"),
+      "require('node:http').createServer((q, s) => s.end('ok')).listen(Number(process.env.PORT) || 0);\n",
+    );
+    const up = await call(`/api/projects/${pid}/dev/start`, {});
+    assert.equal(up.status, 200);
+    assert.equal(up.json.status, "running");
+    assert.ok(up.json.port > 0, "port is only reported after a real listen");
+    assert.equal(up.json.command, "npm run dev");
+
+    // Double start -> 409 carrying the current record.
+    const again = await call(`/api/projects/${pid}/dev/start`, {});
+    assert.equal(again.status, 409);
+    assert.equal(again.json.status, "running");
+    assert.ok(again.json.port > 0);
+
+    // Status: found, running, bounded output tail (no full dump).
+    const st = await call(`/api/projects/${pid}/dev`);
+    assert.equal(st.json.found, true);
+    assert.equal(st.json.status, "running");
+    assert.equal(st.json.port, up.json.port);
+    assert.ok(Array.isArray(st.json.outputTail) && st.json.outputTail.length <= 5);
+  } finally {
+    const stop1 = await call(`/api/projects/${pid}/dev/stop`, {});
+    assert.equal(stop1.status, 200);
+    assert.equal(stop1.json.status, "stopped");
+    assert.equal(stop1.json.port, 0);
+    // Idempotent: stopping an already-stopped record is still a 200 no-op.
+    const stop2 = await call(`/api/projects/${pid}/dev/stop`, {});
+    assert.equal(stop2.status, 200);
+    assert.equal(stop2.json.status, "stopped");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("manifest devControl carries the real base URL, curls, and skill path", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-devctl-mf-"));
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "x" }));
+  // Any loopback request records the serving Host; this call also registers
+  // the fixture project.
+  const reg = await call("/api/projects", { path: dir });
+  assert.equal(reg.status, 201);
+  const project = reg.json.project;
+
+  const manifest = await buildManifest({ request: "scaffold a thing", agentId: "codex" }, project);
+  assert.equal(manifest.devControl.baseUrl, "http://127.0.0.1:3000");
+  assert.equal(manifest.devControl.projectId, project.id);
+  assert.ok(manifest.devControl.skill.endsWith("skills/ade-dev-control/SKILL.md"));
+  assert.equal(
+    manifest.devControl.start,
+    `curl -fsS -X POST http://127.0.0.1:3000/api/projects/${project.id}/dev/start`,
+  );
+  assert.match(manifest.devControl.stop, /dev\/stop$/);
+  assert.match(manifest.devControl.status, /dev$/);
+
+  // The 1e constraint is aligned with the bridge: control belongs to the
+  // agent now, detached servers stay forbidden, sandbox failure = ask user.
+  const bridge = manifest.constraints.find((c) => c.includes("dev-server control"));
+  assert.ok(bridge, "constraints mention the dev-server control");
+  assert.ok(bridge.includes("never start a detached background server"));
+  assert.ok(bridge.includes("devControl"));
+  assert.ok(bridge.includes("ask the user to start it in ADE"));
   rmSync(dir, { recursive: true, force: true });
 });

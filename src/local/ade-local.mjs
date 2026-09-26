@@ -16,6 +16,11 @@ const authChildren = new Map();
 // Process ids whose dev-server port has been confirmed to accept a
 // connection; a process that dies before that never actually listened.
 const listenedProcs = new Set();
+// Real base URL of the serving ADE instance, taken from the latest loopback
+// request's Host header; null until the first request after boot.
+let lastApiBaseUrl = null;
+// Generated agent-facing skill file (private, like every other ~/.ade file).
+const DEV_CONTROL_SKILL_PATH = path.join(DATA_DIR, "skills", "ade-dev-control", "SKILL.md");
 const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
 let probingAgents = false;
 const id = () => randomUUID();
@@ -300,6 +305,56 @@ async function waitForListening(proc, timeoutMs = 10000) {
   }
   return false;
 }
+/**
+ * Launch path shared by POST /processes/:id/start and the project-scoped
+ * dev/start endpoint: framework-mapped flags, fresh port, listen-verified
+ * "running", and an honest failure that resets the port.
+ */
+async function startDevServer(proc, project) {
+  // Map launch flags to the framework actually in the project: next
+  // rejects --host outright (it takes -H/--hostname), vite and other
+  // --host users take --host/--port, unknown scripts get only the port
+  // plus PORT in the environment. Launch flags are computed per start
+  // from the stored base args, so restarts never stack them.
+  const { pkg } = await readDevCommand(project);
+  const framework = detectFramework(pkg, pkg?.scripts?.dev ?? "");
+  proc.port = await allocatePort();
+  listenedProcs.delete(proc.id);
+  const launch = {
+    args: [...baseLaunchArgs(proc.args), ...devServerArgs(framework, proc.port)],
+    ...(framework === "unknown" ? { env: { PORT: String(proc.port) } } : {}),
+  };
+  spawnProcess(proc, project, launch);
+  // "running" is only reported once the port accepts a connection;
+  // otherwise surface the captured stderr tail and reset the port.
+  const up = await waitForListening(proc);
+  if (up) {
+    proc.status = "running";
+  } else {
+    const allocatedPort = proc.port;
+    const alive = children.has(proc.id);
+    if (alive) stopChild(children.get(proc.id));
+    // Either way it never listened, so the allocated port is unusable:
+    // reset it here (and again in the close handler) so a failed start
+    // never reports a stale port.
+    proc.port = 0;
+    proc.output.push(
+      alive
+        ? `The dev server did not accept a connection on port ${allocatedPort} within 10 seconds; ADE stopped it. Its output is above.`
+        : "The dev server exited before it could listen; its error output is above.",
+    );
+    proc.status = "stopped";
+  }
+  proc.updatedAt = now();
+  await save();
+  return proc;
+}
+/** Compact agent-facing view of a dev record: port only while running. */
+const devView = (proc) => ({
+  status: proc.status,
+  port: proc.status === "running" ? proc.port : 0,
+  command: proc.command,
+});
 function addLog(session, text) {
   session.logs = [...(session.logs ?? []), text].slice(-500);
   session.updatedAt = now();
@@ -370,7 +425,107 @@ function devServerStatus(project) {
   if (proc.status === "starting") return "starting";
   return proc.startedAt ? "stopped" : "stopped (never started this session)";
 }
-async function buildManifest(session, project) {
+/**
+ * Agent-facing dev-control block for the manifest: the real base URL of the
+ * serving ADE instance (latest loopback request Host header, then the
+ * configured listen port), ready-to-run curl commands, and the skill file.
+ * When the URL is genuinely unknown the commands are omitted rather than
+ * guessed, and the skill file is referenced instead of printing a wrong URL.
+ */
+function devControlFor(project) {
+  const skill = DEV_CONTROL_SKILL_PATH;
+  const baseUrl = lastApiBaseUrl ?? knownListenBaseUrl();
+  if (!baseUrl)
+    return {
+      baseUrl: null,
+      projectId: project.id,
+      skill,
+      note: "The ADE API base URL is unknown right now: read the skill file for how to reach the control endpoints, and ask the user for the ADE URL instead of guessing one.",
+    };
+  const base = `${baseUrl}/api/projects/${project.id}/dev`;
+  return {
+    baseUrl,
+    projectId: project.id,
+    skill,
+    status: `curl -fsS ${base}`,
+    start: `curl -fsS -X POST ${base}/start`,
+    stop: `curl -fsS -X POST ${base}/stop`,
+  };
+}
+// Only NITRO_PORT is ADE's own configured listen port (set by
+// scripts/start-local.mjs); a generic shell PORT could belong to anything.
+function knownListenBaseUrl() {
+  const port = process.env.NITRO_PORT;
+  return port && /^\d+$/.test(String(port)) ? `http://127.0.0.1:${port}` : null;
+}
+function devControlLine(dc) {
+  return dc.baseUrl
+    ? `start: ${dc.start}; stop: ${dc.stop}; status: ${dc.status}; skill: ${dc.skill}`
+    : `base URL unknown — follow the skill file ${dc.skill}`;
+}
+/**
+ * The agent-facing skill: plain markdown written to ~/.ade at service
+ * startup and after dev-record refreshes, documenting the bridge endpoints,
+ * status semantics, error meanings, and the no-detached-servers rule.
+ */
+export function renderDevControlSkill() {
+  return `# ADE dev-server control
+
+ADE owns this project's dev server. Start, stop, and inspect it ONLY through
+these loopback endpoints — never start a detached background server yourself
+(no nohup, no "&" backgrounding, no disown, no screen/tmux/pm2), and never
+leave one running.
+
+## Base URL and project id
+Take both from your task manifest's \`devControl\` section:
+- \`devControl.baseUrl\` — the ADE API serving this session (e.g. http://127.0.0.1:3000)
+- \`devControl.projectId\` — the project id used in the URLs
+If the manifest says the base URL is unknown, use the curl commands it
+provides as-is; if those are missing too, ask the user for the ADE URL
+instead of guessing one.
+
+In the examples:  ADE="<devControl.baseUrl>"   PID="<devControl.projectId>"
+
+## Endpoints (loopback only, no auth)
+    # status
+    curl -fsS "$ADE/api/projects/$PID/dev"
+    # start (re-scans package.json first, then starts)
+    curl -fsS -X POST "$ADE/api/projects/$PID/dev/start"
+    # stop
+    curl -fsS -X POST "$ADE/api/projects/$PID/dev/stop"
+
+## Status semantics
+- \`status\` is one of "starting", "running", "stopped".
+- \`port\` is non-zero only after the server really accepted a connection on
+  it; a failed or never-started server reports port 0.
+- Start re-scans package.json inline, so a \`scripts.dev\` you scaffolded
+  earlier in this same turn is detected immediately. Call start; do not
+  spawn anything yourself.
+- 409 on start just means it is already running or starting — read the
+  returned record (or call status) instead of retrying.
+
+## Errors
+- 404 on start: no dev script even after the re-scan. Add a proper \`dev\`
+  script to package.json and call start again, or tell the user. Never
+  work around it with a detached process of your own.
+- 404 on stop/status: this project has no dev-server record (it was never
+  started through ADE).
+- 409 on start: already running/starting; the current record is in the body.
+
+## Sandbox caveat
+Codex runs in a \`workspace-write\` sandbox that may be BLOCKED from reaching
+the loopback ADE API. If curl to the ADE API fails from your sandbox, do not
+fall back to starting a server yourself: say so in your response and ask the
+user to press Start in ADE.
+`;
+}
+async function writeDevControlSkill() {
+  try {
+    await fs.mkdir(path.dirname(DEV_CONTROL_SKILL_PATH), { recursive: true, mode: 0o700 });
+    await fs.writeFile(DEV_CONTROL_SKILL_PATH, renderDevControlSkill(), { mode: 0o600 });
+  } catch {}
+}
+export async function buildManifest(session, project) {
   const agent = state.agents.find((a) => a.id === session.agentId);
   const trackedFiles = await git(project, ["ls-files", "-co", "--exclude-standard"]);
   const files = trackedFiles.stdout.split(/\r?\n/).filter(Boolean).slice(0, 400);
@@ -388,11 +543,12 @@ async function buildManifest(session, project) {
       model: session.model ?? "agent default",
     },
     devServer: devServerStatus(project),
+    devControl: devControlFor(project),
     constraints: [
       "Work only within the project directory",
       "No deployments, publishing, or external/shared-system changes without the user",
       "Do not revert or overwrite user changes",
-      "ADE starts and stops this project's dev server through its own process control: never start a detached background server (no nohup, &, or disown) and never leave one running; if your task needs a running server, say so in your response and the user will start it through ADE",
+      "Use ADE's dev-server control for this project (the devControl section of this manifest; its endpoints are documented in the skill file): start, stop, and inspect the dev server only through those endpoints; never start a detached background server (no nohup, &, or disown) and never leave one running; if your sandbox cannot reach the ADE API, say so in your response and ask the user to start it in ADE",
     ],
     relevantFiles: candidates.slice(0, 60),
     tools: agent?.tools ?? "agent's default CLI tools",
@@ -448,6 +604,7 @@ async function runAgent(session, prompt, continuing = false) {
       (session.criteria ? `; acceptance criteria: ${session.criteria}` : "") +
       `; model: ${session.model ?? "agent default"}` +
       `; dev server: ${session.manifest.devServer}` +
+      `; dev control: ${devControlLine(session.manifest.devControl)}` +
       `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}` +
       (session.manifest.uncommittedFiles
         ? `; the user has uncommitted changes in these files: ${session.manifest.uncommittedFiles.join(", ")} — never revert, stash, commit, or overwrite them; work around them`
@@ -943,6 +1100,10 @@ function localRequest(req) {
 async function handle(req, res) {
   if (!localRequest(req))
     return json(res, 403, { error: "ADE local API only accepts requests from this machine." });
+  // Remember the real base URL of this serving instance (Host carries the
+  // port): manifests built for async turns reuse the latest verified one
+  // instead of guessing a URL.
+  if (req.headers.host) lastApiBaseUrl = `http://${req.headers.host}`;
   const url = new URL(req.url, "http://127.0.0.1");
   const parts = url.pathname
     .replace(/^\/api\/?/, "")
@@ -978,7 +1139,10 @@ async function handle(req, res) {
             s.baselineFiles?.includes(c.path) ? { ...c, preExisting: true } : c,
           );
       }
-      if (devStateChanged) save().catch(() => {});
+      if (devStateChanged) {
+        save().catch(() => {});
+        writeDevControlSkill().catch(() => {});
+      }
       return json(res, 200, {
         projects: state.projects.map(safeProject),
         sessions: state.sessions,
@@ -1077,8 +1241,9 @@ async function handle(req, res) {
       // Same detection path as the bootstrap re-scan: an unreadable or
       // malformed package.json records a distinct note instead of silently
       // reporting no dev script.
-      const { proc } = await refreshDevProcess(project);
+      const { proc, changed } = await refreshDevProcess(project);
       await save();
+      if (changed) writeDevControlSkill().catch(() => {});
       return json(res, 201, { project, process: proc });
     }
     if (req.method === "POST" && parts[0] === "projects" && parts[2] === "default-agent") {
@@ -1340,48 +1505,81 @@ async function handle(req, res) {
       if (!p) return json(res, 404, { error: "Session not found." });
       return json(res, 200, await getDiff(p));
     }
+    // ---- Project-scoped dev-server control (the agent-facing bridge) ----
+    if (req.method === "GET" && parts[0] === "projects" && parts[2] === "dev") {
+      const project = state.projects.find((x) => x.id === parts[1]);
+      if (!project) return json(res, 404, { error: "Project not found." });
+      const proc = state.processes.find((x) => x.projectId === project.id);
+      const note = project.devScriptNote ? { devScriptNote: project.devScriptNote } : {};
+      if (!proc)
+        return json(res, 200, {
+          found: false,
+          ...note,
+          hint: "No dev-server record yet: POST this path + /start to re-scan package.json and start it.",
+        });
+      return json(res, 200, {
+        found: true,
+        ...devView(proc),
+        ...note,
+        outputTail: (proc.output ?? []).slice(-5),
+      });
+    }
+    if (
+      req.method === "POST" &&
+      parts[0] === "projects" &&
+      parts[2] === "dev" &&
+      parts[3] === "start"
+    ) {
+      const project = state.projects.find((x) => x.id === parts[1]);
+      if (!project) return json(res, 404, { error: "Project not found." });
+      // Inline re-scan FIRST: a scripts.dev scaffolded earlier this same
+      // turn must be detected without waiting for the next bootstrap poll.
+      const { proc, changed } = await refreshDevProcess(project);
+      if (changed) save().catch(() => {});
+      if (!proc)
+        return json(res, 404, {
+          error: "No dev script for this project, even after re-scanning package.json.",
+          guidance:
+            'Add a proper "dev" script to package.json and call this endpoint again, or tell the user. Never start a detached background server (no nohup, &, or disown) to work around this.',
+        });
+      if (proc.status === "running" || proc.status === "starting")
+        return json(res, 409, {
+          error: "The dev server is already running for this project.",
+          ...devView(proc),
+        });
+      await startDevServer(proc, project);
+      return json(res, 200, devView(proc));
+    }
+    if (
+      req.method === "POST" &&
+      parts[0] === "projects" &&
+      parts[2] === "dev" &&
+      parts[3] === "stop"
+    ) {
+      const project = state.projects.find((x) => x.id === parts[1]);
+      if (!project) return json(res, 404, { error: "Project not found." });
+      const proc = state.processes.find((x) => x.projectId === project.id);
+      if (!proc)
+        return json(res, 404, { error: "No dev-server record for this project; nothing to stop." });
+      // Works during "starting": the live child is in `children` and gets
+      // killed; its close handler resets the port if it never listened.
+      stopChild(children.get(proc.id) ?? proc.pid);
+      if (proc.status !== "stopped") {
+        proc.status = "stopped";
+        delete proc.pid;
+        proc.updatedAt = now();
+        await save();
+      }
+      // Idempotent: stopping an already-stopped record is a 200 no-op.
+      return json(res, 200, devView(proc));
+    }
     if (req.method === "POST" && parts[0] === "processes" && parts[2] === "start") {
       const proc = state.processes.find((x) => x.id === parts[1]);
       const project = state.projects.find((x) => x.id === proc?.projectId);
       if (!proc || !project) return json(res, 404, { error: "Process not found." });
       // "starting" is a live attempt too: never launch a second one over it.
       if (proc.status === "running" || proc.status === "starting") return json(res, 200, proc);
-      // Map launch flags to the framework actually in the project: next
-      // rejects --host outright (it takes -H/--hostname), vite and other
-      // --host users take --host/--port, unknown scripts get only the port
-      // plus PORT in the environment. Launch flags are computed per start
-      // from the stored base args, so restarts never stack them.
-      const { pkg } = await readDevCommand(project);
-      const framework = detectFramework(pkg, pkg?.scripts?.dev ?? "");
-      proc.port = await allocatePort();
-      listenedProcs.delete(proc.id);
-      const launch = {
-        args: [...baseLaunchArgs(proc.args), ...devServerArgs(framework, proc.port)],
-        ...(framework === "unknown" ? { env: { PORT: String(proc.port) } } : {}),
-      };
-      spawnProcess(proc, project, launch);
-      // "running" is only reported once the port accepts a connection;
-      // otherwise surface the captured stderr tail and reset the port.
-      const up = await waitForListening(proc);
-      if (up) {
-        proc.status = "running";
-      } else {
-        const allocatedPort = proc.port;
-        const alive = children.has(proc.id);
-        if (alive) stopChild(children.get(proc.id));
-        // Either way it never listened, so the allocated port is unusable:
-        // reset it here (and again in the close handler) so a failed start
-        // never reports a stale port.
-        proc.port = 0;
-        proc.output.push(
-          alive
-            ? `The dev server did not accept a connection on port ${allocatedPort} within 10 seconds; ADE stopped it. Its output is above.`
-            : "The dev server exited before it could listen; its error output is above.",
-        );
-        proc.status = "stopped";
-      }
-      proc.updatedAt = now();
-      await save();
+      await startDevServer(proc, project);
       return json(res, 200, proc);
     }
     if (req.method === "POST" && parts[0] === "processes" && parts[2] === "stop") {
@@ -1485,6 +1683,7 @@ async function handle(req, res) {
   }
 }
 await load();
+await writeDevControlSkill();
 export async function handleLocalApi(request) {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/")) return undefined;
