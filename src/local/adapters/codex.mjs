@@ -14,10 +14,25 @@ export const codex = {
       result.code === 0 && /logged in|signed in/i.test(result.stdout + result.stderr);
     return { signedIn, ...(signedIn ? { account: "Codex account" } : {}) };
   },
-  command({ projectPath, prompt, session, continuing }) {
+  command({ projectPath, prompt, session, continuing, model }) {
+    // `-m` is valid for both `codex exec` and `codex exec resume`; omit it when
+    // no model was chosen so the CLI keeps its own configured default.
+    const modelArgs = model ? ["-m", model] : [];
     return continuing && session.agentSessionId
-      ? ["codex", ["exec", "resume", "--json", session.agentSessionId, prompt]]
-      : ["codex", ["exec", "--json", "--cd", projectPath, "--sandbox", "workspace-write", prompt]];
+      ? ["codex", ["exec", "resume", "--json", ...modelArgs, session.agentSessionId, prompt]]
+      : [
+          "codex",
+          [
+            "exec",
+            "--json",
+            ...modelArgs,
+            "--cd",
+            projectPath,
+            "--sandbox",
+            "workspace-write",
+            prompt,
+          ],
+        ];
   },
   parse(line, session) {
     let event;

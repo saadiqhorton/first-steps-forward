@@ -24,7 +24,7 @@ export const pi = {
     }
     return { signedIn: false };
   },
-  command({ prompt, session, continuing, dataDir, provider }) {
+  command({ prompt, session, continuing, dataDir, provider, model }) {
     const sessionFile = `${dataDir}/sessions/${session.id}.jsonl`;
     return [
       "pi",
@@ -35,7 +35,10 @@ export const pi = {
         "--no-extensions",
         "--tools",
         "read,edit,write,grep,find,ls",
-        ...(provider ? ["--provider", provider] : []),
+        // A `provider/model` id embeds the provider, so --provider is omitted
+        // when a model is chosen. Otherwise pass the detected provider so the
+        // default stays explicit.
+        ...(model ? ["--model", model] : provider ? ["--provider", provider] : []),
         "--session",
         sessionFile,
         ...(continuing ? ["--continue"] : []),

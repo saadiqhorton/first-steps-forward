@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { AdeState, AgentId, Project, Session } from "./types";
+import type { AdeState, AgentId, AgentModelsResult, Project, Session } from "./types";
 
 const empty: AdeState = {
   hydrated: false,
@@ -22,14 +22,17 @@ type Api = {
     agentId: AgentId;
     request: string;
     criteria: string;
+    model?: string;
   }) => Promise<Session>;
   steer: (sessionId: string, text: string) => void;
   complete: (sessionId: string) => void;
   reopen: (sessionId: string) => void;
   stop: (sessionId: string) => void;
   switchAgent: (sessionId: string, agentId: AgentId) => Promise<void>;
+  setSessionModel: (sessionId: string, model: string) => Promise<void>;
   process: (id: string, op: ProcessOp) => void;
   signIn: (agentId: AgentId) => Promise<{ output?: string; running?: boolean }>;
+  agentModels: (agentId: AgentId) => Promise<AgentModelsResult>;
   setDefaultAgent: (projectId: string, agentId: AgentId) => void;
   runChecks: (sessionId: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -46,6 +49,10 @@ async function request<T>(url: string, method = "GET", data?: unknown): Promise<
   if (!response.ok) throw new Error(value.error ?? `Local API returned ${response.status}`);
   return value as T;
 }
+// Stable identity (outside the provider memo whose value changes on every
+// 2-second polling refresh) so dependent effects do not refetch constantly.
+export const agentModels = (agentId: AgentId) =>
+  request<AgentModelsResult>(`/api/agents/${agentId}/models`);
 
 export function AdeProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AdeState>(empty);
@@ -118,12 +125,17 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         await request(`/api/sessions/${sessionId}/switch-agent`, "POST", { agentId });
         await refresh();
       },
+      setSessionModel: async (sessionId, model) => {
+        await request(`/api/sessions/${sessionId}/model`, "POST", { model });
+        await refresh();
+      },
       process: (id, op) => {
         void request(`/api/processes/${id}/${op}`, "POST")
           .then(refresh)
           .catch((e) => window.alert(e.message));
       },
       signIn: (id) => request(`/api/agents/${id}/login`, "POST"),
+      agentModels,
       setDefaultAgent: (projectId, agentId) => {
         void request(`/api/projects/${projectId}/default-agent`, "POST", { agentId })
           .then(refresh)

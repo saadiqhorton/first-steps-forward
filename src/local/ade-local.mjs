@@ -5,7 +5,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { adapters } from "./adapters/index.mjs";
-import { classifyFailure, retryHint } from "./classify.mjs";
+import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
+import { listModels, MODEL_ID } from "./models.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
@@ -243,6 +244,7 @@ function agentCommand(session, project, prompt, continuing) {
     continuing,
     dataDir: DATA_DIR,
     provider: state.agents.find((a) => a.id === session.agentId)?.provider,
+    model: session.model,
   });
 }
 async function buildManifest(session, project) {
@@ -257,7 +259,11 @@ async function buildManifest(session, project) {
     project: { id: project.id, name: project.name, path: project.path, branch: project.branch },
     task: session.request,
     ...(session.criteria ? { acceptanceCriteria: session.criteria } : {}),
-    agent: { id: session.agentId, account: agent?.account ?? null },
+    agent: {
+      id: session.agentId,
+      account: agent?.account ?? null,
+      model: session.model ?? "agent default",
+    },
     constraints: [
       "Work only within the project directory",
       "No deployments, publishing, or external/shared-system changes without the user",
@@ -293,6 +299,7 @@ async function runAgent(session, prompt, continuing = false) {
   const manifestLine =
     `Context manifest: project ${project.name} (${project.branch}); task: ${session.request}` +
     (session.criteria ? `; acceptance criteria: ${session.criteria}` : "") +
+    `; model: ${session.model ?? "agent default"}` +
     `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}`;
   const safetyPreamble =
     "Safety instructions: Work only in this project. Do not deploy, publish, send external communications, modify shared or production systems, or delete data. If such an action is necessary, stop and ask the user instead. Preserve existing files unless the requested code change requires editing them. ";
@@ -364,28 +371,37 @@ async function runAgent(session, prompt, continuing = false) {
       return runAgent(session, queue.join("\n\n"), true);
     }
     session.status = code === 0 ? "ready" : "blocked";
-    const failureKind =
-      code === 0
-        ? undefined
-        : classifyFailure([
-            ...session.messages.filter((m) => m.role === "system").map((m) => m.text),
-            session.logs,
-          ]);
-    if (failureKind === "provider_quota") session.failureKind = "provider_quota";
+    const failureTexts = [
+      ...session.messages.filter((m) => m.role === "system").map((m) => m.text),
+      session.logs,
+    ];
+    const failureKind = code === 0 ? undefined : classifyFailure(failureTexts);
+    if (failureKind && failureKind !== "process") session.failureKind = failureKind;
     if (code === 0 && !session.messages.some((m) => m.role === "agent"))
       addMessage(
         session,
         "system",
         "The CLI exited successfully but did not emit a parseable response. Review the Logs tab for its raw output.",
       );
-    if (code !== 0)
+    if (code !== 0) {
+      const modelNote = session.model ? ` The selected model was "${session.model}".` : "";
+      const suggestion = failureKind === "model_not_found" ? modelSuggestion(failureTexts) : "";
       addMessage(
         session,
         "system",
         failureKind === "provider_quota"
           ? `Provider quota or rate limit reached — no work was performed.${retryHint(session.logs) ? ` ${retryHint(session.logs)}.` : ""} Your task is kept; nothing in the project was changed. Retry later or switch agents.`
-          : `Agent process exited with ${signal ?? `code ${code}`}. Existing project changes were left in place. See Logs for details.`,
+          : failureKind === "model_not_found"
+            ? `The agent rejected the selected model — no work was performed.${modelNote}${suggestion ? ` ${suggestion}` : ""} Pick a different model with Change model, or clear it to use the agent's configured default, then send a follow-up. Nothing in the project was changed; your task is kept.`
+            : failureKind === "provider_unavailable"
+              ? `The agent reported that its provider is unavailable — no work was performed.${modelNote} Check this CLI's own provider setup (Agents page); ADE does not manage provider credentials. Nothing in the project was changed.`
+              : failureKind === "auth_expired"
+                ? `The agent's sign-in or credentials were refused — no work was performed. Re-authenticate with this CLI's own sign-in flow from the Agents page, then retry. Nothing in the project was changed; your task is kept.`
+                : failureKind === "context_overflow"
+                  ? `The conversation exceeded the model's context window and the turn stopped. Shorten or summarize your follow-up (or start a fresh session for a narrower task); a larger-context model may also help — use Change model. Any project edits made before the failure were left in place.`
+                  : `Agent process exited with ${signal ?? `code ${code}`}. Existing project changes were left in place. See Logs for details.`,
       );
+    }
     session.summary = session.messages.filter((m) => m.role === "agent").at(-1)?.text;
     session.updatedAt = now();
     session.workingTreeSnapshot = await snapshotDigest(project);
@@ -701,6 +717,14 @@ async function handle(req, res) {
     }
     if (req.method === "POST" && parts[0] === "sessions" && parts.length === 1) {
       const data = await body(req);
+      // Sanitize the optional model before anything else so a malformed id is
+      // refused with an honest 400 without ever spawning a CLI.
+      const model = String(data.model ?? "").trim();
+      if (model && !MODEL_ID.test(model))
+        return json(res, 400, {
+          error:
+            "Model ids must start with a letter or digit and may then contain letters, digits, and . _ / : [ ] - + (max 256 characters), so they can never read as a CLI flag. Nothing was started.",
+        });
       const project = state.projects.find((p) => p.id === data.projectId);
       const agent = state.agents.find((a) => a.id === data.agentId);
       if (!project || !agent) return json(res, 400, { error: "Select a valid project and agent." });
@@ -752,6 +776,7 @@ async function handle(req, res) {
         createdAt: now(),
         updatedAt: now(),
         queuedMessages: [],
+        ...(model ? { model } : {}),
       };
       state.sessions.unshift(s);
       await save();
@@ -822,11 +847,18 @@ async function handle(req, res) {
       s.createdBy = s.agentId;
       s.agentId = target.id;
       s.agentSessionId = undefined;
+      // Model ids belong to one CLI's catalog; never transplant them across
+      // agents. The new CLI starts on its own configured default.
+      const droppedModel = s.model;
+      delete s.model;
       const carriesConversation = false;
       addMessage(
         s,
         "system",
-        `Switched from ${from?.name ?? s.agentId} to ${target.name}. The new CLI starts fresh: repository state, the task, and the current diff carry over, but the prior conversation does not.`,
+        `Switched from ${from?.name ?? s.agentId} to ${target.name}. The new CLI starts fresh: repository state, the task, and the current diff carry over, but the prior conversation does not.` +
+          (droppedModel
+            ? ` The selected model (${droppedModel}) belonged to the previous agent and was dropped; ${target.name} starts with its own configured default.`
+            : " The model resets to the new agent's configured default."),
       );
       addLog(
         s,
@@ -947,6 +979,52 @@ async function handle(req, res) {
         ...(job ?? { output: "", running: false }),
         agent: state.agents.find((a) => a.id === parts[1]),
       });
+    }
+    if (req.method === "GET" && parts[0] === "agents" && parts[2] === "models") {
+      const agentId = parts[1];
+      if (!adapters[agentId])
+        return json(res, 404, { error: "Unknown agent. Available: codex, opencode, pi." });
+      // Probes the CLI's own quota-free listing. The cache key includes the
+      // CLI version reported by the bootstrap status poll so an upgraded
+      // binary is never served a stale catalog.
+      const version = state.agents.find((a) => a.id === agentId)?.version ?? "";
+      return json(res, 200, await listModels(agentId, run, { version, cacheDir: DATA_DIR }));
+    }
+    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "model") {
+      const s = state.sessions.find((x) => x.id === parts[1]);
+      if (!s) return json(res, 404, { error: "Session not found." });
+      const data = await body(req);
+      // Same sanitize as session creation. "" or null clears back to the
+      // agent's own configured default (an absent field means default).
+      const model = String(data.model ?? "").trim();
+      if (model && !MODEL_ID.test(model))
+        return json(res, 400, {
+          error:
+            "Model ids must start with a letter or digit and may then contain letters, digits, and . _ / : [ ] - + (max 256 characters), so they can never read as a CLI flag. Nothing was changed.",
+        });
+      if (s.status === "complete")
+        return json(res, 409, { error: "Reopen this session before changing its model." });
+      // OpenCode's proven set-override pattern: only rewrite when the value
+      // actually differs; applying at the next turn is inherent because
+      // runAgent reads session.model when it spawns the CLI.
+      const previousModel = s.model ?? null;
+      const changed = previousModel !== (model || null);
+      if (changed) {
+        if (model) s.model = model;
+        else delete s.model;
+        addMessage(
+          s,
+          "system",
+          model
+            ? `Model set to "${model}". It applies from the next CLI turn; a turn already running keeps its current model. The current conversation continues — per-CLI semantics of changing models mid-conversation are not verified; the CLI may treat context differently under the new model.`
+            : `Model cleared; the next turn uses ${s.agentId}'s configured default. A turn already running keeps its current model.`,
+        );
+        s.updatedAt = now();
+        await save();
+      }
+      // Accepted even while a turn runs: it takes effect on the next turn.
+      // The response reports both the old and new effective values.
+      return json(res, 200, { ...s, model: s.model ?? null, previousModel });
     }
     if (req.method === "GET" && parts[0] === "agents")
       return json(res, 200, { agents: await agentStatus() });

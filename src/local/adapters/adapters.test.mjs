@@ -64,3 +64,83 @@ test("Pi adapter disables extensions and shell tools and parses actual JSON even
   );
   assert.equal(event.text, "Pi response");
 });
+
+test("adapters omit the model flag entirely when no model is chosen", () => {
+  const codexArgs = codex.command({
+    projectPath: "/tmp/project",
+    prompt: "Go",
+    session,
+    continuing: false,
+  })[1];
+  assert.ok(!codexArgs.includes("-m"));
+  assert.ok(!codexArgs.includes("--model"));
+  const openCodeArgs = opencode.command({
+    projectPath: "/tmp/project",
+    prompt: "Go",
+    session,
+    continuing: false,
+  })[1];
+  assert.ok(!openCodeArgs.includes("-m"));
+  assert.ok(!openCodeArgs.includes("--model"));
+  const piArgs = pi.command({
+    prompt: "Go",
+    session,
+    continuing: false,
+    dataDir: "/tmp/ade",
+    provider: "opencode-go",
+  })[1];
+  assert.ok(!piArgs.includes("--model"));
+  // Without a model the detected provider is still passed explicitly.
+  assert.ok(piArgs.includes("--provider") && piArgs.includes("opencode-go"));
+});
+
+test("adapters pass the chosen model with each CLI's own flag spelling", () => {
+  const codexArgs = codex.command({
+    projectPath: "/tmp/project",
+    prompt: "Go",
+    session,
+    continuing: false,
+    model: "gpt-5.5",
+  })[1];
+  assert.equal(codexArgs[codexArgs.indexOf("-m") + 1], "gpt-5.5");
+  const openCodeArgs = opencode.command({
+    projectPath: "/tmp/project",
+    prompt: "Go",
+    session,
+    continuing: false,
+    model: "opencode-go/gpt-5.6-luna",
+  })[1];
+  assert.equal(openCodeArgs[openCodeArgs.indexOf("-m") + 1], "opencode-go/gpt-5.6-luna");
+  const piArgs = pi.command({
+    prompt: "Go",
+    session,
+    continuing: false,
+    dataDir: "/tmp/ade",
+    provider: "opencode-go",
+    model: "opencode-go/gpt-5.6-luna",
+  })[1];
+  assert.equal(piArgs[piArgs.indexOf("--model") + 1], "opencode-go/gpt-5.6-luna");
+});
+
+test("Codex resume carries the model flag and Pi drops --provider when a model is set", () => {
+  const resumed = codex.command({
+    projectPath: "/tmp/project",
+    prompt: "Continue",
+    session: { id: "s", agentSessionId: "thread-9" },
+    continuing: true,
+    model: "gpt-5.6-terra",
+  })[1];
+  assert.ok(resumed.includes("resume") && resumed.includes("thread-9"));
+  assert.equal(resumed[resumed.indexOf("-m") + 1], "gpt-5.6-terra");
+  const piArgs = pi.command({
+    prompt: "Continue",
+    session: { id: "s", agentSessionId: "pi-1" },
+    continuing: true,
+    dataDir: "/tmp/ade",
+    provider: "opencode-go",
+    model: "opencode-go/gpt-5.6-luna",
+  })[1];
+  // provider/id is embedded in the model id; --provider must not compete.
+  assert.ok(!piArgs.includes("--provider"));
+  assert.ok(piArgs.includes("--continue"));
+});

@@ -2,6 +2,7 @@ import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { ChecksList } from "@/components/ade/ChecksList";
 import { DiffView } from "@/components/ade/DiffView";
+import { ModelPicker } from "@/components/ade/ModelPicker";
 import { PreviewPane } from "@/components/ade/PreviewPane";
 import { StatusPill } from "@/components/ade/StatusPill";
 import type { AgentId } from "@/lib/ade/types";
@@ -24,12 +25,15 @@ export const Route = createFileRoute("/sessions/$sessionId")({
 type Tab = "changes" | "checks" | "logs";
 function SessionPage() {
   const { sessionId } = Route.useParams();
-  const { state, steer, complete, reopen, stop, runChecks, switchAgent } = useAde();
+  const { state, steer, complete, reopen, stop, runChecks, switchAgent, setSessionModel } =
+    useAde();
   const session = state.sessions.find((s) => s.id === sessionId);
   const [tab, setTab] = useState<Tab>("changes");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [editingModel, setEditingModel] = useState(false);
+  const [modelDraft, setModelDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -46,6 +50,15 @@ function SessionPage() {
     if (!text.trim()) return;
     steer(session.id, text.trim());
     setText("");
+  };
+  const applyModel = async (next: string) => {
+    if ((session.model ?? "") === next.trim()) return;
+    try {
+      await setSessionModel(session.id, next.trim());
+      setEditingModel(false);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
   };
   const checksClick = async () => {
     if (
@@ -85,8 +98,53 @@ function SessionPage() {
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <StatusPill status={session.status} size="md" />
             <span className="font-mono text-[10px] text-dim">
-              {agent?.name} · real local CLI process
+              {agent?.name} · model: {session.model ?? "agent default"} · real local CLI process
             </span>
+            {session.status !== "complete" && (
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    if (!editingModel) setModelDraft(session.model ?? "");
+                    setEditingModel((v) => !v);
+                  }}
+                  className="btn-quiet px-2.5 py-1 font-mono text-[11px]"
+                  aria-expanded={editingModel}
+                >
+                  Change model ▾
+                </button>
+                {editingModel && (
+                  <div className="absolute left-0 z-20 mt-1 w-96 rounded-md bg-panel p-3 shadow-lg ring-1 ring-ink/10">
+                    <ModelPicker
+                      agentId={session.agentId}
+                      agentName={agent?.name ?? session.agentId}
+                      value={modelDraft}
+                      onChange={setModelDraft}
+                      idSuffix="-session"
+                    />
+                    <p className="mt-2 text-[11px] leading-relaxed text-dim">
+                      {running
+                        ? "The turn already running keeps its current model; an applied change takes effect from the next turn."
+                        : "An applied change takes effect from the next turn. The current conversation continues — per-CLI semantics of changing models mid-conversation are not verified."}
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        onClick={() => void applyModel(modelDraft)}
+                        disabled={modelDraft.trim() === (session.model ?? "")}
+                        className="btn-amber px-3 py-1 text-[12px]"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        onClick={() => setEditingModel(false)}
+                        className="btn-quiet px-3 py-1 text-[12px]"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="relative">
               <button
                 onClick={() => setSwitching((v) => !v)}
@@ -195,6 +253,8 @@ function SessionPage() {
                   {session.manifest.agent.id}
                   {session.manifest.agent.account ? ` · ${session.manifest.agent.account}` : ""}
                 </dd>
+                <dt className="text-dim">Model</dt>
+                <dd>{session.manifest.agent.model ?? session.model ?? "agent default"}</dd>
                 <dt className="text-dim">Constraints</dt>
                 <dd>{session.manifest.constraints.join("; ")}</dd>
                 <dt className="text-dim">Files</dt>
@@ -215,7 +275,7 @@ function SessionPage() {
           )}
           {session.status === "blocked" && (
             <div
-              className={`rounded border p-3 text-[12px] ${session.failureKind === "provider_quota" ? "border-amber/40 bg-amber/5" : "border-danger/30 bg-danger/5"}`}
+              className={`rounded border p-3 text-[12px] ${session.failureKind && session.failureKind !== "process" ? "border-amber/40 bg-amber/5" : "border-danger/30 bg-danger/5"}`}
             >
               {session.failureKind === "provider_quota" ? (
                 <>
@@ -223,6 +283,33 @@ function SessionPage() {
                   reports no usage left (a billing/rate matter, not an ADE fault). Nothing in the
                   project changed; your task is kept. Wait for the limit to reset, upgrade with your
                   provider, or switch agents on this session.
+                </>
+              ) : session.failureKind === "model_not_found" ? (
+                <>
+                  <strong>Model not found.</strong> The agent rejected the selected model
+                  {session.model ? ` (“${session.model}”)` : ""}. Nothing in the project changed;
+                  your task is kept. Pick a different model with Change model above, or clear it to
+                  use the agent's configured default, then send a follow-up. The CLI's own "did you
+                  mean" suggestions, if any, are in its message and Logs.
+                </>
+              ) : session.failureKind === "provider_unavailable" ? (
+                <>
+                  <strong>Provider unavailable.</strong> The agent reported that its provider could
+                  not be used. ADE does not manage provider credentials — check this CLI's own
+                  provider setup on the Agents page. Nothing in the project changed.
+                </>
+              ) : session.failureKind === "auth_expired" ? (
+                <>
+                  <strong>Sign-in rejected.</strong> The agent's credentials were refused or
+                  expired. Re-authenticate with this CLI's own sign-in flow (Agents page → Set up);
+                  ADE never collects tokens. Nothing in the project changed; your task is kept.
+                </>
+              ) : session.failureKind === "context_overflow" ? (
+                <>
+                  <strong>Context window exceeded.</strong> The conversation outgrew the model's
+                  context. Shorten or summarize your follow-up, start a fresh session for a narrower
+                  task, or pick a larger-context model with Change model. Any project edits made
+                  before the failure were left in place.
                 </>
               ) : (
                 <>

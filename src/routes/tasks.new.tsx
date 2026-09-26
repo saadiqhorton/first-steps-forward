@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { ModelPicker } from "@/components/ade/ModelPicker";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import type { Agent, AgentId } from "@/lib/ade/types";
 import { useActiveProject, useAde } from "@/lib/ade/store";
@@ -20,6 +21,7 @@ function NewTask() {
   const [projectId, setProjectId] = useState(active.id);
   const project = state.projects.find((p) => p.id === projectId) ?? active;
   const [agentId, setAgentId] = useState<AgentId>(project.defaultAgent);
+  const [model, setModel] = useState("");
   const [request, setRequest] = useState("");
   const [criteria, setCriteria] = useState("");
   const [signing, setSigning] = useState<Agent | null>(null);
@@ -47,6 +49,7 @@ function NewTask() {
         agentId,
         request: request.trim(),
         criteria: criteria.trim(),
+        ...(model.trim() ? { model: model.trim() } : {}),
       });
       navigate({ to: "/sessions/$sessionId", params: { sessionId: s.id } });
     } catch (e) {
@@ -94,6 +97,7 @@ function NewTask() {
                   onClick={() => {
                     setProjectId(p.id);
                     setAgentId(p.defaultAgent);
+                    setModel("");
                   }}
                   className={`rounded-md px-3 py-1.5 text-[13px] ring-1 ${p.id === project.id ? "bg-amber/15 ring-amber/40 font-medium" : "bg-panel ring-line"}`}
                 >
@@ -138,7 +142,10 @@ function NewTask() {
                   key={a.id}
                   role="radio"
                   aria-checked={a.id === agentId}
-                  onClick={() => setAgentId(a.id)}
+                  onClick={() => {
+                    setAgentId(a.id);
+                    setModel("");
+                  }}
                   className={`rounded-lg p-3 text-left ring-1 ${a.id === agentId ? "bg-amber/15 ring-amber/40" : "bg-panel ring-line"}`}
                 >
                   <div className="text-[13px] font-medium">{a.name}</div>
@@ -167,6 +174,12 @@ function NewTask() {
               </div>
             )}
           </div>
+          <ModelPicker
+            agentId={agentId}
+            agentName={agent?.name ?? agentId}
+            value={model}
+            onChange={setModel}
+          />
           {!!project.uncommittedFiles.length && (
             <div className="rounded-lg border border-amber/40 bg-amber/10 p-4">
               <div className="text-[13px] font-semibold">Uncommitted work is protected</div>

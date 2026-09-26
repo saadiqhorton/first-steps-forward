@@ -59,6 +59,23 @@ export interface Message {
   text: string;
   at: number;
 }
+export interface AgentModel {
+  id: string;
+  label?: string;
+  meta?: string;
+}
+export interface AgentModelsResult {
+  available: boolean;
+  models?: AgentModel[];
+  /** Listing provenance: "live" (CLI's own cached catalog) or "bundled". */
+  source?: string;
+  /** The quota-free CLI command the list came from, for honest disclosure. */
+  command?: string;
+  reason?: string;
+  hint?: string;
+  cached?: boolean;
+}
+
 export interface Session {
   id: string;
   projectId: string;
@@ -76,13 +93,20 @@ export interface Session {
   updatedAt: number;
   completedAt?: number;
   agentSessionId?: string;
-  failureKind?: "provider_quota" | "process";
+  model?: string;
+  failureKind?:
+    | "provider_quota"
+    | "model_not_found"
+    | "provider_unavailable"
+    | "auth_expired"
+    | "context_overflow"
+    | "process";
   manifest?: {
     createdAt: number;
     project: { id: string; name: string; path: string; branch: string };
     task: string;
     acceptanceCriteria?: string;
-    agent: { id: string; account: string | null };
+    agent: { id: string; account: string | null; model?: string };
     constraints: string[];
     relevantFiles: string[];
     tools: string;

@@ -15,7 +15,7 @@ export const opencode = {
       !/0 credentials/i.test(result.stdout);
     return { signedIn, ...(signedIn ? { account: "Configured in OpenCode" } : {}) };
   },
-  command({ projectPath, prompt, session, continuing }) {
+  command({ projectPath, prompt, session, continuing, model }) {
     return [
       "opencode",
       [
@@ -24,6 +24,8 @@ export const opencode = {
         "json",
         "--dir",
         projectPath,
+        // `-m provider/model` also works with `--session` continuation.
+        ...(model ? ["-m", model] : []),
         ...(continuing && session.agentSessionId ? ["--session", session.agentSessionId] : []),
         prompt,
       ],
