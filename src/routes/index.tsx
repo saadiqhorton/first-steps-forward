@@ -59,7 +59,7 @@ function ProjectHome() {
         <header className="flex items-start justify-between gap-6 px-7 pt-6 pb-4">
           <div>
             <div className="label-mono">
-              {project.name} · {project.branch}
+              {project.name} · {project.missing ? "folder missing" : project.branch}
               {project.ahead ? ` · ${project.ahead} ahead` : ""}
               {project.uncommittedFiles.length
                 ? ` · ${project.uncommittedFiles.length} uncommitted`

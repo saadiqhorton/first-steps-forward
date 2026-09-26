@@ -80,7 +80,10 @@ export function Shell({ children }: { children: ReactNode }) {
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 pl-4 font-mono text-[10px] text-dim">{p.path}</div>
+                  <div className="mt-1 pl-4 font-mono text-[10px] text-dim">
+                    {p.path}
+                    {p.missing ? " · missing" : ""}
+                  </div>
                 </button>
               );
             })}

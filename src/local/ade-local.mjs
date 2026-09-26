@@ -13,6 +13,8 @@ const DATA_FILE = path.join(DATA_DIR, "workspace.json");
 const state = { projects: [], sessions: [], processes: [], agents: [] };
 const children = new Map();
 const authChildren = new Map();
+const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
+let probingAgents = false;
 const id = () => randomUUID();
 const now = () => Date.now();
 const UNSUPPORTED_RISK =
@@ -133,13 +135,59 @@ async function agentStatus() {
     }),
   );
   state.agents = results;
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
+    await fs.writeFile(
+      AGENTS_STATUS_FILE,
+      JSON.stringify({ fetchedAt: Date.now(), agents: results }),
+      { mode: 0o600 },
+    );
+  } catch {}
   return results;
+}
+
+/**
+ * Fast path for the UI's 2-second bootstrap poll: return the last probed
+ * agent status immediately (persisted under ~/.ade) and refresh the real
+ * probes in the background — the next poll picks them up. Only the very
+ * first bootstrap after the store is wiped pays the full probe latency.
+ * A single background probe runs at a time so polls can't stampede CLIs.
+ */
+async function bootstrapAgents() {
+  let cached = null;
+  try {
+    cached = JSON.parse(await fs.readFile(AGENTS_STATUS_FILE, "utf8"));
+  } catch {}
+  if (cached?.agents) {
+    state.agents = cached.agents;
+    if (!probingAgents) {
+      probingAgents = true;
+      agentStatus()
+        .catch(() => {})
+        .finally(() => {
+          probingAgents = false;
+        });
+    }
+  } else {
+    await agentStatus();
+  }
+  return state.agents;
 }
 const safeProject = (p) => ({ ...p });
 async function git(project, args) {
   return run("git", ["-C", project.path, ...args], { timeout: 10000 });
 }
 async function projectInfo(project) {
+  try {
+    await fs.stat(project.path);
+    project.missing = false;
+  } catch {
+    project.missing = true;
+    project.branch = "folder missing";
+    project.uncommittedFiles = [];
+    project.ahead = 0;
+    return safeProject(project);
+  }
   const branchRes = await git(project, ["branch", "--show-current"]);
   const statusRes = await git(project, ["status", "--porcelain=v1", "-uall"]);
   const changedFiles = statusRes.stdout
@@ -579,9 +627,16 @@ async function handle(req, res) {
     .map(decodeURIComponent);
   try {
     if (req.method === "GET" && parts[0] === "bootstrap") {
-      const agents = await agentStatus();
+      const agents = await bootstrapAgents();
+      // Git work is the other poll cost: per project we spawn branch/status/
+      // upstream plus two diffs. Only projects with live (non-complete)
+      // sessions need a fresh diff; the rest only need cheap branch/status.
+      const needsDiff = new Set(
+        state.sessions.filter((item) => item.status !== "complete").map((item) => item.projectId),
+      );
       for (const p of state.projects) {
         await projectInfo(p);
+        if (p.missing || !needsDiff.has(p.id)) continue;
         const diff = await getDiff(p);
         for (const s of state.sessions.filter(
           (item) => item.projectId === p.id && item.status !== "complete",
@@ -741,6 +796,10 @@ async function handle(req, res) {
             "This request appears to require a destructive or external action. ADE cannot mediate this CLI's per-action approval flow yet, so it will not start it. Use the agent CLI directly after reviewing the action's scope.",
         });
       await projectInfo(project);
+      if (project.missing)
+        return json(res, 409, {
+          error: `The folder ${project.path} no longer exists on disk. Remove the project from ADE (Remove button) and re-add it.`,
+        });
       if (project.uncommittedFiles.length)
         return json(res, 409, {
           error: `This project has uncommitted changes (${project.uncommittedFiles.slice(0, 5).join(", ")}). Commit or stash them first. ADE will not start an agent against a dirty working tree.`,

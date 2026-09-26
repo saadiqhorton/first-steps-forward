@@ -22,6 +22,7 @@ export interface Project {
   branch: string;
   ahead: number;
   uncommittedFiles: string[];
+  missing?: boolean;
   defaultAgent: AgentId;
   addedAt: number;
 }
