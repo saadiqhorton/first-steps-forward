@@ -1,7 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import type { Project, Session } from "@/lib/ade/types";
+import type { LocalProcess, Project, Session } from "@/lib/ade/types";
 import { useAde } from "@/lib/ade/store";
 import { summarizeChecks } from "./ChecksList";
+
+// The server lane adds `external` to adopted entries; tolerated here as optional
+// so this renders correctly before that type lands.
+type PreviewProcess = LocalProcess & { external?: boolean };
 
 export function PreviewPane({
   project,
@@ -11,8 +15,10 @@ export function PreviewPane({
   session?: Session | undefined;
 }) {
   const { state, process } = useAde();
-  const dev = state.processes.find((p) => p.projectId === project.id && p.port > 0);
-  const running = dev?.status === "running";
+  const dev = state.processes.find((p) => p.projectId === project.id) as PreviewProcess | undefined;
+  const running = dev?.status === "running" && dev.port > 0;
+  const starting = dev?.status === "starting";
+  const external = running && dev?.external === true;
   const checks = session ? summarizeChecks(session.checks) : null;
   const added = session?.changes.reduce((n, c) => n + c.added, 0) ?? 0;
   const removed = session?.changes.reduce((n, c) => n + c.removed, 0) ?? 0;
@@ -24,7 +30,7 @@ export function PreviewPane({
       <div className="flex h-9 items-center justify-between border-b border-line px-3">
         <span className="label-mono">Preview</span>
         <span className="font-mono text-[10px] text-dim">
-          {running ? `127.0.0.1:${dev?.port}` : "offline"}
+          {running ? `127.0.0.1:${dev?.port}` : starting ? "starting…" : "offline"}
         </span>
       </div>
       <div className="p-3">
@@ -41,16 +47,30 @@ export function PreviewPane({
           <div className="grid aspect-[4/3] w-full place-items-center rounded-md bg-ink/[0.04] outline-1 -outline-offset-1 outline-ink/5">
             <div className="text-center">
               <div className="font-mono text-[10px] uppercase tracking-[0.15em] text-dim">
-                {dev ? "Dev server stopped" : "No dev script detected"}
+                {!dev
+                  ? "No dev script detected"
+                  : starting
+                    ? "Dev server starting"
+                    : dev.port === 0
+                      ? "Dev script detected"
+                      : "Dev server stopped"}
               </div>
-              {dev && (
-                <button
-                  onClick={() => process(dev.id, "start")}
-                  className="btn-amber mt-3 px-3 py-1.5 text-[12px]"
-                >
-                  Start {dev.name.toLowerCase()}
-                </button>
-              )}
+              {dev &&
+                (starting ? (
+                  <button
+                    onClick={() => process(dev.id, "stop")}
+                    className="btn-quiet mt-3 px-3 py-1.5 text-[12px]"
+                  >
+                    Stop
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => process(dev.id, "start")}
+                    className="btn-amber mt-3 px-3 py-1.5 text-[12px]"
+                  >
+                    Start {dev.name.toLowerCase()}
+                  </button>
+                ))}
             </div>
           </div>
         )}
@@ -60,9 +80,13 @@ export function PreviewPane({
         <p className="mt-1 text-[12px] leading-snug text-dim">
           {running
             ? "Live iframe from the project's local development server."
-            : dev
-              ? "Start the configured local dev script to see a live preview."
-              : "No package.json dev script was detected for this folder."}
+            : !dev
+              ? "No package.json dev script was detected for this folder."
+              : starting
+                ? "The dev script is booting; the live preview appears once its port accepts connections."
+                : dev.port === 0
+                  ? "Start the dev script to see a live preview."
+                  : "Start the configured local dev script to see a live preview."}
         </p>
         {running && dev && (
           <div className="mt-2 flex gap-2">
@@ -74,10 +98,17 @@ export function PreviewPane({
             >
               Open in browser
             </a>
-            <Link to="/processes" className="btn-quiet px-3 py-1.5 text-[12px]">
-              Output
-            </Link>
+            {!external && (
+              <Link to="/processes" className="btn-quiet px-3 py-1.5 text-[12px]">
+                Output
+              </Link>
+            )}
           </div>
+        )}
+        {external && (
+          <p className="mt-2 font-mono text-[10px] text-dim">
+            This server was started outside ADE.
+          </p>
         )}
       </div>
       <div className="mt-auto border-t border-line">

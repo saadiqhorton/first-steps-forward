@@ -35,7 +35,7 @@ export interface LocalProcess {
   bin?: string;
   args?: string[];
   port: number;
-  status: "running" | "stopped";
+  status: "running" | "starting" | "stopped";
   output: string[];
   startedAt?: number;
   updatedAt?: number;

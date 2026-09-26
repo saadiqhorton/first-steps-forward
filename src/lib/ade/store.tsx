@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { AdeState, AgentId, AgentModelsResult, Project, Session } from "./types";
 
 const empty: AdeState = {
@@ -24,8 +32,8 @@ type Api = {
     criteria: string;
     model?: string;
   }) => Promise<Session>;
-  steer: (sessionId: string, text: string) => void;
-  complete: (sessionId: string) => void;
+  steer: (sessionId: string, text: string) => Promise<void>;
+  complete: (sessionId: string) => Promise<void>;
   reopen: (sessionId: string) => void;
   stop: (sessionId: string) => void;
   switchAgent: (sessionId: string, agentId: AgentId) => Promise<void>;
@@ -56,6 +64,9 @@ export const agentModels = (agentId: AgentId) =>
 
 export function AdeProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AdeState>(empty);
+  // One in-flight complete() per session; a second click joins the first
+  // promise instead of firing a duplicate POST (which the server answers 409).
+  const completeCalls = useRef(new Map<string, Promise<void>>());
   const refresh = async () => {
     try {
       const data = await request<
@@ -101,15 +112,21 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         await refresh();
         return session;
       },
-      steer: (sessionId, text) => {
-        void request(`/api/sessions/${sessionId}/messages`, "POST", { text })
-          .then(refresh)
-          .catch((e) => window.alert(e.message));
+      // Resolves only after the POST and the refresh; rejects on 4xx/5xx or
+      // network failure so the caller can keep the draft and show the error.
+      steer: async (sessionId, text) => {
+        await request(`/api/sessions/${sessionId}/messages`, "POST", { text });
+        await refresh();
       },
       complete: (id) => {
-        void request(`/api/sessions/${id}/complete`, "POST")
+        const inFlight = completeCalls.current.get(id);
+        if (inFlight) return inFlight;
+        const call = request(`/api/sessions/${id}/complete`, "POST")
           .then(refresh)
-          .catch((e) => window.alert(e.message));
+          .catch((e) => window.alert(e.message))
+          .finally(() => completeCalls.current.delete(id));
+        completeCalls.current.set(id, call);
+        return call;
       },
       reopen: (id) => {
         void request(`/api/sessions/${id}/reopen`, "POST")

@@ -92,8 +92,11 @@ export function ModelPicker({
             onChange={(e) => {
               const next = e.target.value;
               if (next === OTHER) {
+                // Re-commit any existing draft so the manual input's displayed
+                // text and the applied value cannot diverge (type O, pick
+                // listed L, reselect Other -> commits O, not L).
+                if (otherText) onChange(otherText.trim());
                 setShowOther(true);
-                onChange(otherText.trim());
               } else {
                 setShowOther(false);
                 onChange(next);

@@ -81,7 +81,7 @@ export function Shell({ children }: { children: ReactNode }) {
               const active = p.id === state.activeProjectId;
               const sessions = state.sessions.filter((s) => s.projectId === p.id && isActive(s));
               const running = state.processes.some(
-                (x) => x.projectId === p.id && x.status === "running",
+                (x) => x.projectId === p.id && (x.status === "running" || x.status === "starting"),
               );
               return (
                 <button

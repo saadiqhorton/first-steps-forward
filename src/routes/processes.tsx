@@ -47,19 +47,20 @@ function Processes() {
             <div className="card-panel divide-y divide-line">
               {procs.map((p) => {
                 const running = p.status === "running";
+                const starting = p.status === "starting";
                 const isOpen = open === p.id;
                 return (
                   <div key={p.id}>
                     <div className="flex items-center gap-3 px-4 py-3">
                       <span
-                        className={`size-2 rounded-full ${running ? "bg-teal animate-pulse-soft" : "bg-dim"}`}
+                        className={`size-2 rounded-full ${running || starting ? "bg-teal animate-pulse-soft" : "bg-dim"}`}
                         aria-hidden
                       />
                       <div className="min-w-0 flex-1">
                         <div className="text-[13px] font-medium">
                           {p.name}{" "}
                           <span className="ml-1 font-mono text-[10px] font-normal text-dim">
-                            {running ? "running" : "stopped"}
+                            {running ? "running" : starting ? "starting" : "stopped"}
                           </span>
                         </div>
                         <div className="font-mono text-[10px] text-dim">
@@ -86,7 +87,7 @@ function Processes() {
                       >
                         Output
                       </button>
-                      {running ? (
+                      {running || starting ? (
                         <button
                           onClick={() => process(p.id, "stop")}
                           className="btn-quiet px-3 py-1.5 text-[12px]"

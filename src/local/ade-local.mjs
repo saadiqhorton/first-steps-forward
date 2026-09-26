@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -13,6 +13,9 @@ const DATA_FILE = path.join(DATA_DIR, "workspace.json");
 const state = { projects: [], sessions: [], processes: [], agents: [] };
 const children = new Map();
 const authChildren = new Map();
+// Process ids whose dev-server port has been confirmed to accept a
+// connection; a process that dies before that never actually listened.
+const listenedProcs = new Set();
 const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
 let probingAgents = false;
 const id = () => randomUUID();
@@ -124,6 +127,7 @@ async function agentStatus() {
         id: adapter.id,
         name: adapter.name,
         short: adapter.short,
+        tools: adapter.tools,
         authMethod: adapter.authMethod,
         authNote: adapter.authNote,
         installHint: adapter.installHint,
@@ -159,7 +163,13 @@ async function bootstrapAgents() {
     cached = JSON.parse(await fs.readFile(AGENTS_STATUS_FILE, "utf8"));
   } catch {}
   if (cached?.agents) {
-    state.agents = cached.agents;
+    // Caches written before agentStatus copied the adapter tools string lack
+    // it: backfill from the adapter so buildManifest resolves the real tool
+    // set immediately, while the background probe refreshes the rest.
+    state.agents = cached.agents.map((agent) => ({
+      ...agent,
+      tools: agent.tools ?? adapters[agent.id]?.tools,
+    }));
     if (!probingAgents) {
       probingAgents = true;
       agentStatus()
@@ -259,6 +269,37 @@ async function allocatePort() {
     });
   });
 }
+function probeConnection(port) {
+  return new Promise((resolve) => {
+    if (!port) return resolve(false);
+    const socket = connect({ port, host: "127.0.0.1" });
+    const finish = (ok) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(1000, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+/**
+ * Only a port that actually accepts a connection proves the dev server is
+ * up. Bounded poll: returns false if the process dies first or nothing
+ * listens within the window, so the caller can surface the captured stderr
+ * tail and reset the port instead of reporting a stale "running".
+ */
+async function waitForListening(proc, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!children.has(proc.id)) return false;
+    if (await probeConnection(proc.port)) {
+      listenedProcs.add(proc.id);
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
 function addLog(session, text) {
   session.logs = [...(session.logs ?? []), text].slice(-500);
   session.updatedAt = now();
@@ -277,6 +318,31 @@ function parseAgentOutput(session, line) {
   if (update.text) addMessage(session, "agent", update.text);
   if (update.error) addMessage(session, "system", update.error);
 }
+/**
+ * Classify one agent turn from its own output slice only: history before
+ * logStart/messageStart belongs to earlier turns, so an old line (e.g. an
+ * earlier "rate limit") can never re-classify this turn. A successful turn
+ * clears any stale failureKind so it cannot haunt later failures either.
+ */
+export function classifyTurnFailure(session, code, logStart, messageStart) {
+  const texts = [
+    ...session.messages
+      .slice(messageStart)
+      .filter((m) => m.role === "system")
+      .map((m) => m.text),
+    ...session.logs.slice(logStart),
+  ];
+  if (code === 0) {
+    delete session.failureKind;
+    return { kind: undefined, texts };
+  }
+  const kind = classifyFailure(texts);
+  // failureKind must describe the CURRENT turn only: a generic process
+  // failure clears any quota/model diagnosis left by an earlier turn.
+  if (kind === "process") delete session.failureKind;
+  else session.failureKind = kind;
+  return { kind, texts };
+}
 function agentCommand(session, project, prompt, continuing) {
   const adapter = adapters[session.agentId];
   return adapter.command({
@@ -288,6 +354,21 @@ function agentCommand(session, project, prompt, continuing) {
     providers: state.agents.find((a) => a.id === session.agentId)?.providers,
     model: session.model,
   });
+}
+/**
+ * Current dev-server state from the ADE-managed process record, rebuilt on
+ * every manifest so start/stop between turns is always reflected. Awareness
+ * only: the agent is told the workspace owns start/stop (see constraints).
+ */
+function devServerStatus(project) {
+  const proc = state.processes.find((p) => p.projectId === project.id);
+  if (!proc)
+    return project.devScriptNote
+      ? "status unknown (package.json could not be read)"
+      : "no dev script detected";
+  if (proc.status === "running") return `running on 127.0.0.1:${proc.port}`;
+  if (proc.status === "starting") return "starting";
+  return proc.startedAt ? "stopped" : "stopped (never started this session)";
 }
 async function buildManifest(session, project) {
   const agent = state.agents.find((a) => a.id === session.agentId);
@@ -306,10 +387,12 @@ async function buildManifest(session, project) {
       account: agent?.account ?? null,
       model: session.model ?? "agent default",
     },
+    devServer: devServerStatus(project),
     constraints: [
       "Work only within the project directory",
       "No deployments, publishing, or external/shared-system changes without the user",
       "Do not revert or overwrite user changes",
+      "ADE starts and stops this project's dev server through its own process control: never start a detached background server (no nohup, &, or disown) and never leave one running; if your task needs a running server, say so in your response and the user will start it through ADE",
     ],
     relevantFiles: candidates.slice(0, 60),
     tools: agent?.tools ?? "agent's default CLI tools",
@@ -321,7 +404,10 @@ async function buildManifest(session, project) {
 }
 async function runAgent(session, prompt, continuing = false) {
   const project = state.projects.find((p) => p.id === session.projectId);
-  if (!project) return;
+  if (!project) {
+    releaseTurn(session);
+    return;
+  }
   const meta = state.agents.find((a) => a.id === session.agentId);
   if (!meta?.installed || !meta.signedIn) {
     session.status = "blocked";
@@ -330,43 +416,71 @@ async function runAgent(session, prompt, continuing = false) {
       "system",
       `${meta?.name ?? session.agentId} is not available or not authenticated. Check the Agents page.`,
     );
+    releaseTurn(session);
     await save();
     return;
   }
-  session.status = "working";
-  await save();
-  await projectInfo(project);
-  // Refresh the preserved-changes baseline at the start of every turn so it
-  // reflects the tree as it is right now (the user may edit between turns).
-  if (project.uncommittedFiles.length) {
-    const baseline = await getDiff(project);
-    session.baselineFiles = baseline.files.map((f) => f.path);
-  } else {
-    delete session.baselineFiles;
+  // Mark where this turn's output starts so failure classification only ever
+  // sees the current turn, never earlier history.
+  const turnLogStart = session.logs.length;
+  const turnMessageStart = session.messages.length;
+  let bin = "";
+  let args = [];
+  try {
+    session.status = "working";
+    await save();
+    await projectInfo(project);
+    // Refresh the preserved-changes baseline at the start of every turn so it
+    // reflects the tree as it is right now (the user may edit between turns).
+    if (project.uncommittedFiles.length) {
+      const baseline = await getDiff(project);
+      session.baselineFiles = baseline.files.map((f) => f.path);
+    } else {
+      delete session.baselineFiles;
+    }
+    session.manifest = await buildManifest(session, project);
+    addLog(
+      session,
+      `Context manifest: ${session.manifest.relevantFiles.length} candidate files, tools: ${session.manifest.tools}`,
+    );
+    const manifestLine =
+      `Context manifest: project ${project.name} (${project.branch}); task: ${session.request}` +
+      (session.criteria ? `; acceptance criteria: ${session.criteria}` : "") +
+      `; model: ${session.model ?? "agent default"}` +
+      `; dev server: ${session.manifest.devServer}` +
+      `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}` +
+      (session.manifest.uncommittedFiles
+        ? `; the user has uncommitted changes in these files: ${session.manifest.uncommittedFiles.join(", ")} — never revert, stash, commit, or overwrite them; work around them`
+        : "");
+    const safetyPreamble =
+      "Safety instructions: Work only in this project. Do not deploy, publish, send external communications, modify shared or production systems, or delete data. If such an action is necessary, stop and ask the user instead. Preserve existing files unless the requested code change requires editing them. ";
+    const command = agentCommand(
+      session,
+      project,
+      `${safetyPreamble}${manifestLine}\n\nTask: ${prompt}`,
+      continuing,
+    );
+    bin = command[0];
+    args = command[1];
+    if (session.agentId === "pi")
+      await fs.mkdir(path.join(DATA_DIR, "sessions"), { recursive: true, mode: 0o700 });
+    // The user may have stopped the session while the manifest was being
+    // built: honor that instead of spawning a CLI nobody is waiting for.
+    if (session.status === "stopped" || session.status === "complete") {
+      releaseTurn(session);
+      addLog(session, "Turn not started: the session was stopped before the CLI launched.");
+      await save();
+      return;
+    }
+  } catch (error) {
+    // Any pre-spawn failure must free the claimTurn placeholder, or the
+    // session would queue follow-ups forever with no live child to drain them.
+    releaseTurn(session);
+    if (!["stopped", "complete"].includes(session.status)) session.status = "blocked";
+    addMessage(session, "system", `ADE could not start this turn: ${error.message}`);
+    await save().catch(() => {});
+    return;
   }
-  session.manifest = await buildManifest(session, project);
-  addLog(
-    session,
-    `Context manifest: ${session.manifest.relevantFiles.length} candidate files, tools: ${session.manifest.tools}`,
-  );
-  const manifestLine =
-    `Context manifest: project ${project.name} (${project.branch}); task: ${session.request}` +
-    (session.criteria ? `; acceptance criteria: ${session.criteria}` : "") +
-    `; model: ${session.model ?? "agent default"}` +
-    `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}` +
-    (session.manifest.uncommittedFiles
-      ? `; the user has uncommitted changes in these files: ${session.manifest.uncommittedFiles.join(", ")} — never revert, stash, commit, or overwrite them; work around them`
-      : "");
-  const safetyPreamble =
-    "Safety instructions: Work only in this project. Do not deploy, publish, send external communications, modify shared or production systems, or delete data. If such an action is necessary, stop and ask the user instead. Preserve existing files unless the requested code change requires editing them. ";
-  const [bin, args] = agentCommand(
-    session,
-    project,
-    `${safetyPreamble}${manifestLine}\n\nTask: ${prompt}`,
-    continuing,
-  );
-  if (session.agentId === "pi")
-    await fs.mkdir(path.join(DATA_DIR, "sessions"), { recursive: true, mode: 0o700 });
   const child = spawn(bin, args, {
     cwd: project.path,
     env: process.env,
@@ -375,8 +489,10 @@ async function runAgent(session, prompt, continuing = false) {
     detached: process.platform !== "win32",
   });
   session.pid = child.pid;
+  // Register the child and its handlers with no await in between: an await
+  // here would let a very fast exit fire close before anyone is listening,
+  // leaving a dead child in `children` that /messages would queue behind.
   children.set(session.id, child);
-  await save();
   let stdoutBuffer = "",
     stderrBuffer = "";
   const consume = (data, isErr = false) => {
@@ -430,16 +546,22 @@ async function runAgent(session, prompt, continuing = false) {
     const queue = session.queuedMessages ?? [];
     session.queuedMessages = [];
     if (queue.length) {
+      // The slot was freed by the children.delete above with no await in
+      // between; re-claim synchronously so /messages queues instead of
+      // racing this drain with a second spawn.
+      claimTurn(session);
       await save();
       return runAgent(session, queue.join("\n\n"), true);
     }
     session.status = code === 0 ? "ready" : "blocked";
-    const failureTexts = [
-      ...session.messages.filter((m) => m.role === "system").map((m) => m.text),
-      session.logs,
-    ];
-    const failureKind = code === 0 ? undefined : classifyFailure(failureTexts);
-    if (failureKind && failureKind !== "process") session.failureKind = failureKind;
+    // Classify from this turn's own output slice only; a successful turn
+    // also clears any stale failureKind left by an earlier failure.
+    const { kind: failureKind, texts: failureTexts } = classifyTurnFailure(
+      session,
+      code,
+      turnLogStart,
+      turnMessageStart,
+    );
     if (code === 0 && !session.messages.some((m) => m.role === "agent"))
       addMessage(
         session,
@@ -453,7 +575,7 @@ async function runAgent(session, prompt, continuing = false) {
         session,
         "system",
         failureKind === "provider_quota"
-          ? `Provider quota or rate limit reached — no work was performed.${retryHint(session.logs) ? ` ${retryHint(session.logs)}.` : ""} Your task is kept; nothing in the project was changed. Retry later or switch agents.`
+          ? `Provider quota or rate limit reached — no work was performed.${retryHint(failureTexts) ? ` ${retryHint(failureTexts)}.` : ""} Your task is kept; nothing in the project was changed. Retry later or switch agents.`
           : failureKind === "model_not_found"
             ? `The agent rejected the selected model — no work was performed.${modelNote}${suggestion ? ` ${suggestion}` : ""} Pick a different model with Change model, or clear it to use the agent's configured default, then send a follow-up. Nothing in the project was changed; your task is kept.`
             : failureKind === "provider_unavailable"
@@ -493,18 +615,55 @@ function stopChild(child) {
     } catch {}
   }
 }
-function spawnProcess(proc, project) {
-  const child = spawn(proc.bin, proc.args, {
+/**
+ * Claim a session's single CLI-turn slot. The check-and-set is synchronous
+ * by contract: no await may sit between a children.has() check and
+ * claimTurn(), which is what makes "check then spawn" atomic — a close
+ * handler draining the queue can never double-spawn against a route.
+ * The placeholder holds the slot from the claim until the real child is
+ * registered (or the turn is abandoned).
+ */
+function claimTurn(session) {
+  if (children.has(session.id)) return false;
+  children.set(session.id, { placeholder: true });
+  return true;
+}
+function releaseTurn(session) {
+  if (children.get(session.id)?.placeholder) children.delete(session.id);
+}
+/**
+ * Strip dev-server flags an earlier start may have left in the stored base
+ * args (an older ADE persisted them into proc.args): the flags themselves
+ * plus the value each one was appended with, so restarts never stack them.
+ */
+function baseLaunchArgs(args) {
+  const out = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--" || arg === "127.0.0.1") continue;
+    if (["--host", "-H", "--hostname", "--port", "-p"].includes(arg)) {
+      i += 1;
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}
+function spawnProcess(proc, project, launch = {}) {
+  const args = launch.args ?? proc.args;
+  const child = spawn(proc.bin, args, {
     cwd: project.path,
-    env: process.env,
+    env: { ...process.env, ...(launch.env ?? {}) },
     stdio: ["ignore", "pipe", "pipe"],
     shell: false,
     detached: process.platform !== "win32",
   });
   proc.pid = child.pid;
-  proc.status = "running";
+  // "starting" until the port proves it accepts connections (see
+  // waitForListening); the start route flips it to "running" or back.
+  proc.status = "starting";
   proc.startedAt = now();
-  proc.output = [`$ ${proc.command}`];
+  proc.output = [`$ ${proc.bin} ${args.join(" ")}`];
   children.set(proc.id, child);
   const line = (data) => {
     proc.output = [...proc.output, ...data.toString().split(/\r?\n/).filter(Boolean)].slice(-300);
@@ -516,6 +675,8 @@ function spawnProcess(proc, project) {
   child.on("error", (e) => {
     proc.status = "stopped";
     delete proc.pid;
+    // A process that never listened leaves no usable port behind.
+    if (!listenedProcs.has(proc.id)) proc.port = 0;
     proc.output.push(e.message);
     children.delete(proc.id);
     save().catch(() => {});
@@ -523,6 +684,7 @@ function spawnProcess(proc, project) {
   child.on("close", (code) => {
     proc.status = "stopped";
     delete proc.pid;
+    if (!listenedProcs.has(proc.id)) proc.port = 0;
     proc.exitCode = code;
     proc.output.push(`Process exited (${code ?? "signal"})`);
     children.delete(proc.id);
@@ -548,6 +710,109 @@ async function packageManager(project, pkg = {}) {
       return manager;
   }
   return "npm";
+}
+/**
+ * Read package.json fresh on every call (never cached): detect the dev
+ * script and its package manager, or return a distinct note when the file
+ * is unreadable or malformed instead of silently reporting "no script".
+ */
+async function readDevCommand(project) {
+  try {
+    const pkg = JSON.parse(await fs.readFile(path.join(project.path, "package.json"), "utf8"));
+    const manager = await packageManager(project, pkg);
+    return { pkg, devCommand: pkg.scripts?.dev ? `${manager} run dev` : "", note: null };
+  } catch (error) {
+    return {
+      pkg: {},
+      devCommand: "",
+      note: `package.json could not be read or parsed (${error.message}); the dev script cannot be detected until the file is valid JSON.`,
+    };
+  }
+}
+/**
+ * Re-evaluate scripts.dev for a project — called on every bootstrap poll —
+ * and create or refresh its single ADE-managed dev-server record, keeping
+ * the record id stable across rescans. Returns whether state changed so
+ * the caller can persist cheaply.
+ */
+export async function refreshDevProcess(project) {
+  const { devCommand, note } = await readDevCommand(project);
+  const existing = state.processes.find((p) => p.projectId === project.id);
+  if (note) {
+    const changed = project.devScriptNote !== note;
+    if (changed) project.devScriptNote = note;
+    return { proc: existing ?? null, changed };
+  }
+  let changed = false;
+  if (project.devScriptNote !== undefined) {
+    delete project.devScriptNote;
+    changed = true;
+  }
+  if (!devCommand) {
+    // No dev script: retire a stopped record, but never one currently running.
+    if (existing && existing.status !== "running" && !children.has(existing.id)) {
+      state.processes = state.processes.filter((p) => p.id !== existing.id);
+      return { proc: null, changed: true };
+    }
+    return { proc: existing ?? null, changed };
+  }
+  if (existing) {
+    if (existing.command !== devCommand) {
+      existing.command = devCommand;
+      existing.output = [...(existing.output ?? []), `dev script changed: ${devCommand}`].slice(
+        -300,
+      );
+      changed = true;
+    }
+    // While the record is not running, args always mirror the re-derived
+    // devCommand: an older start route persisted mutated args into proc.args
+    // (orphan positionals like "run dev -- 3000") and those must never leak
+    // into the next launch argv. A running record keeps the args its live
+    // child was started with.
+    const [bin, ...args] = devCommand.split(" ");
+    if (existing.status !== "running" && !children.has(existing.id)) {
+      if (existing.bin !== bin || (existing.args ?? []).join(" ") !== args.join(" ")) {
+        existing.bin = bin;
+        existing.args = args;
+        changed = true;
+      }
+    }
+    return { proc: existing, changed };
+  }
+  const proc = {
+    id: id(),
+    projectId: project.id,
+    name: "Development server",
+    command: devCommand,
+    bin: devCommand.split(" ")[0],
+    args: devCommand.split(" ").slice(1),
+    port: 0,
+    status: "stopped",
+    output: [],
+  };
+  state.processes.push(proc);
+  return { proc, changed: true };
+}
+/**
+ * The dev-server flag family the project's framework accepts: `next` rejects
+ * --host outright (it takes -H/--hostname and -p), vite and other --host
+ * users take --host/--port, and unknown scripts get only the port — the most
+ * widely supported flag — with PORT set in the environment as belt-and-braces.
+ */
+export function detectFramework(pkg, devScript = "") {
+  const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
+  if (deps.next || /\bnext\s+dev\b/.test(devScript)) return "next";
+  if (deps.vite || /\bvite\b/.test(devScript)) return "vite";
+  return "unknown";
+}
+export function devServerArgs(framework, port) {
+  const flags =
+    framework === "next"
+      ? ["-H", "127.0.0.1", "-p"]
+      : framework === "vite"
+        ? ["--host", "127.0.0.1", "--port"]
+        : ["--port"];
+  return ["--", ...flags, String(port)];
 }
 async function checksFor(project) {
   const categories = [
@@ -577,24 +842,43 @@ async function checksFor(project) {
             detail: `No ${category.scripts.join(" or ")} script configured.`,
           };
     });
-  } catch {
+  } catch (error) {
     return categories.map(({ name }) => ({
       name,
       status: "skipped",
-      detail: "No package.json scripts detected.",
+      detail: `package.json could not be read or parsed (${error.message}); no scripts detected.`,
     }));
   }
 }
-async function executeChecks(session) {
-  const project = state.projects.find((p) => p.id === session.projectId);
-  const checks = await checksFor(project);
+export async function executeChecks(session) {
+  // Claim the verifying state before the first await: a /stop handled while
+  // checksFor yields must not be overwritten by this loop afterwards.
   session.status = "verifying";
+  session.checksCancelled = false;
+  const project = state.projects.find((p) => p.id === session.projectId);
+  if (!project) {
+    // Defensive: the route only admits ready sessions, so restore that state
+    // rather than wedging the session in verifying with no loop running.
+    session.status = "ready";
+    return;
+  }
+  const checks = await checksFor(project);
+  // Re-check immediately after the yield: if /stop (or completion) landed
+  // while checksFor was reading, abandon before touching any check state.
+  if (session.status !== "verifying" || session.checksCancelled) {
+    session.updatedAt = now();
+    await save();
+    return;
+  }
   session.checks = checks.filter((check) => !check.script);
   const pkg = JSON.parse(
     await fs.readFile(path.join(project.path, "package.json"), "utf8").catch(() => "{}"),
   );
   const manager = await packageManager(project, pkg);
   for (const check of checks.filter((item) => item.script)) {
+    // Checks have no tracked child to kill, so cancellation is a flag tested
+    // between steps: /stop must not be overwritten by this loop finishing.
+    if (session.checksCancelled || ["stopped", "complete"].includes(session.status)) break;
     const actualCmd = `${manager} run ${check.script}`;
     const r = await run(manager, ["run", check.script], { cwd: project.path, timeout: 120000 });
     const output = (r.stdout + r.stderr).trim().slice(-4000);
@@ -606,8 +890,33 @@ async function executeChecks(session) {
     session.logs.push(`$ ${actualCmd}\n${output}`);
     await save();
   }
-  session.status = "ready";
   session.updatedAt = now();
+  // Never write over a stopped or completed session, whatever the loop did.
+  if (session.checksCancelled || ["stopped", "complete"].includes(session.status)) {
+    await save();
+    return;
+  }
+  const queue = session.queuedMessages ?? [];
+  if (children.has(session.id)) {
+    // A turn is (still) live: report what is actually true instead of
+    // claiming ready; its close handler owns the queue.
+    session.status = "working";
+    await save();
+    return;
+  }
+  if (queue.length) {
+    // Drain follow-ups that arrived during verifying: claim the turn slot
+    // synchronously before the await, so a second /messages queues instead
+    // of racing this drain with another spawn.
+    claimTurn(session);
+    session.queuedMessages = [];
+    session.status = "working";
+    await save();
+    runAgent(session, queue.join("\n\n"), true);
+    return;
+  }
+  // verifying -> ready only when no child is running.
+  session.status = "ready";
   await save();
 }
 function json(res, status, body) {
@@ -649,8 +958,17 @@ async function handle(req, res) {
       const needsDiff = new Set(
         state.sessions.filter((item) => item.status !== "complete").map((item) => item.projectId),
       );
+      let devStateChanged = false;
       for (const p of state.projects) {
         await projectInfo(p);
+        if (!p.missing) {
+          // Re-scan scripts.dev on every poll: a script added, changed, or
+          // broken since the last poll is reflected without re-registering.
+          try {
+            const { changed } = await refreshDevProcess(p);
+            if (changed) devStateChanged = true;
+          } catch {}
+        }
         if (p.missing || !needsDiff.has(p.id)) continue;
         const diff = await getDiff(p);
         for (const s of state.sessions.filter(
@@ -660,6 +978,7 @@ async function handle(req, res) {
             s.baselineFiles?.includes(c.path) ? { ...c, preExisting: true } : c,
           );
       }
+      if (devStateChanged) save().catch(() => {});
       return json(res, 200, {
         projects: state.projects.map(safeProject),
         sessions: state.sessions,
@@ -755,25 +1074,10 @@ async function handle(req, res) {
       };
       await projectInfo(project);
       state.projects.push(project);
-      const pkg = JSON.parse(
-        await fs.readFile(path.join(real, "package.json"), "utf8").catch(() => "{}"),
-      );
-      const manager = await packageManager(project, pkg);
-      const devCommand = pkg.scripts?.dev ? `${manager} run dev` : "";
-      const proc = devCommand
-        ? {
-            id: id(),
-            projectId: project.id,
-            name: "Development server",
-            command: devCommand,
-            bin: devCommand.split(" ")[0],
-            args: devCommand.split(" ").slice(1),
-            port: 0,
-            status: "stopped",
-            output: [],
-          }
-        : null;
-      if (proc) state.processes.push(proc);
+      // Same detection path as the bootstrap re-scan: an unreadable or
+      // malformed package.json records a distinct note instead of silently
+      // reporting no dev script.
+      const { proc } = await refreshDevProcess(project);
       await save();
       return json(res, 201, { project, process: proc });
     }
@@ -887,6 +1191,9 @@ async function handle(req, res) {
         ...(model ? { model } : {}),
       };
       state.sessions.unshift(s);
+      // Hold the single-turn slot across the awaits inside runAgent so an
+      // immediate follow-up queues instead of spawning a second CLI.
+      claimTurn(s);
       await save();
       runAgent(s, request + (data.criteria ? `\n\nAcceptance criteria: ${data.criteria}` : ""));
       return json(res, 201, s);
@@ -907,21 +1214,25 @@ async function handle(req, res) {
       // Follow-ups stay non-blocking: the user may keep editing between
       // turns. runAgent re-reads the working tree at the start of each turn
       // and refreshes the preserved-changes baseline, so the agent always
-      // sees current reality.
-      if (children.has(s.id)) {
+      // sees current reality. Checks spawn no tracked child, so "verifying"
+      // must queue here too instead of racing the checks run while the
+      // header still says verifying.
+      if (children.has(s.id) || s.status === "verifying") {
         (s.queuedMessages ??= []).push(text);
         addMessage(s, "user", text);
         addLog(s, "Follow-up queued until the current CLI turn exits.");
-      } else {
-        addMessage(s, "user", text);
-        s.queuedMessages = [text];
+        await save();
+        return json(res, 200, s);
       }
+      addMessage(s, "user", text);
       s.status = "working";
+      // Claim the turn slot synchronously: nothing awaits between the
+      // children.has() check above and this registration, so a close handler
+      // draining the queue can never double-spawn against this handler.
+      const claimed = claimTurn(s);
+      if (claimed) s.queuedMessages = [];
       await save();
-      if (!children.has(s.id)) {
-        s.queuedMessages = [];
-        runAgent(s, text, true);
-      }
+      if (claimed) runAgent(s, text, true);
       return json(res, 200, s);
     }
     if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "switch-agent") {
@@ -975,6 +1286,10 @@ async function handle(req, res) {
       const s = state.sessions.find((x) => x.id === parts[1]);
       if (!s) return json(res, 404, { error: "Session not found." });
       s.status = "stopped";
+      // Checks have no child to kill: flag cancellation so executeChecks
+      // stops at the next step boundary instead of overwriting this state
+      // with "ready" when the loop ends.
+      s.checksCancelled = true;
       const child = children.get(s.id);
       stopChild(child ?? s.pid);
       addLog(s, "Stopped by user. Existing worktree changes are kept.");
@@ -986,6 +1301,11 @@ async function handle(req, res) {
       if (!s || !["ready", "blocked", "stopped"].includes(s.status))
         return json(res, 409, {
           error: "Wait for the agent to stop before completing this session.",
+        });
+      // A "ready" that lies (a live child still running) must not complete.
+      if (children.has(s.id))
+        return json(res, 409, {
+          error: "The agent is still running. Wait for it to stop before completing this session.",
         });
       s.status = "complete";
       s.completedAt = now();
@@ -1005,6 +1325,12 @@ async function handle(req, res) {
       if (!s) return json(res, 404, { error: "Session not found." });
       if (children.has(s.id))
         return json(res, 409, { error: "Stop or wait for the agent before running checks." });
+      // Mirrors the UI contract: checks run only on a session that is
+      // actually ready to review; verifying/stopped/complete must not race.
+      if (s.status !== "ready")
+        return json(res, 409, {
+          error: `Checks run only when the session is ready to review; this session is "${s.status}".`,
+        });
       await executeChecks(s);
       return json(res, 200, s);
     }
@@ -1018,17 +1344,43 @@ async function handle(req, res) {
       const proc = state.processes.find((x) => x.id === parts[1]);
       const project = state.projects.find((x) => x.id === proc?.projectId);
       if (!proc || !project) return json(res, 404, { error: "Process not found." });
-      if (proc.status === "running") return json(res, 200, proc);
+      // "starting" is a live attempt too: never launch a second one over it.
+      if (proc.status === "running" || proc.status === "starting") return json(res, 200, proc);
+      // Map launch flags to the framework actually in the project: next
+      // rejects --host outright (it takes -H/--hostname), vite and other
+      // --host users take --host/--port, unknown scripts get only the port
+      // plus PORT in the environment. Launch flags are computed per start
+      // from the stored base args, so restarts never stack them.
+      const { pkg } = await readDevCommand(project);
+      const framework = detectFramework(pkg, pkg?.scripts?.dev ?? "");
       proc.port = await allocatePort();
-      proc.args = [
-        ...proc.args.filter((a) => a !== "--host" && a !== "127.0.0.1" && a !== "--port"),
-        "--",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        String(proc.port),
-      ];
-      spawnProcess(proc, project);
+      listenedProcs.delete(proc.id);
+      const launch = {
+        args: [...baseLaunchArgs(proc.args), ...devServerArgs(framework, proc.port)],
+        ...(framework === "unknown" ? { env: { PORT: String(proc.port) } } : {}),
+      };
+      spawnProcess(proc, project, launch);
+      // "running" is only reported once the port accepts a connection;
+      // otherwise surface the captured stderr tail and reset the port.
+      const up = await waitForListening(proc);
+      if (up) {
+        proc.status = "running";
+      } else {
+        const allocatedPort = proc.port;
+        const alive = children.has(proc.id);
+        if (alive) stopChild(children.get(proc.id));
+        // Either way it never listened, so the allocated port is unusable:
+        // reset it here (and again in the close handler) so a failed start
+        // never reports a stale port.
+        proc.port = 0;
+        proc.output.push(
+          alive
+            ? `The dev server did not accept a connection on port ${allocatedPort} within 10 seconds; ADE stopped it. Its output is above.`
+            : "The dev server exited before it could listen; its error output is above.",
+        );
+        proc.status = "stopped";
+      }
+      proc.updatedAt = now();
       await save();
       return json(res, 200, proc);
     }

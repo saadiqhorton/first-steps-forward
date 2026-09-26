@@ -1,5 +1,5 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ChecksList } from "@/components/ade/ChecksList";
 import { DiffView } from "@/components/ade/DiffView";
 import { ModelPicker } from "@/components/ade/ModelPicker";
@@ -34,10 +34,101 @@ function SessionPage() {
   const [switching, setSwitching] = useState(false);
   const [editingModel, setEditingModel] = useState(false);
   const [modelDraft, setModelDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Auto-scroll only if the reader is already near the bottom (or sent the
+  // last message); updated from scroll events below.
+  const stickToBottomRef = useRef(true);
+  const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
+  const modelPanelRef = useRef<HTMLDivElement>(null);
+  const switchPanelRef = useRef<HTMLDivElement>(null);
+  const modelToggleRef = useRef<HTMLButtonElement>(null);
+  const switchToggleRef = useRef<HTMLButtonElement>(null);
+  const lastMessageRole = session?.messages[session.messages.length - 1]?.role;
+  const onMessagesScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+  const onTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, t: Tab) => {
+    const order: Tab[] = ["changes", "checks", "logs"];
+    const index = order.indexOf(t);
+    let next: number | null = null;
+    if (event.key === "ArrowRight") next = (index + 1) % order.length;
+    else if (event.key === "ArrowLeft") next = (index - 1 + order.length) % order.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = order.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    const target = order[next] as Tab;
+    setTab(target);
+    tabRefs.current[target]?.focus();
+  };
+  // Local popover dismissal: Escape and outside pointerdown close the model
+  // and switch-agent popovers. Escape is consumed with stopPropagation so the
+  // Shell's window-level Escape (nav drawer) does not also fire, and focus
+  // returns to the popover's own toggle.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [session?.messages.length, session?.status]);
+    if (!editingModel && !switching) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      // Outside click closes and hands focus back to the toggle. A later
+      // mousedown on a focusable element still wins, so focus only sticks
+      // when the click landed on non-focusable space.
+      if (
+        editingModel &&
+        !modelPanelRef.current?.contains(target) &&
+        !modelToggleRef.current?.contains(target)
+      ) {
+        setEditingModel(false);
+        modelToggleRef.current?.focus();
+      }
+      if (
+        switching &&
+        !switchPanelRef.current?.contains(target) &&
+        !switchToggleRef.current?.contains(target)
+      ) {
+        setSwitching(false);
+        switchToggleRef.current?.focus();
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      if (switching) {
+        setSwitching(false);
+        switchToggleRef.current?.focus();
+      }
+      if (editingModel) {
+        setEditingModel(false);
+        modelToggleRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [editingModel, switching]);
+  // Close the switch-agent popover when the session enters a state where the
+  // API refuses switching (turn running, or complete).
+  useEffect(() => {
+    const status = session?.status;
+    if (!status) return;
+    if (["working", "verifying"].includes(status) || status === "complete") {
+      setSwitching(false);
+      if (status === "complete") setEditingModel(false);
+    }
+  }, [session?.status]);
+  useEffect(() => {
+    if (stickToBottomRef.current || lastMessageRole === "user")
+      endRef.current?.scrollIntoView({ block: "end" });
+  }, [session?.messages.length, session?.status, lastMessageRole]);
   if (!session) {
     if (!state.hydrated) return <main className="flex-1" />;
     throw notFound();
@@ -46,10 +137,37 @@ function SessionPage() {
   const agent = state.agents.find((a) => a.id === session.agentId);
   if (!project) return <main className="flex-1 p-8">Project not found.</main>;
   const running = ["working", "verifying"].includes(session.status);
-  const send = () => {
-    if (!text.trim()) return;
-    steer(session.id, text.trim());
-    setText("");
+  const switchBlockReason = running
+    ? "Unavailable while a turn runs"
+    : session.status === "complete"
+      ? "Unavailable once complete"
+      : null;
+  const send = async () => {
+    const outgoing = text.trim();
+    if (!outgoing || sending) return;
+    setSending(true);
+    setSendError(null);
+    stickToBottomRef.current = true;
+    try {
+      await steer(session.id, outgoing);
+      // Clear only the text we actually sent; anything typed while the
+      // request was in flight is kept.
+      setText((current) => (current === text ? "" : current));
+    } catch (e) {
+      // Keep the draft in the composer and surface the failure there.
+      setSendError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSending(false);
+    }
+  };
+  const markComplete = async () => {
+    if (completing) return;
+    setCompleting(true);
+    try {
+      await complete(session.id);
+    } finally {
+      setCompleting(false);
+    }
   };
   const applyModel = async (next: string) => {
     if ((session.model ?? "") === next.trim()) return;
@@ -103,6 +221,7 @@ function SessionPage() {
             {session.status !== "complete" && (
               <div className="relative">
                 <button
+                  ref={modelToggleRef}
                   onClick={() => {
                     if (!editingModel) setModelDraft(session.model ?? "");
                     setEditingModel((v) => !v);
@@ -113,7 +232,10 @@ function SessionPage() {
                   Change model ▾
                 </button>
                 {editingModel && (
-                  <div className="absolute left-0 z-20 mt-1 w-96 rounded-md bg-panel p-3 shadow-lg ring-1 ring-ink/10">
+                  <div
+                    ref={modelPanelRef}
+                    className="absolute left-0 z-20 mt-1 w-96 rounded-md bg-panel p-3 shadow-lg ring-1 ring-ink/10"
+                  >
                     <ModelPicker
                       agentId={session.agentId}
                       agentName={agent?.name ?? session.agentId}
@@ -147,14 +269,23 @@ function SessionPage() {
             )}
             <div className="relative">
               <button
+                ref={switchToggleRef}
                 onClick={() => setSwitching((v) => !v)}
-                className="btn-quiet px-2.5 py-1 font-mono text-[11px]"
+                disabled={!!switchBlockReason}
+                title={switchBlockReason ?? undefined}
+                className="btn-quiet px-2.5 py-1 font-mono text-[11px] disabled:opacity-50"
                 aria-expanded={switching}
               >
                 Switch agent ▾
               </button>
+              {switchBlockReason && (
+                <span className="ml-2 font-mono text-[10px] text-dim">{switchBlockReason}</span>
+              )}
               {switching && (
-                <div className="absolute left-0 z-20 mt-1 w-80 rounded-md bg-panel p-2 shadow-lg ring-1 ring-ink/10">
+                <div
+                  ref={switchPanelRef}
+                  className="absolute left-0 z-20 mt-1 w-80 rounded-md bg-panel p-2 shadow-lg ring-1 ring-ink/10"
+                >
                   <div className="label-mono px-2 py-1">
                     New agent continues the task, not the conversation
                   </div>
@@ -202,10 +333,11 @@ function SessionPage() {
               )}
               {["ready", "blocked", "stopped"].includes(session.status) && (
                 <button
-                  onClick={() => complete(session.id)}
-                  className="btn-amber px-3 py-1.5 text-[12px]"
+                  onClick={() => void markComplete()}
+                  disabled={completing}
+                  className="btn-amber px-3 py-1.5 text-[12px] disabled:opacity-60"
                 >
-                  Mark complete
+                  {completing ? "Completing…" : "Mark complete"}
                 </button>
               )}
               {session.status === "complete" && (
@@ -219,7 +351,11 @@ function SessionPage() {
             </div>
           </div>
         </header>
-        <div className="flex-1 space-y-3 overflow-y-auto px-7 py-5">
+        <div
+          ref={scrollRef}
+          onScroll={onMessagesScroll}
+          className="flex-1 space-y-3 overflow-y-auto px-7 py-5"
+        >
           {session.messages.map((m) => (
             <div
               key={m.id}
@@ -326,24 +462,32 @@ function SessionPage() {
                 The CLI has exited. Inspect the actual project diff and run checks explicitly; ADE
                 did not run checks automatically.
               </p>
-              <button
-                onClick={() => complete(session.id)}
-                className="btn-amber mt-3 px-3 py-1.5 text-[12px]"
-              >
-                Mark complete
-              </button>
+              <p className="mt-2 font-mono text-[10px] text-dim">
+                Use “Mark complete” in the header when the result looks right.
+              </p>
             </div>
           )}
           <div ref={endRef} />
         </div>
         <div className="border-t border-line bg-panel">
-          <div className="flex items-center gap-1 px-7 pt-3" role="tablist">
+          <div
+            className="flex flex-wrap items-center gap-1 px-7 pt-3"
+            role="tablist"
+            aria-label="Session panels"
+          >
             {(["changes", "checks", "logs"] as Tab[]).map((t) => (
               <button
                 key={t}
+                ref={(el) => {
+                  tabRefs.current[t] = el;
+                }}
+                id={`session-tab-${t}`}
                 onClick={() => setTab(t)}
+                onKeyDown={(e) => onTabKeyDown(e, t)}
                 aria-selected={tab === t}
+                aria-controls={`session-panel-${t}`}
                 role="tab"
+                tabIndex={tab === t ? 0 : -1}
                 className={`rounded-md px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] ${tab === t ? "bg-ink text-paper" : "text-dim hover:text-ink"}`}
               >
                 {t === "changes"
@@ -354,36 +498,48 @@ function SessionPage() {
               </button>
             ))}
           </div>
-          <div className="max-h-56 overflow-y-auto px-7 py-3" role="tabpanel">
-            {tab === "changes" && <DiffView changes={session.changes} />}
-            {tab === "checks" && (
-              <>
-                <ChecksList checks={session.checks} />
-                {!running && (
-                  <button
-                    disabled={busy}
-                    onClick={() => void checksClick()}
-                    className="btn-quiet mt-3 px-3 py-1.5 text-[12px]"
-                  >
-                    {busy ? "Running…" : "Run project checks"}
-                  </button>
-                )}
-              </>
-            )}
-            {tab === "logs" &&
-              (session.logs.length ? (
-                <pre className="whitespace-pre-wrap rounded-md bg-ink px-3 py-2 font-mono text-[11px] leading-relaxed text-paper/80">
-                  {session.logs.join("\n")}
-                </pre>
-              ) : (
-                <p className="text-[12px] text-dim">No CLI output yet.</p>
-              ))}
-          </div>
+          {(["changes", "checks", "logs"] as Tab[]).map((t) => (
+            <div
+              key={t}
+              id={`session-panel-${t}`}
+              aria-labelledby={`session-tab-${t}`}
+              role="tabpanel"
+              hidden={tab !== t}
+              tabIndex={0}
+              className="max-h-56 overflow-y-auto px-7 py-3"
+            >
+              {t === "changes" && <DiffView changes={session.changes} />}
+              {t === "checks" && (
+                <>
+                  <ChecksList checks={session.checks} />
+                  {session.status === "ready" && (
+                    <button
+                      disabled={busy}
+                      onClick={() => void checksClick()}
+                      className="btn-quiet mt-3 px-3 py-1.5 text-[12px]"
+                    >
+                      {busy ? "Running…" : "Run project checks"}
+                    </button>
+                  )}
+                </>
+              )}
+              {t === "logs" &&
+                (session.logs.length ? (
+                  <pre className="whitespace-pre-wrap rounded-md bg-ink px-3 py-2 font-mono text-[11px] leading-relaxed text-paper/80">
+                    {session.logs.join("\n")}
+                  </pre>
+                ) : (
+                  <p className="text-[12px] text-dim">No CLI output yet.</p>
+                ))}
+            </div>
+          ))}
           <div className="flex gap-2 border-t border-line px-7 py-3">
             <input
               value={text}
               onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && send()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) void send();
+              }}
               disabled={session.status === "complete"}
               placeholder={
                 session.status === "complete"
@@ -396,13 +552,18 @@ function SessionPage() {
               className="flex-1 rounded-md border border-line bg-paper px-3 py-2 text-[13px] placeholder:text-dim/70 disabled:opacity-60"
             />
             <button
-              onClick={send}
-              disabled={!text.trim() || session.status === "complete"}
-              className="btn-amber px-4 py-2 text-[13px]"
+              onClick={() => void send()}
+              disabled={!text.trim() || session.status === "complete" || sending}
+              className="btn-amber px-4 py-2 text-[13px] disabled:opacity-60"
             >
-              Send
+              {sending ? "Sending…" : "Send"}
             </button>
           </div>
+          {sendError && (
+            <p role="alert" className="px-7 pb-3 text-[12px] leading-relaxed text-danger">
+              Couldn’t send: {sendError} Your text is still in the composer.
+            </p>
+          )}
         </div>
       </main>
       <PreviewPane project={project} session={session} />

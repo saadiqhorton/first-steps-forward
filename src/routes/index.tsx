@@ -1,7 +1,12 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { PreviewPane } from "@/components/ade/PreviewPane";
 import { SessionCard } from "@/components/ade/SessionCard";
+import type { LocalProcess } from "@/lib/ade/types";
 import { isActive, timeAgo, useActiveProject, useAde } from "@/lib/ade/store";
+
+// The server lane adds `external` to adopted entries; tolerated here as optional
+// so this renders correctly before that type lands.
+type HomeProcess = LocalProcess & { external?: boolean };
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -31,8 +36,10 @@ function ProjectHome() {
     .filter((s) => s.status === "complete")
     .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
     .slice(0, 5);
-  const dev = state.processes.find((p) => p.projectId === project.id && p.port > 0);
-  const running = dev?.status === "running";
+  const dev = state.processes.find((p) => p.projectId === project.id) as HomeProcess | undefined;
+  const running = dev?.status === "running" && dev.port > 0;
+  const starting = dev?.status === "starting";
+  const external = running && dev?.external === true;
   const focus = active[0];
 
   if (!state.projects.length)
@@ -99,17 +106,27 @@ function ProjectHome() {
 
         <div className="space-y-4 overflow-y-auto px-7 pb-8">
           <div className="grain relative overflow-hidden rounded-lg bg-ink p-4 text-paper ring-1 ring-ink/20 animate-rise">
-            <div className={`absolute inset-y-0 left-0 w-1 ${running ? "bg-amber" : "bg-dim"}`} />
+            <div
+              className={`absolute inset-y-0 left-0 w-1 ${running || starting ? "bg-amber" : "bg-dim"}`}
+            />
             <div className="flex items-center gap-2">
               <span
-                className={`size-2 rounded-full ${running ? "bg-teal animate-pulse-soft" : "bg-dim"}`}
+                className={`size-2 rounded-full ${running || starting ? "bg-teal animate-pulse-soft" : "bg-dim"}`}
                 aria-hidden
               />
               <span
-                className={`font-mono text-[11px] uppercase tracking-[0.16em] ${running ? "text-teal" : "text-paper/60"}`}
+                className={`font-mono text-[11px] uppercase tracking-[0.16em] ${running || starting ? "text-teal" : "text-paper/60"}`}
               >
                 {dev
-                  ? `${dev.name} ${running ? "running" : "stopped"}`
+                  ? `${dev.name} ${
+                      running
+                        ? "running"
+                        : starting
+                          ? "starting"
+                          : dev.port === 0
+                            ? "detected"
+                            : "stopped"
+                    }`
                   : "No dev server configured"}
               </span>
               {running && dev?.startedAt && (
@@ -143,6 +160,13 @@ function ProjectHome() {
                       Stop
                     </button>
                   </>
+                ) : starting ? (
+                  <button
+                    onClick={() => process(dev.id, "stop")}
+                    className="btn-ink-ghost px-3 py-1.5 text-[12px]"
+                  >
+                    Stop
+                  </button>
                 ) : (
                   <button
                     onClick={() => process(dev.id, "start")}
@@ -151,9 +175,11 @@ function ProjectHome() {
                     Start
                   </button>
                 )}
-                <Link to="/processes" className="btn-ink-ghost px-3 py-1.5 text-[12px]">
-                  Output
-                </Link>
+                {!external && (
+                  <Link to="/processes" className="btn-ink-ghost px-3 py-1.5 text-[12px]">
+                    Output
+                  </Link>
+                )}
               </div>
             )}
           </div>
