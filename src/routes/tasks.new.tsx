@@ -1,21 +1,18 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import type { Agent, AgentId } from "@/lib/ade/types";
-import { isActive, useActiveProject, useAde } from "@/lib/ade/store";
+import { useActiveProject, useAde } from "@/lib/ade/store";
 
 export const Route = createFileRoute("/tasks/new")({
   head: () => ({
     meta: [
       { title: "New task — ADE" },
-      { name: "description", content: "Describe a change in plain language and choose which coding agent should make it." },
-      { property: "og:title", content: "New task — ADE" },
-      { property: "og:description", content: "Start a fresh agent session for a project." },
+      { name: "description", content: "Start a real local coding-agent session." },
     ],
   }),
   component: NewTask,
 });
-
 function NewTask() {
   const { state, startTask } = useAde();
   const active = useActiveProject();
@@ -25,34 +22,70 @@ function NewTask() {
   const [agentId, setAgentId] = useState<AgentId>(project.defaultAgent);
   const [request, setRequest] = useState("");
   const [criteria, setCriteria] = useState("");
-  const [ackUncommitted, setAck] = useState(false);
   const [signing, setSigning] = useState<Agent | null>(null);
-
-  const agent = state.agents.find((a) => a.id === agentId)!;
-  const usable = agent.installed && agent.signedIn;
-  const overlapping = state.sessions.filter((s) => s.projectId === project.id && isActive(s) && s.status !== "ready");
-  const needsAck = project.uncommittedFiles.length > 0 && !ackUncommitted;
-  const canStart = request.trim().length > 3 && usable && !needsAck;
-
-  const submit = () => {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const agent = state.agents.find((a) => a.id === agentId);
+  const usable = !!agent?.installed && agent.signedIn;
+  const overlapping = state.sessions.some(
+    (s) => s.projectId === project.id && ["working", "verifying"].includes(s.status),
+  );
+  const canStart =
+    !!project.id &&
+    request.trim().length > 3 &&
+    usable &&
+    !project.uncommittedFiles.length &&
+    !overlapping &&
+    !busy;
+  const submit = async () => {
     if (!canStart) return;
-    const s = startTask({ projectId: project.id, agentId, request: request.trim(), criteria: criteria.trim() });
-    navigate({ to: "/sessions/$sessionId", params: { sessionId: s.id } });
+    setBusy(true);
+    setError("");
+    try {
+      const s = await startTask({
+        projectId: project.id,
+        agentId,
+        request: request.trim(),
+        criteria: criteria.trim(),
+      });
+      navigate({ to: "/sessions/$sessionId", params: { sessionId: s.id } });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   };
-
+  if (!state.projects.length)
+    return (
+      <main className="min-w-0 flex-1 px-7 py-8">
+        <div className="label-mono">No project selected</div>
+        <h1 className="mt-1 font-display text-4xl">Add a project first</h1>
+        <Link to="/projects/add" className="btn-amber mt-5 inline-block px-4 py-2 text-sm">
+          + Add project
+        </Link>
+      </main>
+    );
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-2xl px-7 pt-8 pb-12">
         <div className="label-mono">New task</div>
-        <h1 className="mt-1 font-display text-[44px] leading-[0.9] tracking-wide">What should change?</h1>
-        <p className="mt-2 text-[13px] text-dim">A few plain sentences is enough. Add acceptance criteria if you know how you'll judge it.</p>
-
+        <h1 className="mt-1 font-display text-[44px] leading-[0.9] tracking-wide">
+          What should change?
+        </h1>
+        <p className="mt-2 text-[13px] text-dim">
+          A focused request starts the selected CLI in your project. Prompts and files the CLI reads
+          are sent to its configured provider under that provider's policies.
+        </p>
+        <div className="mt-4 rounded-md border border-line bg-panel px-3 py-2 text-[11px] leading-relaxed text-dim">
+          ADE refuses dirty Git worktrees and explicit deployment/destructive requests. Tool-level
+          approval prompts are not bridged yet; OpenCode rejects permission requests in
+          non-interactive mode, and follow-ups are queued between turns. Review the agent's real
+          output and diff.
+        </div>
         <div className="mt-6 space-y-5">
           <div>
-            <label className="label-mono block" htmlFor="project">
-              Project
-            </label>
-            <div className="mt-2 flex flex-wrap gap-2" id="project" role="radiogroup">
+            <label className="label-mono block">Project</label>
+            <div className="mt-2 flex flex-wrap gap-2" role="radiogroup">
               {state.projects.map((p) => (
                 <button
                   key={p.id}
@@ -61,16 +94,14 @@ function NewTask() {
                   onClick={() => {
                     setProjectId(p.id);
                     setAgentId(p.defaultAgent);
-                    setAck(false);
                   }}
-                  className={`rounded-md px-3 py-1.5 text-[13px] ring-1 transition-colors ${p.id === project.id ? "bg-amber/15 ring-amber/40 font-medium" : "bg-panel ring-line hover:bg-ink/[0.03]"}`}
+                  className={`rounded-md px-3 py-1.5 text-[13px] ring-1 ${p.id === project.id ? "bg-amber/15 ring-amber/40 font-medium" : "bg-panel ring-line"}`}
                 >
                   {p.name} <span className="font-mono text-[10px] text-dim">{p.branch}</span>
                 </button>
               ))}
             </div>
           </div>
-
           <div>
             <label className="label-mono block" htmlFor="request">
               Request
@@ -80,13 +111,12 @@ function NewTask() {
               autoFocus
               value={request}
               onChange={(e) => setRequest(e.target.value)}
-              onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === "Enter" && submit()}
+              onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === "Enter" && void submit()}
               rows={4}
-              placeholder='e.g. Add a "Back in stock" email signup to sold-out product pages.'
-              className="mt-2 w-full resize-y rounded-lg border border-line bg-panel px-4 py-3 text-[15px] leading-relaxed placeholder:text-dim/70 focus:border-amber"
+              placeholder='e.g. Add a "Back in stock" signup to sold-out product pages.'
+              className="mt-2 w-full resize-y rounded-lg border border-line bg-panel px-4 py-3 text-[15px] leading-relaxed placeholder:text-dim/70"
             />
           </div>
-
           <div>
             <label className="label-mono block" htmlFor="criteria">
               Acceptance criteria <span className="normal-case tracking-normal">(optional)</span>
@@ -96,75 +126,80 @@ function NewTask() {
               value={criteria}
               onChange={(e) => setCriteria(e.target.value)}
               rows={2}
-              placeholder="How will you know it's done? If you skip this, the agent may ask a question first."
-              className="mt-2 w-full resize-y rounded-lg border border-line bg-panel px-4 py-3 text-[13px] leading-relaxed placeholder:text-dim/70 focus:border-amber"
+              placeholder="How will you know it's done? Leave blank to let the agent choose a reasonable approach."
+              className="mt-2 w-full resize-y rounded-lg border border-line bg-panel px-4 py-3 text-[13px] leading-relaxed placeholder:text-dim/70"
             />
           </div>
-
           <div>
             <div className="label-mono">Agent</div>
             <div className="mt-2 grid grid-cols-3 gap-2" role="radiogroup">
-              {state.agents.map((a) => {
-                const sel = a.id === agentId;
-                return (
-                  <button
-                    key={a.id}
-                    role="radio"
-                    aria-checked={sel}
-                    onClick={() => setAgentId(a.id)}
-                    className={`rounded-lg p-3 text-left ring-1 transition-colors ${sel ? "bg-amber/15 ring-amber/40" : "bg-panel ring-line hover:bg-ink/[0.03]"}`}
-                  >
-                    <div className="text-[13px] font-medium">{a.name}</div>
-                    <div className="mt-0.5 font-mono text-[10px] text-dim">
-                      {!a.installed ? "Not installed" : a.signedIn ? a.account : "Not signed in"}
+              {state.agents.map((a) => (
+                <button
+                  key={a.id}
+                  role="radio"
+                  aria-checked={a.id === agentId}
+                  onClick={() => setAgentId(a.id)}
+                  className={`rounded-lg p-3 text-left ring-1 ${a.id === agentId ? "bg-amber/15 ring-amber/40" : "bg-panel ring-line"}`}
+                >
+                  <div className="text-[13px] font-medium">{a.name}</div>
+                  <div className="mt-0.5 font-mono text-[10px] text-dim">
+                    {!a.installed ? "Not installed" : a.signedIn ? a.account : "Sign-in needed"}
+                  </div>
+                  {a.id === project.defaultAgent && (
+                    <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-teal">
+                      Project default
                     </div>
-                    {a.id === project.defaultAgent && <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.14em] text-teal">Project default</div>}
-                  </button>
-                );
-              })}
+                  )}
+                </button>
+              ))}
             </div>
-            {!agent.installed && (
-              <p className="mt-2 rounded-md bg-amber/10 px-3 py-2 text-[12px] leading-snug">
-                {agent.name} isn't installed on this machine. Install it with <code className="font-mono">{agent.installHint}</code>, then ADE will detect it. Pick another agent for now.
+            {agent && !agent.installed && (
+              <p className="mt-2 rounded-md bg-amber/10 px-3 py-2 text-[12px]">
+                {agent.name} is not installed. {agent.installHint}
               </p>
             )}
-            {agent.installed && !agent.signedIn && (
-              <div className="mt-2 flex items-center gap-3 rounded-md bg-amber/10 px-3 py-2 text-[12px] leading-snug">
-                <span>{agent.name} is installed but not signed in yet.</span>
-                <button onClick={() => setSigning(agent)} className="btn-amber ml-auto shrink-0 px-3 py-1 text-[12px]">
-                  Sign in
+            {agent?.installed && !agent.signedIn && (
+              <div className="mt-2 flex items-center gap-3 rounded-md bg-amber/10 px-3 py-2 text-[12px]">
+                <span>{agent.name} is installed but not authenticated.</span>
+                <button onClick={() => setSigning(agent)} className="btn-amber ml-auto px-3 py-1">
+                  Set up
                 </button>
               </div>
             )}
           </div>
-
-          {project.uncommittedFiles.length > 0 && (
+          {!!project.uncommittedFiles.length && (
             <div className="rounded-lg border border-amber/40 bg-amber/10 p-4">
-              <div className="text-[13px] font-semibold">You have uncommitted work in {project.name}</div>
-              <ul className="mt-1 font-mono text-[11px] text-dim">
+              <div className="text-[13px] font-semibold">Uncommitted work is protected</div>
+              <p className="mt-1 text-[12px] leading-relaxed">
+                ADE will not launch an agent against a dirty working tree. Commit or stash these
+                changes first. ADE never auto-stashes, resets, or restores files.
+              </p>
+              <ul className="mt-2 font-mono text-[11px] text-dim">
                 {project.uncommittedFiles.map((f) => (
                   <li key={f}>{f}</li>
                 ))}
               </ul>
-              <label className="mt-3 flex items-start gap-2 text-[12px] leading-snug">
-                <input type="checkbox" checked={ackUncommitted} onChange={(e) => setAck(e.target.checked)} className="mt-0.5 accent-amber" />
-                <span>The agent must leave these files alone and stop if the task requires touching them. It will never revert or overwrite your changes.</span>
-              </label>
             </div>
           )}
-
-          {overlapping.length > 0 && (
-            <div className="rounded-lg border border-line bg-panel p-4 text-[12px] leading-snug">
-              <span className="font-semibold">Heads up:</span> {overlapping.length} other task{overlapping.length === 1 ? " is" : "s are"} still running in {project.name}. ADE will flag it if both touch the same files and offer to sequence them.
+          {overlapping && (
+            <div className="rounded-lg border border-line bg-panel p-4 text-[12px]">
+              One task is still running in this project. Wait for it to stop before starting another
+              to avoid overlapping edits.
             </div>
           )}
-
+          {error && <p className="rounded bg-danger/10 p-3 text-[12px] text-danger">{error}</p>}
           <div className="flex items-center gap-3 pt-2">
-            <button onClick={submit} disabled={!canStart} className="btn-amber px-5 py-2.5 text-[14px]">
-              Start task
+            <button
+              onClick={() => void submit()}
+              disabled={!canStart}
+              className="btn-amber px-5 py-2.5 text-[14px]"
+            >
+              {busy ? "Starting…" : "Start task"}
             </button>
-            <span className="font-mono text-[10px] text-dim">⌘↵ to start</span>
-            <button onClick={() => navigate({ to: "/" })} className="btn-quiet ml-auto px-4 py-2 text-[13px]">
+            <button
+              onClick={() => navigate({ to: "/" })}
+              className="btn-quiet ml-auto px-4 py-2 text-[13px]"
+            >
               Cancel
             </button>
           </div>

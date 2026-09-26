@@ -6,7 +6,10 @@ export const Route = createFileRoute("/processes")({
   head: () => ({
     meta: [
       { title: "Processes — ADE" },
-      { name: "description", content: "Start, stop, and inspect the local dev servers and watchers for each project." },
+      {
+        name: "description",
+        content: "Start, stop, and inspect the local dev servers and watchers for each project.",
+      },
       { property: "og:title", content: "Processes — ADE" },
       { property: "og:description", content: "Every local process, named by project and purpose." },
     ],
@@ -17,8 +20,13 @@ export const Route = createFileRoute("/processes")({
 function Processes() {
   const { state, process } = useAde();
   const active = useActiveProject();
-  const [open, setOpen] = useState<string | null>(state.processes.find((p) => p.projectId === active.id)?.id ?? null);
-  const grouped = state.projects.map((p) => ({ project: p, procs: state.processes.filter((x) => x.projectId === p.id) }));
+  const [open, setOpen] = useState<string | null>(
+    state.processes.find((p) => p.projectId === active.id)?.id ?? null,
+  );
+  const grouped = state.projects.map((p) => ({
+    project: p,
+    procs: state.processes.filter((x) => x.projectId === p.id),
+  }));
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
@@ -26,7 +34,8 @@ function Processes() {
         <div className="label-mono">This machine</div>
         <h1 className="mt-1 font-display text-[44px] leading-[0.9] tracking-wide">Processes</h1>
         <p className="mt-1 text-[12px] text-dim">
-          Everything here runs locally. <span className="font-semibold text-ink/70">localhost</span> addresses are only reachable from this computer; nothing on this page touches a production environment.
+          ADE passes a loopback host and port to the project's dev script. Check its output: a
+          custom script can ignore those options. ADE never runs a production deployment.
         </p>
       </div>
       <div className="space-y-6 px-7 pb-8">
@@ -42,30 +51,53 @@ function Processes() {
                 return (
                   <div key={p.id}>
                     <div className="flex items-center gap-3 px-4 py-3">
-                      <span className={`size-2 rounded-full ${running ? "bg-teal animate-pulse-soft" : "bg-dim"}`} aria-hidden />
+                      <span
+                        className={`size-2 rounded-full ${running ? "bg-teal animate-pulse-soft" : "bg-dim"}`}
+                        aria-hidden
+                      />
                       <div className="min-w-0 flex-1">
                         <div className="text-[13px] font-medium">
-                          {p.name} <span className="ml-1 font-mono text-[10px] font-normal text-dim">{running ? "running" : "stopped"}</span>
+                          {p.name}{" "}
+                          <span className="ml-1 font-mono text-[10px] font-normal text-dim">
+                            {running ? "running" : "stopped"}
+                          </span>
                         </div>
                         <div className="font-mono text-[10px] text-dim">
                           {p.command}
-                          {running && p.port ? ` · http://localhost:${p.port} · up ${timeAgo(state.now, p.startedAt).replace(" ago", "")}` : ""}
+                          {running && p.port
+                            ? ` · http://127.0.0.1:${p.port} · up ${timeAgo(state.now, p.startedAt).replace(" ago", "")}`
+                            : ""}
                         </div>
                       </div>
                       {running && p.port > 0 && (
-                        <a href={`http://localhost:${p.port}`} target="_blank" rel="noreferrer" className="btn-quiet px-3 py-1.5 text-[12px]">
+                        <a
+                          href={`http://127.0.0.1:${p.port}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn-quiet px-3 py-1.5 text-[12px]"
+                        >
                           Open
                         </a>
                       )}
-                      <button onClick={() => setOpen(isOpen ? null : p.id)} className="btn-quiet px-3 py-1.5 text-[12px]" aria-expanded={isOpen}>
+                      <button
+                        onClick={() => setOpen(isOpen ? null : p.id)}
+                        className="btn-quiet px-3 py-1.5 text-[12px]"
+                        aria-expanded={isOpen}
+                      >
                         Output
                       </button>
                       {running ? (
-                        <button onClick={() => process(p.id, "stop")} className="btn-quiet px-3 py-1.5 text-[12px]">
+                        <button
+                          onClick={() => process(p.id, "stop")}
+                          className="btn-quiet px-3 py-1.5 text-[12px]"
+                        >
                           Stop
                         </button>
                       ) : (
-                        <button onClick={() => process(p.id, "start")} className="btn-amber px-3 py-1.5 text-[12px]">
+                        <button
+                          onClick={() => process(p.id, "start")}
+                          className="btn-amber px-3 py-1.5 text-[12px]"
+                        >
                           Start
                         </button>
                       )}

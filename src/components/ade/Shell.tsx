@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
-import { NEEDS_YOU, isActive, useAde } from "@/lib/ade/store";
+import { isActive, useAde } from "@/lib/ade/store";
 
 const NAV = [
   { to: "/", label: "Home" },
@@ -26,34 +26,38 @@ export function Shell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate]);
 
-  const needsTotal = state.sessions.filter((s) => NEEDS_YOU.includes(s.status)).length;
-
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
       <div className="flex h-9 shrink-0 items-center justify-between bg-ink/90 px-4 text-paper">
-        <span className="font-mono text-[11px] uppercase tracking-[0.18em]">ADE · local-first agent workspace</span>
+        <span className="font-mono text-[11px] uppercase tracking-[0.18em]">
+          ADE · local-first agent workspace
+        </span>
         <span className="flex items-center gap-4 font-mono text-[11px] text-paper/60">
-          {needsTotal > 0 && (
-            <span className="text-amber">
-              {needsTotal} need{needsTotal === 1 ? "s" : ""} you
-            </span>
+          {state.hydrated && !state.serviceAvailable && (
+            <span className="text-amber">Local service disconnected</span>
           )}
           <span>⌘K new task</span>
         </span>
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-panel" aria-label="Projects">
+        <aside
+          className="flex w-56 shrink-0 flex-col border-r border-line bg-panel"
+          aria-label="Projects"
+        >
           <div className="px-4 pt-5 pb-2">
             <div className="font-display text-2xl leading-none tracking-wide">Projects</div>
-            <div className="label-mono mt-1 tracking-[0.16em]">{state.projects.length} on this machine</div>
+            <div className="label-mono mt-1 tracking-[0.16em]">
+              {state.projects.length} on this machine
+            </div>
           </div>
           <div className="space-y-1 px-3">
             {state.projects.map((p) => {
               const active = p.id === state.activeProjectId;
               const sessions = state.sessions.filter((s) => s.projectId === p.id && isActive(s));
-              const needs = sessions.some((s) => NEEDS_YOU.includes(s.status));
-              const running = state.processes.some((x) => x.projectId === p.id && x.status === "running");
+              const running = state.processes.some(
+                (x) => x.projectId === p.id && x.status === "running",
+              );
               return (
                 <button
                   key={p.id}
@@ -66,17 +70,24 @@ export function Shell({ children }: { children: ReactNode }) {
                 >
                   <div className="flex items-center gap-2">
                     <span
-                      className={`size-2 shrink-0 rounded-full ${needs ? "bg-amber" : running ? "bg-teal" : "bg-dim"}`}
+                      className={`size-2 shrink-0 rounded-full ${running ? "bg-teal" : "bg-dim"}`}
                       aria-hidden
                     />
                     <span className={`text-[13px] ${active ? "font-medium" : ""}`}>{p.name}</span>
-                    {sessions.length > 0 && <span className="ml-auto font-mono text-[10px] text-dim">{sessions.length}</span>}
+                    {sessions.length > 0 && (
+                      <span className="ml-auto font-mono text-[10px] text-dim">
+                        {sessions.length}
+                      </span>
+                    )}
                   </div>
                   <div className="mt-1 pl-4 font-mono text-[10px] text-dim">{p.path}</div>
                 </button>
               );
             })}
-            <Link to="/projects/add" className="block rounded-md px-3 py-2 text-[12px] text-dim hover:bg-ink/[0.04] hover:text-ink">
+            <Link
+              to="/projects/add"
+              className="block rounded-md px-3 py-2 text-[12px] text-dim hover:bg-ink/[0.04] hover:text-ink"
+            >
               + Add project
             </Link>
           </div>
@@ -98,7 +109,9 @@ export function Shell({ children }: { children: ReactNode }) {
 
           <div className="mt-auto p-3">
             <div className="rounded-md bg-ink px-3 py-2 text-center">
-              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-paper/70">Open source · free</span>
+              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-paper/70">
+                Open source · free
+              </span>
             </div>
           </div>
         </aside>
@@ -107,8 +120,12 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>
 
       <footer className="flex h-8 shrink-0 items-center justify-between bg-ink px-4 text-paper/55">
-        <span className="font-mono text-[10px] uppercase tracking-[0.2em]">ADE — start with the task · Codex · OpenCode · Pi Agent</span>
-        <span className="font-mono text-[10px] uppercase tracking-[0.2em]">Local-first · Free · Open source · No telemetry</span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.2em]">
+          ADE — start with the task · Codex · OpenCode · Pi Agent
+        </span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.2em]">
+          Loopback only · No ADE account · No hosted service
+        </span>
       </footer>
     </div>
   );

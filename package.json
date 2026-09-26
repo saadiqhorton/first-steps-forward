@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+    "start": "node scripts/start-local.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/local/adapters/*.test.mjs src/local/classify.test.mjs",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",

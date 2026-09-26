@@ -1,24 +1,59 @@
-# First Steps Forward
+# ADE — local agent workspace
 
-Go ahead and build out the full MVP for this.
+ADE is an open-source workspace for local coding-agent CLIs. It does not require an ADE account, hosted backend, or relay. The original Lovable screens were a simulation; the current app replaces its seeded projects, generated agent runs, fake sign-in, and fabricated diffs with a Node service that reads the local filesystem and starts the installed CLI processes.
 
-This project was built with [Lovable](https://lovable.dev).
+## Run locally
 
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/051ac323-5359-4b04-a205-a3990e8cfab6).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Requirements: Node.js 22+, npm, Git, and whichever coding-agent CLIs/providers you plan to use.
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
+npm install
 npm run dev
+```
+
+Open the loopback URL Vite prints (for this preset it defaults to `http://127.0.0.1:8080`). The development server and API bind to `127.0.0.1`, not the LAN. To run the built, self-hosted Node server instead:
+
+```sh
+npm run build
+npm start
+```
+
+That server listens on `127.0.0.1:3000` (override with `PORT=... npm start`). Do not change the host to `0.0.0.0` unless you add your own authentication and network security first.
+
+Add a folder using the native picker when available, or enter its local path. To drop a project from the workspace, use **Remove** in the project header: it deletes only ADE's metadata (session records, process entries) for that project after an explicit confirmation, and never touches the folder or its files.
+
+ADE stores project/session metadata and CLI logs in `~/.ade/workspace.json` (private file permissions); Pi session files are under `~/.ade/sessions/`. Project files are not copied into ADE, and provider credentials are not written to ADE or project files.
+
+## Agents and authentication
+
+ADE detects the installed executable and asks that CLI to report its current auth state. It invokes agents with argument arrays (no shell interpolation):
+
+- **OpenAI Codex:** `codex exec --json --cd <project> --sandbox workspace-write …`; resume uses Codex's session ID. `codex login --device-auth` is an actual supported device sign-in flow and can be started from ADE. Codex's own CLI manages its credentials.
+- **OpenCode:** `opencode run --format json --dir <project> …`; follow-ups resume its session. Provider credentials are managed by OpenCode (`opencode auth login`) in its user-level data directory. OAuth availability depends on provider; ADE does not claim every provider supports a browser flow.
+- **Agent switching:** a session can be re-parented to another installed, authenticated agent via `POST /api/sessions/:id/switch-agent`. The new CLI starts fresh: repository state, the task, and the current diff carry over, but the prior conversation does not, and the session records that disclosure. Switching is refused while a CLI turn is running, for completed sessions, and on dirty working trees.
+- **Context manifest:** every agent turn records a manifest (project/branch, task, acceptance criteria, constraints, candidate files from `git ls-files`, the agent's tool set, and dirty-tree state) in the session, surfaces it as a collapsible detail in the UI, and passes a rendered version to the CLI prompt.
+- **Pi Agent:** `pi -p --mode json …`; turns use a session file outside the project. Pi supports `/login` in its interactive TUI, but does not expose a supported device-login API for this browser UI. Use `pi` then `/login` in a terminal; ADE does not fake a sign-in. The provider whose auth Pi reports ready is passed explicitly.
+
+The CLI versions and authentication methods were checked against the installed CLIs and their current documentation: [Codex authentication](https://developers.openai.com/codex/auth/), [OpenCode CLI](https://opencode.ai/docs/cli/) and [providers](https://opencode.ai/docs/providers/), [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). ADE never asks you to paste a token. Some CLIs store credentials in their own user-level files rather than the OS keychain; ADE leaves that choice to the supported CLI flow.
+
+## Safety and current limitations
+
+- ADE refuses to start an agent while Git reports any staged, unstaged, or untracked changes. Commit or stash first; ADE never stashes, resets, checks out, or automatically restores files. It allows one running task per project.
+- Codex is invoked with its `workspace-write` sandbox; ADE never passes Codex's dangerous sandbox-bypass flag. OpenCode is not started with `--auto`. ADE does not itself execute deployments or external/shared-system changes.
+- Agent-specific interactive approval/question protocols are **not yet bridged to this UI**. An agent may stop, fail, or report a question in its response; ADE shows the real output and lets you follow up. While a CLI turn is still running, follow-ups are queued and sent as the next turn, not injected mid-turn. Do not treat the current UI as a per-tool approval gate.
+- Provider quota/rate-limit failures are detected from the CLI's own wording and reported as a distinct, recoverable state (with the provider's retry hint when given) — never as success, and never substituted with simulated output.
+- Project check scripts execute project code and can have side effects. ADE runs none automatically; “Run project checks” asks for confirmation first and reports the actual command, exit status, and output. Missing scripts are not represented as passes.
+- The dev-server controls only start a detected local `dev` package script, pass a loopback host/port, capture real stdout/stderr, and stop the process. Projects without a detectable script have no server control.
+- Claude Code is deferred. There is no ADE cloud service or telemetry. The original type direction is preserved with locally bundled OFL-licensed fonts (licenses are in `public/licenses/`); the UI makes no third-party font requests.
+
+## Architecture
+
+The existing TanStack Start/React app and warm workbench visual direction are retained. A small Node local-service module is mounted into Vite dev/preview and the self-hosted Node server. Agent adapters are isolated in `src/local/adapters/` so additional CLIs can be added without changing UI state. The service owns project registration, Git inspection/diffs, task persistence, child-process lifecycle, CLI streaming, checks, and development servers. The browser polls that loopback API; browser storage is no longer the source of truth.
+
+## Checks
+
+```sh
+npm run typecheck
+npm run lint
+npm run build
 ```

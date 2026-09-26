@@ -9,7 +9,8 @@ export function DiffView({ changes }: { changes: FileChange[] }) {
   return (
     <div>
       <div className="mb-2 font-mono text-[11px] text-dim">
-        {changes.length} file{changes.length === 1 ? "" : "s"} · <span className="text-teal">+{added}</span> /{" "}
+        {changes.length} file{changes.length === 1 ? "" : "s"} ·{" "}
+        <span className="text-teal">+{added}</span> /{" "}
         <span className="text-danger">−{removed}</span>
       </div>
       <ul className="card-panel divide-y divide-line overflow-hidden">
@@ -27,7 +28,8 @@ export function DiffView({ changes }: { changes: FileChange[] }) {
                 </span>
                 <span className="flex-1 truncate font-mono text-[12px]">{c.path}</span>
                 <span className="font-mono text-[10px]">
-                  <span className="text-teal">+{c.added}</span> <span className="text-danger">−{c.removed}</span>
+                  <span className="text-teal">+{c.added}</span>{" "}
+                  <span className="text-danger">−{c.removed}</span>
                 </span>
               </button>
               {isOpen && (

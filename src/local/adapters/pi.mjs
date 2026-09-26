@@ -1,0 +1,63 @@
+export const pi = {
+  id: "pi",
+  name: "Pi Agent",
+  short: "Pi",
+  bin: "pi",
+  authMethod: "Pi's /login command",
+  authNote:
+    "Pi provides /login inside its interactive TUI; it does not expose a supported browser/device login command for this UI. Sign in with `pi`, then choose /login.",
+  installHint: "Install from https://pi.dev/",
+  tools: "read, edit, write, grep, find, ls (no shell, no extensions)",
+  async detectAuth(run) {
+    for (const provider of ["openai-codex", "openai", "anthropic", "google"]) {
+      const result = await run(
+        "pi",
+        ["auth", "check", "--provider", provider, "--json", "--no-refresh"],
+        {
+          timeout: 7000,
+        },
+      );
+      try {
+        if (JSON.parse(result.stdout).status === "ready")
+          return { signedIn: true, account: `Pi · ${provider}`, provider };
+      } catch {}
+    }
+    return { signedIn: false };
+  },
+  command({ prompt, session, continuing, dataDir, provider }) {
+    const sessionFile = `${dataDir}/sessions/${session.id}.jsonl`;
+    return [
+      "pi",
+      [
+        "-p",
+        "--mode",
+        "json",
+        "--no-extensions",
+        "--tools",
+        "read,edit,write,grep,find,ls",
+        ...(provider ? ["--provider", provider] : []),
+        "--session",
+        sessionFile,
+        ...(continuing ? ["--continue"] : []),
+        prompt,
+      ],
+    ];
+  },
+  parse(line) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      return { text: line };
+    }
+    if (event.type === "text" && event.text) return { text: event.text };
+    if (event.type === "message_end" && event.message?.content) {
+      const text = event.message.content
+        .filter?.((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("");
+      return { text: text ?? "" };
+    }
+    return {};
+  },
+};

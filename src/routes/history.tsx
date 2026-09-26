@@ -7,7 +7,10 @@ export const Route = createFileRoute("/history")({
   head: () => ({
     meta: [
       { title: "History — ADE" },
-      { name: "description", content: "Search and reopen past agent sessions across all your projects." },
+      {
+        name: "description",
+        content: "Search and reopen past agent sessions across all your projects.",
+      },
       { property: "og:title", content: "History — ADE" },
       { property: "og:description", content: "Every task session, kept and searchable." },
     ],
@@ -25,7 +28,10 @@ function History() {
     .filter((s) => {
       if (!needle) return true;
       const p = state.projects.find((x) => x.id === s.projectId)?.name ?? "";
-      return [s.request, s.summary ?? "", p, ...s.changes.map((c) => c.path)].join(" ").toLowerCase().includes(needle);
+      return [s.request, s.summary ?? "", p, ...s.changes.map((c) => c.path)]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
     })
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -34,7 +40,10 @@ function History() {
       <div className="px-7 pt-6 pb-4">
         <div className="label-mono">All projects</div>
         <h1 className="mt-1 font-display text-[44px] leading-[0.9] tracking-wide">History</h1>
-        <p className="mt-1 text-[12px] text-dim">Completed sessions leave the home view but are never deleted. Search by request, summary, project, or file.</p>
+        <p className="mt-1 text-[12px] text-dim">
+          Completed sessions leave the home view but are never deleted. Search by request, summary,
+          project, or file.
+        </p>
         <div className="mt-4 flex gap-2">
           <input
             value={q}
@@ -43,7 +52,10 @@ function History() {
             aria-label="Search sessions"
             className="flex-1 rounded-md border border-line bg-panel px-3 py-2 text-[13px] placeholder:text-dim/70 focus:border-amber"
           />
-          <button onClick={() => setScope(scope === "all" ? "active" : "all")} className="btn-quiet px-3 py-2 font-mono text-[11px]">
+          <button
+            onClick={() => setScope(scope === "all" ? "active" : "all")}
+            className="btn-quiet px-3 py-2 font-mono text-[11px]"
+          >
             {scope === "all" ? "Showing all" : "Hiding completed"}
           </button>
         </div>
@@ -70,11 +82,18 @@ function History() {
                   </div>
                   <span className="font-mono text-[10px] text-dim">{s.changes.length} files</span>
                   {s.status === "complete" && (
-                    <button onClick={() => reopen(s.id)} className="btn-quiet px-3 py-1.5 text-[12px]">
+                    <button
+                      onClick={() => reopen(s.id)}
+                      className="btn-quiet px-3 py-1.5 text-[12px]"
+                    >
                       Reopen
                     </button>
                   )}
-                  <Link to="/sessions/$sessionId" params={{ sessionId: s.id }} className="btn-quiet px-3 py-1.5 text-[12px]">
+                  <Link
+                    to="/sessions/$sessionId"
+                    params={{ sessionId: s.id }}
+                    className="btn-quiet px-3 py-1.5 text-[12px]"
+                  >
                     Open
                   </Link>
                 </div>
