@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { connect, createServer } from "node:net";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,6 +31,27 @@ const id = () => randomUUID();
 const now = () => Date.now();
 const UNSUPPORTED_RISK =
   /\b(?:deploy(?:ment)?|publish|release (?:to )?prod(?:uction)?|production (?:deployment|database)|git push|push (?:to )?(?:origin|remote|github|gitlab)|open (?:a )?pull request|create (?:a )?pull request|drop database|wipe (?:all )?(?:data|files)|delete all|send (?:an? )?email|charge (?:a )?(?:credit )?card)\b/i;
+// Optional exposure beyond loopback (LAN / Tailscale). Deliberately opt-in and
+// always token-gated: with no ADE_HOST the API stays loopback-only, and
+// scripts/start-local.mjs refuses to bind a non-loopback address without a
+// non-empty ADE_TOKEN. Requests from this machine keep the original strict
+// rules; every other peer must present the token as `Authorization: Bearer …`
+// or the ade_auth cookie that POST /api/auth exchanges. Read per request so
+// the guard never depends on import order.
+const EXPOSE_HOST = () => (process.env.ADE_HOST ?? "").trim();
+const EXPOSE_TOKEN = () => (process.env.ADE_TOKEN ?? "").trim();
+const loopbackBind = () => {
+  const host = EXPOSE_HOST();
+  return !host || ["localhost", "::1"].includes(host.toLowerCase()) || isLoopbackAddress(host);
+};
+const sha256 = (value) => createHash("sha256").update(value).digest();
+function safeTokenEqual(a, b) {
+  try {
+    return timingSafeEqual(sha256(String(a ?? "")), sha256(String(b ?? "")));
+  } catch {
+    return false;
+  }
+}
 
 async function save() {
   await saveWorkspace(DATA_FILE, state);
@@ -347,15 +368,20 @@ async function startDevServer(proc, project) {
   // Map launch flags to the framework actually in the project: next
   // rejects --host outright (it takes -H/--hostname), vite and other
   // --host users take --host/--port, unknown scripts get only the port
-  // plus PORT in the environment. Launch flags are computed per start
-  // from the stored base args, so restarts never stack them.
+  // plus PORT and HOST=127.0.0.1 in the environment. Launch flags are
+  // computed per start from the stored base args, so restarts never
+  // stack them.
   const { pkg } = await readDevCommand(project);
   const framework = detectFramework(pkg, pkg?.scripts?.dev ?? "");
   proc.port = await allocatePort();
   listenedProcs.delete(proc.id);
   const launch = {
     args: [...baseLaunchArgs(proc.args), ...devServerArgs(framework, proc.port)],
-    ...(framework === "unknown" ? { env: { PORT: String(proc.port) } } : {}),
+    // Unknown scripts: --port plus PORT and HOST in the environment. HOST is
+    // best effort (some servers ignore it and bind wider) — the listen probe
+    // then still gates reporting "running", but it connects to 127.0.0.1 and
+    // cannot tell a loopback-only bind from a wide one; say so honestly.
+    ...(framework === "unknown" ? { env: { PORT: String(proc.port), HOST: "127.0.0.1" } } : {}),
   };
   spawnProcess(proc, project, launch);
   // "running" is only reported once the port accepts a connection;
@@ -1024,7 +1050,9 @@ export async function refreshDevProcess(project) {
  * The dev-server flag family the project's framework accepts: `next` rejects
  * --host outright (it takes -H/--hostname and -p), vite and other --host
  * users take --host/--port, and unknown scripts get only the port — the most
- * widely supported flag — with PORT set in the environment as belt-and-braces.
+ * widely supported flag — with PORT and HOST=127.0.0.1 set in the environment
+ * as belt-and-braces (servers that honor neither may bind wider; the listen
+ * probe cannot tell, see startDevServer).
  */
 export function detectFramework(pkg, devScript = "") {
   const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
@@ -1167,30 +1195,123 @@ function isLoopbackAddress(address) {
     normalized === "::1" || normalized === "127.0.0.1" || /^127(?:\.\d{1,3}){3}$/.test(normalized)
   );
 }
-function localRequest(req) {
-  const host = req.headers.host
-    ? new URL(`http://${req.headers.host}`).hostname.toLowerCase().replace(/^\[|\]$/g, "")
-    : "";
-  if (!new Set(["127.0.0.1", "localhost", "::1"]).has(host)) return false;
-  if (!isLoopbackAddress(req.socket?.remoteAddress)) return false;
+const hostnameOf = (hostHeader) =>
+  hostHeader ? new URL(`http://${hostHeader}`).hostname.toLowerCase().replace(/^\[|\]$/g, "") : "";
+function tokenAccepted(req) {
+  const expected = EXPOSE_TOKEN();
+  if (!expected) return false;
+  const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization ?? ""))?.[1] ?? "";
+  const cookie = /(?:^|;\s*)ade_auth=([^;]*)/.exec(String(req.headers.cookie ?? ""))?.[1] ?? "";
+  for (const candidate of [bearer, cookie]) {
+    if (!candidate) continue;
+    if (safeTokenEqual(candidate, expected)) return true;
+  }
+  return false;
+}
+/**
+ * Origin fence. Direct HTTP: the Origin authority must equal the request
+ * authority. Behind an HTTPS-terminating proxy (`tailscale serve`): scheme
+ * must stay https and the Origin host must equal X-Forwarded-Host when the
+ * proxy sets it; without that header any https origin passes, because the
+ * token (and the host-scoped SameSite=Lax cookie) remains the real gate.
+ * Requests without an Origin (curl, top-level navigations) pass.
+ */
+function originAllowed(req) {
   const origin = req.headers.origin;
-  if (origin && origin !== `http://${req.headers.host}`) return false;
-  return true;
+  if (!origin) return true;
+  let parsed;
+  try {
+    parsed = new URL(String(origin));
+  } catch {
+    return false;
+  }
+  const forwardProto = String(req.headers["x-forwarded-proto"] ?? "")
+    .split(",")[0]
+    .trim();
+  if (!forwardProto) return origin === `http://${req.headers.host}`;
+  if (forwardProto !== "https" || parsed.protocol !== "https:") return false;
+  const forwardHost = String(req.headers["x-forwarded-host"] ?? "")
+    .split(",")[0]
+    .trim();
+  return !forwardHost || parsed.host === forwardHost;
+}
+function localRequest(req) {
+  const host = hostnameOf(req.headers.host);
+  // Loopback peers (the UI on this machine, agent CLIs, dev-control curls)
+  // keep the strict original rules: loopback Host name, loopback peer,
+  // same-origin Origin.
+  if (new Set(["127.0.0.1", "localhost", "::1"]).has(host))
+    return isLoopbackAddress(req.socket?.remoteAddress) && originAllowed(req);
+  // A loopback reverse proxy (`tailscale serve`) forwards with a preserved,
+  // non-loopback Host and X-Forwarded-Proto; the proxy itself connects from
+  // loopback and its remote clients are gated by the proxy.
+  if (
+    isLoopbackAddress(req.socket?.remoteAddress) &&
+    req.headers["x-forwarded-proto"] &&
+    originAllowed(req)
+  )
+    return true;
+  // Opt-in LAN/Tailscale exposure: the peer must prove the token, and (for a
+  // specific bind address) the Host header must name the exposed interface —
+  // a DNS-rebound page presenting some other authority never reaches the API.
+  // Binding 0.0.0.0/:: spans every interface, so any Host name is accepted
+  // there; the token (and the host-scoped cookie) remains the gate.
+  if (loopbackBind()) return false;
+  if (!tokenAccepted(req) || !originAllowed(req)) return false;
+  const bindHost = EXPOSE_HOST().toLowerCase();
+  return bindHost === "0.0.0.0" || bindHost === "::" || host === bindHost;
 }
 async function handle(req, res) {
-  if (!localRequest(req))
-    return json(res, 403, { error: "ADE local API only accepts requests from this machine." });
-  // Remember the real base URL of this serving instance (Host carries the
-  // port): manifests built for async turns reuse the latest verified one
-  // instead of guessing a URL.
-  if (req.headers.host) lastApiBaseUrl = `http://${req.headers.host}`;
   const url = new URL(req.url, "http://127.0.0.1");
   const parts = url.pathname
     .replace(/^\/api\/?/, "")
     .split("/")
     .filter(Boolean)
     .map(decodeURIComponent);
+  // The token exchange must be reachable by not-yet-authorized peers —
+  // proving the token here is exactly how a LAN/Tailscale client becomes
+  // authorized (the route itself validates it).
+  const isAuthExchange = req.method === "POST" && parts[0] === "auth" && parts.length === 1;
+  if (!localRequest(req) && !isAuthExchange) {
+    // In exposed mode an unauthorized peer gets 401 + authRequired (the UI
+    // shows its token gate). Otherwise — including ADE_HOST without
+    // ADE_TOKEN, which start-local refuses to boot — the strict
+    // loopback-only 403: without a token the address is never exposed.
+    if (loopbackBind() || !EXPOSE_TOKEN())
+      return json(res, 403, { error: "ADE local API only accepts requests from this machine." });
+    return json(res, 401, {
+      error: "ADE requires its access token for requests from other machines.",
+      authRequired: true,
+    });
+  }
+  // Remember the real base URL of this serving instance for the agent-facing
+  // dev-control curls. Only LOCAL requests count (the agent CLIs run on this
+  // machine), and only with loopback Host names — a LAN browser polling
+  // bootstrap must not poison manifests with an authority that would require
+  // the token, and the exempt POST /api/auth path must not either (its peer
+  // is by definition not yet authorized; a forged loopback Host header on a
+  // remote peer fails localRequest's peer check).
+  if (
+    localRequest(req) &&
+    req.headers.host &&
+    ["127.0.0.1", "localhost", "::1"].includes(hostnameOf(req.headers.host))
+  )
+    lastApiBaseUrl = `http://${req.headers.host}`;
   try {
+    // Token exchange for exposed mode: browsers POST the token once and get an
+    // HttpOnly cookie; scripts use `Authorization: Bearer` directly. Loopback
+    // callers can also use this route (no-op there).
+    if (isAuthExchange) {
+      const data = await body(req);
+      const token = String(data.token ?? "").trim();
+      if (!EXPOSE_TOKEN() || !token || !safeTokenEqual(token, EXPOSE_TOKEN()))
+        return json(res, 401, { error: "Incorrect access token." });
+      res.setHeader(
+        "set-cookie",
+        `ade_auth=${encodeURIComponent(EXPOSE_TOKEN())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000`,
+      );
+      return json(res, 200, { ok: true });
+    }
     if (req.method === "GET" && parts[0] === "bootstrap") {
       await reconcileWorkspaceMessages(DATA_FILE, state);
       const agents = await bootstrapAgents();
@@ -1634,9 +1755,18 @@ async function handle(req, res) {
       const proc = state.processes.find((x) => x.projectId === project.id);
       if (!proc)
         return json(res, 404, { error: "No dev-server record for this project; nothing to stop." });
+      // PID-reuse guard: with no live child, only signal a persisted pid that
+      // still matches the project's path — a recycled pid belongs to an
+      // unrelated process, and killing it would be worse than a stale record.
+      const child = children.get(proc.id);
+      if (!child && proc.pid && !(await processMatches(proc.pid, project.path)))
+        return json(res, 200, {
+          ...devView(proc),
+          note: "The stored pid no longer matches this project's dev process; nothing was signalled.",
+        });
       // Works during "starting": the live child is in `children` and gets
       // killed; its close handler resets the port if it never listened.
-      stopChild(children.get(proc.id) ?? proc.pid);
+      stopChild(child ?? proc.pid);
       if (proc.status !== "stopped") {
         proc.status = "stopped";
         delete proc.pid;
@@ -1668,7 +1798,21 @@ async function handle(req, res) {
     if (req.method === "POST" && parts[0] === "processes" && parts[2] === "stop") {
       const proc = state.processes.find((x) => x.id === parts[1]);
       if (!proc) return json(res, 404, { error: "Process not found." });
-      stopChild(children.get(proc.id) ?? proc.pid);
+      // Same PID-reuse guard as dev/stop: never signal a persisted pid whose
+      // cwd no longer matches the project.
+      const child = children.get(proc.id);
+      const project = state.projects.find((x) => x.id === proc.projectId);
+      if (!child && proc.pid && !(await processMatches(proc.pid, project?.path))) {
+        delete proc.pid;
+        proc.status = "stopped";
+        proc.updatedAt = now();
+        await save();
+        return json(res, 200, {
+          ...proc,
+          note: "The stored pid no longer matches this project's dev process; nothing was signalled.",
+        });
+      }
+      stopChild(child ?? proc.pid);
       proc.status = "stopped";
       delete proc.pid;
       proc.updatedAt = now();
@@ -1767,16 +1911,53 @@ async function handle(req, res) {
 }
 await load();
 await writeDevControlSkill();
+// API request bodies are tiny JSON; anything larger is refused before it is
+// read (an exposed instance must not let an unauthenticated peer stream an
+// unbounded body into memory — content-length lies are caught by the reader).
+const MAX_PAYLOAD_BYTES = 1024 * 1024;
+async function boundedText(request, limit = MAX_PAYLOAD_BYTES) {
+  const declared = Number(request.headers?.get?.("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > limit) throw new Error("payload_too_large");
+  if (!request.body) return await request.text();
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => {});
+      throw new Error("payload_too_large");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 export async function handleLocalApi(request) {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/")) return undefined;
   const headers = Object.fromEntries(request.headers.entries());
-  const payload = request.method === "GET" || request.method === "HEAD" ? "" : await request.text();
+  let payload = "";
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    try {
+      payload = await boundedText(request);
+    } catch {
+      return Response.json({ error: "Request body too large." }, { status: 413 });
+    }
+  }
+  // Resolve the client address the way the runtimes actually present it. The
+  // built server (nitro node preset) hands us srvx's NodeRequest: the raw
+  // IncomingMessage is private, the address lives on
+  // request.runtime.node.req.socket.remoteAddress (mirrored as request.ip)
+  // and request.socket does NOT exist. A plain fetch Request has neither, and
+  // with no provable address the request must fail closed (403).
+  const remoteAddress = request.runtime?.node?.req?.socket?.remoteAddress ?? request.ip;
   const req = {
     method: request.method,
     url: `${url.pathname}${url.search}`,
     headers,
-    socket: request.socket,
+    ...(remoteAddress ? { socket: { remoteAddress } } : {}),
     async *[Symbol.asyncIterator]() {
       if (payload) yield Buffer.from(payload);
     },

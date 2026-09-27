@@ -141,4 +141,6 @@ export interface AdeState {
   processes: LocalProcess[];
   sessions: Session[];
   agents: Agent[];
+  /** ADE is exposed beyond loopback and this browser has not proven the token yet. */
+  authRequired: boolean;
 }

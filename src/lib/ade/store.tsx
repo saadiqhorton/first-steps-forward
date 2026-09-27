@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { AdeState, AgentId, AgentModelsResult, Project, Session } from "./types";
+import { TokenGate } from "@/components/ade/TokenGate";
 
 const empty: AdeState = {
   hydrated: false,
@@ -18,6 +19,7 @@ const empty: AdeState = {
   processes: [],
   sessions: [],
   agents: [],
+  authRequired: false,
 };
 type ProcessOp = "start" | "stop";
 type Api = {
@@ -46,6 +48,7 @@ type Api = {
   refresh: () => Promise<void>;
 };
 const Ctx = createContext<Api | null>(null);
+type RequestError = Error & { status?: number; authRequired?: boolean };
 async function request<T>(url: string, method = "GET", data?: unknown): Promise<T> {
   const init: RequestInit = { method };
   if (data) {
@@ -53,8 +56,13 @@ async function request<T>(url: string, method = "GET", data?: unknown): Promise<
     init.body = JSON.stringify(data);
   }
   const response = await fetch(url, init);
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error ?? `Local API returned ${response.status}`);
+  const value = (await response.json()) as { error?: string; authRequired?: boolean };
+  if (!response.ok) {
+    const error: RequestError = new Error(value.error ?? `Local API returned ${response.status}`);
+    error.status = response.status;
+    error.authRequired = value.authRequired === true;
+    throw error;
+  }
   return value as T;
 }
 // Stable identity (outside the provider memo whose value changes on every
@@ -78,13 +86,23 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         ...data,
         hydrated: true,
         serviceAvailable: true,
+        authRequired: false,
         activeProjectId: data.projects.some((p) => p.id === previous.activeProjectId)
           ? previous.activeProjectId
           : (data.projects[0]?.id ?? ""),
       }));
     } catch (error) {
-      setState((previous) => ({ ...previous, hydrated: true, serviceAvailable: false }));
-      console.error("ADE local service unavailable", error);
+      // 401 + authRequired means ADE is exposed beyond loopback and this
+      // browser has not proven the token yet: show the token gate instead
+      // of the "service unavailable" state.
+      const authRequired = (error as RequestError).authRequired === true;
+      setState((previous) => ({
+        ...previous,
+        hydrated: true,
+        serviceAvailable: !authRequired,
+        authRequired,
+      }));
+      if (!authRequired) console.error("ADE local service unavailable", error);
     }
   };
   useEffect(() => {
@@ -165,7 +183,11 @@ export function AdeProvider({ children }: { children: ReactNode }) {
     }),
     [state],
   );
-  return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={api}>
+      {state.authRequired ? <TokenGate onUnlocked={() => refresh()} /> : children}
+    </Ctx.Provider>
+  );
 }
 export function useAde() {
   const value = useContext(Ctx);

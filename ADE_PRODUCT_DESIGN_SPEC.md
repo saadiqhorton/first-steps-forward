@@ -208,6 +208,7 @@ These are runtime guarantees, not a reason to make every task feel like a compli
 - **Responsive:** Project switching, session navigation, and opening a local preview should feel immediate; long-running work must remain observable without blocking the workspace.
 - **Accessible:** Primary controls are keyboard accessible, status is not communicated by color alone, and nontechnical language is used by default.
 - **Private:** No telemetry by default; credentials are stored securely; remote exposure of a local preview requires deliberate configuration.
+- **Network exposure is opt-in and token-gated:** ADE binds loopback by default. Non-loopback exposure happens only through an explicit `ADE_HOST` + `ADE_TOKEN` configuration (`scripts/start-local.mjs` refuses a non-loopback bind without a token), and every API request from a non-loopback client must prove that token (bearer header or the browser's `HttpOnly` session cookie). Local agent CLIs and loopback clients remain exempt; a `tailscale serve`-style HTTPS proxy in front of the loopback bind is the recommended path for remote access.
 
 ## 10. Success measures
 
