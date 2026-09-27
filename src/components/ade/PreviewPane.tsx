@@ -1,11 +1,7 @@
 import { Link } from "@tanstack/react-router";
-import type { LocalProcess, Project, Session } from "@/lib/ade/types";
+import type { Project, Session } from "@/lib/ade/types";
 import { useAde } from "@/lib/ade/store";
 import { summarizeChecks } from "./ChecksList";
-
-// The server lane adds `external` to adopted entries; tolerated here as optional
-// so this renders correctly before that type lands.
-type PreviewProcess = LocalProcess & { external?: boolean };
 
 export function PreviewPane({
   project,
@@ -15,10 +11,9 @@ export function PreviewPane({
   session?: Session | undefined;
 }) {
   const { state, process } = useAde();
-  const dev = state.processes.find((p) => p.projectId === project.id) as PreviewProcess | undefined;
+  const dev = state.processes.find((p) => p.projectId === project.id);
   const running = dev?.status === "running" && dev.port > 0;
   const starting = dev?.status === "starting";
-  const external = running && dev?.external === true;
   const checks = session ? summarizeChecks(session.checks) : null;
   const added = session?.changes.reduce((n, c) => n + c.added, 0) ?? 0;
   const removed = session?.changes.reduce((n, c) => n + c.removed, 0) ?? 0;
@@ -98,17 +93,10 @@ export function PreviewPane({
             >
               Open in browser
             </a>
-            {!external && (
-              <Link to="/processes" className="btn-quiet px-3 py-1.5 text-[12px]">
-                Output
-              </Link>
-            )}
+            <Link to="/processes" className="btn-quiet px-3 py-1.5 text-[12px]">
+              Output
+            </Link>
           </div>
-        )}
-        {external && (
-          <p className="mt-2 font-mono text-[10px] text-dim">
-            This server was started outside ADE.
-          </p>
         )}
       </div>
       <div className="mt-auto border-t border-line">

@@ -2,12 +2,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { PreviewPane } from "@/components/ade/PreviewPane";
 import { RightPanePortal } from "@/components/ade/RightPanePortal";
 import { SessionCard } from "@/components/ade/SessionCard";
-import type { LocalProcess } from "@/lib/ade/types";
 import { isActive, timeAgo, useActiveProject, useAde } from "@/lib/ade/store";
-
-// The server lane adds `external` to adopted entries; tolerated here as optional
-// so this renders correctly before that type lands.
-type HomeProcess = LocalProcess & { external?: boolean };
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -37,10 +32,9 @@ function ProjectHome() {
     .filter((s) => s.status === "complete")
     .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
     .slice(0, 5);
-  const dev = state.processes.find((p) => p.projectId === project.id) as HomeProcess | undefined;
+  const dev = state.processes.find((p) => p.projectId === project.id);
   const running = dev?.status === "running" && dev.port > 0;
   const starting = dev?.status === "starting";
-  const external = running && dev?.external === true;
   const focus = active[0];
 
   if (!state.projects.length)
@@ -176,11 +170,9 @@ function ProjectHome() {
                     Start
                   </button>
                 )}
-                {!external && (
-                  <Link to="/processes" className="btn-ink-ghost px-3 py-1.5 text-[12px]">
-                    Output
-                  </Link>
-                )}
+                <Link to="/processes" className="btn-ink-ghost px-3 py-1.5 text-[12px]">
+                  Output
+                </Link>
               </div>
             )}
           </div>

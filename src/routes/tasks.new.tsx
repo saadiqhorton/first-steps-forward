@@ -83,9 +83,8 @@ function NewTask() {
         </p>
         <div className="mt-4 rounded-md border border-line bg-panel px-3 py-2 text-[11px] leading-relaxed text-dim">
           ADE refuses dirty Git worktrees and explicit deployment/destructive requests. Tool-level
-          approval prompts are not bridged yet; OpenCode rejects permission requests in
-          non-interactive mode, and follow-ups are queued between turns. Review the agent's real
-          output and diff.
+          approval prompts are not bridged yet; the CLI queues permission requests and follow-ups
+          between turns. Review the agent's real output and diff.
         </div>
         <div className="mt-6 space-y-5">
           <div>
