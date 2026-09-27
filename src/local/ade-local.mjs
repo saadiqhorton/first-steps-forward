@@ -25,6 +25,7 @@ const devStartClaims = new Set();
 const DEV_CONTROL_SKILL_PATH = path.join(DATA_DIR, "skills", "ade-dev-control", "SKILL.md");
 const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
 let probingAgents = false;
+let refreshingBootstrap = false;
 const id = () => randomUUID();
 const now = () => Date.now();
 const UNSUPPORTED_RISK =
@@ -177,18 +178,58 @@ async function bootstrapAgents() {
       ...agent,
       tools: agent.tools ?? adapters[agent.id]?.tools,
     }));
-    if (!probingAgents) {
-      probingAgents = true;
-      agentStatus()
-        .catch(() => {})
-        .finally(() => {
-          probingAgents = false;
-        });
-    }
-  } else {
-    await agentStatus();
+  }
+  // Never make the project list wait on CLI version/auth probes. If there's
+  // no cache yet, return the current (possibly empty) agent list; the normal
+  // bootstrap poll picks up the probe result when it finishes.
+  if (!probingAgents) {
+    probingAgents = true;
+    agentStatus()
+      .catch(() => {})
+      .finally(() => {
+        probingAgents = false;
+      });
   }
   return state.agents;
+}
+function refreshBootstrapInBackground() {
+  if (refreshingBootstrap) return;
+  refreshingBootstrap = true;
+  void (async () => {
+    const needsDiff = new Set(
+      state.sessions.filter((item) => item.status !== "complete").map((item) => item.projectId),
+    );
+    let devStateChanged = false;
+    for (const p of state.projects) {
+      try {
+        await projectInfo(p);
+        if (!p.missing) {
+          // Re-scan scripts.dev after returning the saved workspace snapshot;
+          // the next poll picks up any newly discovered dev process.
+          const { changed } = await refreshDevProcess(p);
+          if (changed) devStateChanged = true;
+        }
+        if (p.missing || !needsDiff.has(p.id)) continue;
+        const diff = await getDiff(p);
+        for (const s of state.sessions.filter(
+          (item) => item.projectId === p.id && item.status !== "complete",
+        ))
+          s.changes = diff.changes.map((c) =>
+            s.baselineFiles?.includes(c.path) ? { ...c, preExisting: true } : c,
+          );
+      } catch (error) {
+        console.warn(`ADE background project refresh failed for ${p.path}:`, error);
+      }
+    }
+    if (devStateChanged) {
+      save().catch(() => {});
+      writeDevControlSkill().catch(() => {});
+    }
+  })()
+    .catch((error) => console.warn("ADE background bootstrap refresh failed:", error))
+    .finally(() => {
+      refreshingBootstrap = false;
+    });
 }
 const safeProject = (p) => ({ ...p });
 async function git(project, args) {
@@ -1141,43 +1182,18 @@ async function handle(req, res) {
   try {
     if (req.method === "GET" && parts[0] === "bootstrap") {
       const agents = await bootstrapAgents();
-      // Git work is the other poll cost: per project we spawn branch/status/
-      // upstream plus two diffs. Only projects with live (non-complete)
-      // sessions need a fresh diff; the rest only need cheap branch/status.
-      const needsDiff = new Set(
-        state.sessions.filter((item) => item.status !== "complete").map((item) => item.projectId),
-      );
-      let devStateChanged = false;
-      for (const p of state.projects) {
-        await projectInfo(p);
-        if (!p.missing) {
-          // Re-scan scripts.dev on every poll: a script added, changed, or
-          // broken since the last poll is reflected without re-registering.
-          try {
-            const { changed } = await refreshDevProcess(p);
-            if (changed) devStateChanged = true;
-          } catch {}
-        }
-        if (p.missing || !needsDiff.has(p.id)) continue;
-        const diff = await getDiff(p);
-        for (const s of state.sessions.filter(
-          (item) => item.projectId === p.id && item.status !== "complete",
-        ))
-          s.changes = diff.changes.map((c) =>
-            s.baselineFiles?.includes(c.path) ? { ...c, preExisting: true } : c,
-          );
-      }
-      if (devStateChanged) {
-        save().catch(() => {});
-        writeDevControlSkill().catch(() => {});
-      }
-      return json(res, 200, {
+      // Return the persisted workspace snapshot immediately. Git inspection,
+      // diffs, and dev-script re-scan update the next 2-second poll instead
+      // of holding the project list behind subprocesses.
+      json(res, 200, {
         projects: state.projects.map(safeProject),
         sessions: state.sessions,
         processes: state.processes,
         agents,
         now: now(),
       });
+      refreshBootstrapInBackground();
+      return;
     }
     if (req.method === "GET" && parts[0] === "browse") {
       // Read-only directory listing for ADE's built-in folder picker. Same
