@@ -632,6 +632,13 @@ function SessionPage() {
                             {busy ? "Running…" : "Run project checks"}
                           </button>
                         )}
+                        {session.status === "blocked" && (
+                          <p className="mt-3 text-[12px] text-dim">
+                            Checks run once the session is ready to review. Clear the blocker
+                            above — re-authenticate, switch agents, or send a follow-up — then run
+                            them here.
+                          </p>
+                        )}
                       </>
                     )}
                     {t === "logs" &&

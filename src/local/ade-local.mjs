@@ -847,7 +847,7 @@ async function runAgent(session, prompt, continuing = false) {
       {
         name: "Project checks",
         status: "not_run",
-        detail: "No checks were run automatically. Run them explicitly from the Checks tab.",
+        detail: "ADE did not run checks automatically.",
       },
     ];
     await save();

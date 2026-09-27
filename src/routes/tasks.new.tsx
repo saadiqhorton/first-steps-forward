@@ -82,9 +82,10 @@ function NewTask() {
           are sent to its configured provider under that provider's policies.
         </p>
         <div className="mt-4 rounded-md border border-line bg-panel px-3 py-2 text-[11px] leading-relaxed text-dim">
-          ADE refuses dirty Git worktrees and explicit deployment/destructive requests. Tool-level
-          approval prompts are not bridged yet; the CLI queues permission requests and follow-ups
-          between turns. Review the agent's real output and diff.
+          ADE protects dirty Git worktrees — it records your pre-existing changes as "yours" and
+          tells the agent to work around them. Explicit deployment/destructive requests are
+          refused. Tool-level approval prompts are not bridged yet; the CLI queues permission
+          requests and follow-ups between turns. Review the agent's real output and diff.
         </div>
         <div className="mt-6 space-y-5">
           <div>
