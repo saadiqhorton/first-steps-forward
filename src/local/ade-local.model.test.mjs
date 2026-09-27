@@ -45,12 +45,14 @@ const {
   classifyTurnFailure,
   executeChecks,
   buildManifest,
+  writeDevControlSkill,
 } = await import("./ade-local.mjs");
 
 const apiRequest = (urlPath, body) => ({
   url: `http://127.0.0.1:3000${urlPath}`,
   method: body === undefined ? "GET" : "POST",
   headers: { entries: () => [["host", "127.0.0.1:3000"]] },
+  socket: { remoteAddress: "::ffff:127.0.0.1" },
   text: async () => JSON.stringify(body ?? {}),
 });
 const call = async (urlPath, body) => {
@@ -145,6 +147,7 @@ test("unknown agents have no model listing", async () => {
     url: "http://127.0.0.1:3000/api/agents/claudette/models",
     method: "GET",
     headers: { entries: () => [["host", "127.0.0.1:3000"]] },
+    socket: { remoteAddress: "::1" },
     text: async () => "",
   });
   assert.equal(res.status, 404);
@@ -155,9 +158,59 @@ test("loopback guard still rejects non-local hosts", async () => {
     url: "http://example.com/api/sessions/s-ready/model",
     method: "POST",
     headers: { entries: () => [["host", "example.com"]] },
+    socket: { remoteAddress: "::1" },
     text: async () => "{}",
   });
   assert.equal(res.status, 403);
+});
+
+test("non-loopback peers cannot submit requests or poison the captured manifest base URL", async () => {
+  const denied = await handleLocalApi({
+    url: "http://127.0.0.1:3000/api/projects",
+    method: "POST",
+    headers: { entries: () => [["host", "attacker.example:9443"]] },
+    socket: { remoteAddress: "203.0.113.8" },
+    text: async () => "{}",
+  });
+  assert.equal(denied.status, 403);
+  const project = { id: "peer-check", name: "peer", path: home };
+  const manifest = await buildManifest({ agentId: "codex" }, project);
+  assert.equal(manifest.devControl.baseUrl, "http://127.0.0.1:3000");
+  const spoofedHost = await handleLocalApi({
+    url: "http://attacker.example:9443/api/agents/unknown/models",
+    method: "GET",
+    headers: { entries: () => [["host", "attacker.example:9443"]] },
+    socket: { remoteAddress: "::1" },
+    text: async () => "",
+  });
+  assert.equal(spoofedHost.status, 403);
+  assert.equal(
+    (await buildManifest({ agentId: "codex" }, project)).devControl.baseUrl,
+    "http://127.0.0.1:3000",
+  );
+
+  for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+    const response = await handleLocalApi({
+      url: "http://127.0.0.1:3000/api/agents/unknown/models",
+      method: "GET",
+      headers: { entries: () => [["host", "127.0.0.1:3000"]] },
+      socket: { remoteAddress: address },
+      text: async () => "",
+    });
+    assert.equal(response.status, 404, `${address} should be accepted as loopback`);
+  }
+});
+
+test("dev-control skill write failures are recorded without throwing", async () => {
+  assert.equal(
+    await writeDevControlSkill(async () => {
+      throw new Error("disk full");
+    }),
+    false,
+  );
+  const manifest = await buildManifest({ agentId: "codex" }, { id: "p", name: "p", path: home });
+  assert.match(manifest.devControl.note, /skill could not be written \(disk full\)/);
+  assert.equal(await writeDevControlSkill(), true);
 });
 
 test("dev-server launch flags map by framework (next vs vite vs unknown)", () => {
@@ -365,6 +418,7 @@ test("dev-control skill file is generated at startup with private perms and full
     assert.ok(skill.includes(needle), `skill should mention ${needle}`);
   }
   // Private, like the other ~/.ade files.
+  assert.equal(statSync(path.dirname(path.dirname(skillPath))).mode & 0o777, 0o700);
   assert.equal(statSync(skillPath).mode & 0o777, 0o600);
 });
 
@@ -375,20 +429,20 @@ test("project dev control: 404 guidance, inline re-scan on start, 409 while runn
   assert.equal(reg.status, 201);
   const pid = reg.json.project.id;
 
-  // No dev script even after the inline re-scan -> 404 with instructions
-  // (and nothing is spawned).
-  const miss = await call(`/api/projects/${pid}/dev/start`, {});
-  assert.equal(miss.status, 404);
-  assert.match(miss.json.error, /No dev script/);
-  assert.match(miss.json.guidance, /nohup/);
-  assert.match(miss.json.guidance, /tell the user/);
-
-  // Status before any record exists.
-  const st0 = await call(`/api/projects/${pid}/dev`);
-  assert.equal(st0.status, 200);
-  assert.equal(st0.json.found, false);
-
   try {
+    // No dev script even after the inline re-scan -> 404 with instructions
+    // (and nothing is spawned).
+    const miss = await call(`/api/projects/${pid}/dev/start`, {});
+    assert.equal(miss.status, 404);
+    assert.match(miss.json.error, /No dev script/);
+    assert.match(miss.json.guidance, /nohup/);
+    assert.match(miss.json.guidance, /tell the user/);
+
+    // Status before any record exists.
+    const st0 = await call(`/api/projects/${pid}/dev`);
+    assert.equal(st0.status, 200);
+    assert.equal(st0.json.found, false);
+
     // Mid-turn scaffold: scripts.dev + a tiny server appear. Start must
     // detect them INLINE — a route without the re-scan would still 404.
     writeFileSync(
@@ -417,7 +471,6 @@ test("project dev control: 404 guidance, inline re-scan on start, 409 while runn
     assert.equal(st.json.status, "running");
     assert.equal(st.json.port, up.json.port);
     assert.ok(Array.isArray(st.json.outputTail) && st.json.outputTail.length <= 5);
-  } finally {
     const stop1 = await call(`/api/projects/${pid}/dev/stop`, {});
     assert.equal(stop1.status, 200);
     assert.equal(stop1.json.status, "stopped");
@@ -426,6 +479,94 @@ test("project dev control: 404 guidance, inline re-scan on start, 409 while runn
     const stop2 = await call(`/api/projects/${pid}/dev/stop`, {});
     assert.equal(stop2.status, 200);
     assert.equal(stop2.json.status, "stopped");
+  } finally {
+    await call(`/api/projects/${pid}/dev/stop`, {}).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("dev stop returns 404 without a process record", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-stop-missing-"));
+  try {
+    writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "x" }));
+    const project = await call("/api/projects", { path: dir });
+    const stopped = await call(`/api/projects/${project.json.project.id}/dev/stop`, {});
+    assert.equal(stopped.status, 404);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("project and legacy start routes share a synchronous claim", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-start-race-"));
+  let projectId;
+  try {
+    writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ name: "x", scripts: { dev: "node server.js" } }),
+    );
+    writeFileSync(
+      path.join(dir, "server.js"),
+      "require('node:http').createServer((q,s)=>s.end('ok')).listen(Number(process.env.PORT));\n",
+    );
+    const registered = await call("/api/projects", { path: dir });
+    projectId = registered.json.project.id;
+    const procId = registered.json.process.id;
+    const both = await Promise.all([
+      call(`/api/projects/${projectId}/dev/start`, {}),
+      call(`/api/processes/${procId}/start`, {}),
+      call(`/api/projects/${projectId}/dev/start`, {}),
+    ]);
+    const scoped = both[0];
+    assert.equal(scoped.status, 200);
+    assert.equal(scoped.json.status, "running");
+    const status = await call(`/api/projects/${projectId}/dev`);
+    assert.equal(status.json.port, scoped.json.port);
+    // Both competing endpoints report the claimed start as starting, rather
+    // than returning the stale stopped state before the child is spawned.
+    assert.equal(both[1].status, 200);
+    assert.equal(both[1].json.status, "starting");
+    assert.equal(both[2].status, 409);
+    assert.equal(both[2].json.status, "starting");
+    const state = await call(`/api/projects/${projectId}/dev`);
+    assert.equal(state.json.status, "running");
+    const stopped = await call(`/api/projects/${projectId}/dev/stop`, {});
+    assert.equal(stopped.status, 200);
+    assert.equal((await call(`/api/projects/${projectId}/dev`)).json.status, "stopped");
+  } finally {
+    if (projectId) await call(`/api/projects/${projectId}/dev/stop`, {}).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("dev stop during starting kills the child and missing records are 404", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-stop-starting-"));
+  let projectId;
+  try {
+    writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ name: "x", scripts: { dev: "node server.js" } }),
+    );
+    writeFileSync(
+      path.join(dir, "server.js"),
+      "setTimeout(()=>require('node:http').createServer((q,s)=>s.end('ok')).listen(Number(process.env.PORT)), 3000);\n",
+    );
+    const registered = await call("/api/projects", { path: dir });
+    projectId = registered.json.project.id;
+    const starting = call(`/api/projects/${projectId}/dev/start`, {});
+    let current;
+    for (let i = 0; i < 100; i += 1) {
+      current = await call(`/api/projects/${projectId}/dev`);
+      if (current.json.status === "starting") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(current.json.status, "starting");
+    const stopped = await call(`/api/projects/${projectId}/dev/stop`, {});
+    assert.equal(stopped.status, 200);
+    assert.equal(stopped.json.status, "stopped");
+    await starting;
+  } finally {
+    if (projectId) await call(`/api/projects/${projectId}/dev/stop`, {}).catch(() => {});
     rmSync(dir, { recursive: true, force: true });
   }
 });

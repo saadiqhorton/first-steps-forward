@@ -19,6 +19,8 @@ const listenedProcs = new Set();
 // Real base URL of the serving ADE instance, taken from the latest loopback
 // request's Host header; null until the first request after boot.
 let lastApiBaseUrl = null;
+let devControlSkillError = null;
+const devStartClaims = new Set();
 // Generated agent-facing skill file (private, like every other ~/.ade file).
 const DEV_CONTROL_SKILL_PATH = path.join(DATA_DIR, "skills", "ade-dev-control", "SKILL.md");
 const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
@@ -435,18 +437,27 @@ function devServerStatus(project) {
 function devControlFor(project) {
   const skill = DEV_CONTROL_SKILL_PATH;
   const baseUrl = lastApiBaseUrl ?? knownListenBaseUrl();
+  const skillNote = devControlSkillError
+    ? `The ADE dev-control skill could not be written (${devControlSkillError}); the skill file may be unavailable.`
+    : null;
   if (!baseUrl)
     return {
       baseUrl: null,
       projectId: project.id,
       skill,
-      note: "The ADE API base URL is unknown right now: read the skill file for how to reach the control endpoints, and ask the user for the ADE URL instead of guessing one.",
+      note: [
+        "The ADE API base URL is unknown right now: read the skill file for how to reach the control endpoints, and ask the user for the ADE URL instead of guessing one.",
+        skillNote,
+      ]
+        .filter(Boolean)
+        .join(" "),
     };
   const base = `${baseUrl}/api/projects/${project.id}/dev`;
   return {
     baseUrl,
     projectId: project.id,
     skill,
+    ...(skillNote ? { note: skillNote } : {}),
     status: `curl -fsS ${base}`,
     start: `curl -fsS -X POST ${base}/start`,
     stop: `curl -fsS -X POST ${base}/stop`,
@@ -519,11 +530,18 @@ fall back to starting a server yourself: say so in your response and ask the
 user to press Start in ADE.
 `;
 }
-async function writeDevControlSkill() {
+export async function writeDevControlSkill(writer = fs.writeFile) {
   try {
     await fs.mkdir(path.dirname(DEV_CONTROL_SKILL_PATH), { recursive: true, mode: 0o700 });
-    await fs.writeFile(DEV_CONTROL_SKILL_PATH, renderDevControlSkill(), { mode: 0o600 });
-  } catch {}
+    await fs.chmod(path.dirname(DEV_CONTROL_SKILL_PATH), 0o700);
+    await writer(DEV_CONTROL_SKILL_PATH, renderDevControlSkill(), { mode: 0o600 });
+    await fs.chmod(DEV_CONTROL_SKILL_PATH, 0o600);
+    devControlSkillError = null;
+    return true;
+  } catch (error) {
+    devControlSkillError = error.message;
+    return false;
+  }
 }
 export async function buildManifest(session, project) {
   const agent = state.agents.find((a) => a.id === session.agentId);
@@ -1090,9 +1108,19 @@ async function body(req) {
   }
   return raw ? JSON.parse(raw) : {};
 }
+function isLoopbackAddress(address) {
+  if (!address) return false;
+  const normalized = address.toLowerCase().replace(/^::ffff:/, "");
+  return (
+    normalized === "::1" || normalized === "127.0.0.1" || /^127(?:\.\d{1,3}){3}$/.test(normalized)
+  );
+}
 function localRequest(req) {
-  const host = req.headers.host?.split(":")[0];
+  const host = req.headers.host
+    ? new URL(`http://${req.headers.host}`).hostname.toLowerCase().replace(/^\[|\]$/g, "")
+    : "";
   if (!new Set(["127.0.0.1", "localhost", "::1"]).has(host)) return false;
+  if (!isLoopbackAddress(req.socket?.remoteAddress)) return false;
   const origin = req.headers.origin;
   if (origin && origin !== `http://${req.headers.host}`) return false;
   return true;
@@ -1532,23 +1560,40 @@ async function handle(req, res) {
     ) {
       const project = state.projects.find((x) => x.id === parts[1]);
       if (!project) return json(res, 404, { error: "Project not found." });
-      // Inline re-scan FIRST: a scripts.dev scaffolded earlier this same
-      // turn must be detected without waiting for the next bootstrap poll.
-      const { proc, changed } = await refreshDevProcess(project);
-      if (changed) save().catch(() => {});
-      if (!proc)
-        return json(res, 404, {
-          error: "No dev script for this project, even after re-scanning package.json.",
-          guidance:
-            'Add a proper "dev" script to package.json and call this endpoint again, or tell the user. Never start a detached background server (no nohup, &, or disown) to work around this.',
-        });
-      if (proc.status === "running" || proc.status === "starting")
+      if (devStartClaims.has(project.id)) {
+        const current = state.processes.find((x) => x.projectId === project.id);
         return json(res, 409, {
           error: "The dev server is already running for this project.",
-          ...devView(proc),
+          ...(current
+            ? {
+                ...devView(current),
+                status: current.status === "running" ? "running" : "starting",
+              }
+            : { status: "starting", port: 0 }),
         });
-      await startDevServer(proc, project);
-      return json(res, 200, devView(proc));
+      }
+      devStartClaims.add(project.id);
+      try {
+        // Inline re-scan FIRST: a scripts.dev scaffolded earlier this same
+        // turn must be detected without waiting for the next bootstrap poll.
+        const { proc, changed } = await refreshDevProcess(project);
+        if (changed) save().catch(() => {});
+        if (!proc)
+          return json(res, 404, {
+            error: "No dev script for this project, even after re-scanning package.json.",
+            guidance:
+              'Add a proper "dev" script to package.json and call this endpoint again, or tell the user. Never start a detached background server (no nohup, &, or disown) to work around this.',
+          });
+        if (proc.status === "running" || proc.status === "starting")
+          return json(res, 409, {
+            error: "The dev server is already running for this project.",
+            ...devView(proc),
+          });
+        await startDevServer(proc, project);
+        return json(res, 200, devView(proc));
+      } finally {
+        devStartClaims.delete(project.id);
+      }
     }
     if (
       req.method === "POST" &&
@@ -1577,10 +1622,20 @@ async function handle(req, res) {
       const proc = state.processes.find((x) => x.id === parts[1]);
       const project = state.projects.find((x) => x.id === proc?.projectId);
       if (!proc || !project) return json(res, 404, { error: "Process not found." });
-      // "starting" is a live attempt too: never launch a second one over it.
+      // Both start routes claim per-project synchronously before the first await.
+      if (devStartClaims.has(project.id))
+        return json(res, 200, {
+          ...proc,
+          status: proc.status === "running" ? "running" : "starting",
+        });
       if (proc.status === "running" || proc.status === "starting") return json(res, 200, proc);
-      await startDevServer(proc, project);
-      return json(res, 200, proc);
+      devStartClaims.add(project.id);
+      try {
+        await startDevServer(proc, project);
+        return json(res, 200, proc);
+      } finally {
+        devStartClaims.delete(project.id);
+      }
     }
     if (req.method === "POST" && parts[0] === "processes" && parts[2] === "stop") {
       const proc = state.processes.find((x) => x.id === parts[1]);
@@ -1693,6 +1748,7 @@ export async function handleLocalApi(request) {
     method: request.method,
     url: `${url.pathname}${url.search}`,
     headers,
+    socket: request.socket,
     async *[Symbol.asyncIterator]() {
       if (payload) yield Buffer.from(payload);
     },
