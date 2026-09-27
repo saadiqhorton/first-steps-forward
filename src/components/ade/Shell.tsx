@@ -1,7 +1,39 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Menu, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  Group,
+  Panel,
+  Separator,
+  type GroupImperativeHandle,
+  type Layout,
+} from "react-resizable-panels";
+import {
+  Menu,
+  PanelBottomClose,
+  PanelBottomOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { isActive, useAde } from "@/lib/ade/store";
+import { RightPaneHostContext } from "./rightPaneContext";
+import { usePersistedLayout } from "./persistLayout";
+
+const SHELL_LAYOUT_ID = "ade-shell-layout";
+const SHELL_PANEL_IDS = ["shell-sidebar", "shell-main", "shell-right"] as const;
+type ShellPanelId = (typeof SHELL_PANEL_IDS)[number];
+
+// Default layout when the user hasn't persisted anything yet.
+// Sidebar ~14%, main takes the rest, right pane ~18% (≈ 300 px on a 1700-wide screen).
+const DEFAULT_LAYOUT: Layout = { "shell-sidebar": 14, "shell-main": 68, "shell-right": 18 };
+const SIDEBAR_MIN_PX = 200;
+const SIDEBAR_MAX_PX = 480;
+const RIGHT_MIN_PX = 240;
+const RIGHT_MAX_PX = 540;
+const SIDEBAR_REST_PCT = 14;
+const RIGHT_REST_PCT = 18;
 
 const NAV = [
   { to: "/", label: "Home" },
@@ -10,10 +42,146 @@ const NAV = [
   { to: "/agents", label: "Agents" },
 ] as const;
 
+/**
+ * Tracks whether we're on the `lg` breakpoint or wider. Renders `true` on the
+ * server and during the first client render (so hydration matches), then
+ * reconciles in an effect. The desktop `Group` sets `display: flex` inline
+ * itself, so we can't hide it with the Tailwind `hidden` class — we choose
+ * which layout to mount instead to avoid rendering the sidebar twice.
+ */
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(true);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const query = window.matchMedia("(min-width: 1024px)");
+    const apply = () => setIsDesktop(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+  return isDesktop;
+}
+
+function PanelSash({
+  orientation,
+  panelId,
+  side,
+  onToggleCollapsed,
+  collapsed,
+  collapseLabel,
+  expandLabel,
+  showCollapseHandle = true,
+}: {
+  orientation: "vertical" | "horizontal";
+  panelId: ShellPanelId | "session-bottom";
+  side: "left" | "right" | "bottom";
+  onToggleCollapsed?: () => void;
+  collapsed?: boolean;
+  collapseLabel?: string;
+  expandLabel?: string;
+  showCollapseHandle?: boolean;
+}) {
+  const label = collapsed ? (expandLabel ?? "Expand panel") : (collapseLabel ?? "Collapse panel");
+  // `data-orientation` follows react-resizable-panels' own convention so the
+  // stylesheet can apply the right width/cursor and wider hit area.
+  return (
+    <Separator id={`seam-${panelId}`} className="panel-seam" data-orientation={orientation}>
+      {showCollapseHandle && onToggleCollapsed && (
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          aria-expanded={!collapsed}
+          aria-controls={String(panelId)}
+          onClick={onToggleCollapsed}
+          className="panel-collapse-handle"
+          // Keep the chevron visible when the panel is collapsed so the restore
+          // affordance is always discoverable; otherwise reveal on hover.
+          data-always-visible={collapsed ? "true" : undefined}
+        >
+          {side === "left" ? (
+            collapsed ? (
+              <PanelLeftOpen className="size-3.5" aria-hidden strokeWidth={2.5} />
+            ) : (
+              <PanelLeftClose className="size-3.5" aria-hidden strokeWidth={2.5} />
+            )
+          ) : side === "right" ? (
+            collapsed ? (
+              <PanelRightOpen className="size-3.5" aria-hidden strokeWidth={2.5} />
+            ) : (
+              <PanelRightClose className="size-3.5" aria-hidden strokeWidth={2.5} />
+            )
+          ) : collapsed ? (
+            <PanelBottomOpen className="size-3.5" aria-hidden strokeWidth={2.5} />
+          ) : (
+            <PanelBottomClose className="size-3.5" aria-hidden strokeWidth={2.5} />
+          )}
+        </button>
+      )}
+    </Separator>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
+  // Host element for the right column. Routes portal their preview into it, so
+  // there's no cross-tree state to keep in sync (and no render loop).
+  const [rightHost, setRightHost] = useState<HTMLDivElement | null>(null);
+  return (
+    <RightPaneHostContext.Provider value={rightHost}>
+      <ShellInner onRightHostChange={setRightHost}>{children}</ShellInner>
+    </RightPaneHostContext.Provider>
+  );
+}
+
+function ShellInner({
+  children,
+  onRightHostChange,
+}: {
+  children: ReactNode;
+  onRightHostChange: (host: HTMLDivElement | null) => void;
+}) {
   const { state, selectProject } = useAde();
   const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
+  const isDesktop = useIsDesktop();
+  const groupRef = useRef<GroupImperativeHandle | null>(null);
+  // SSR-safe persistence: hydrate from storage after mount and persist on
+  // user-driven changes only (`isUserInteraction`). See `persistLayout.ts`.
+  const { onLayoutChanged: onShellLayoutChanged, hydrateGroup } =
+    usePersistedLayout(SHELL_LAYOUT_ID);
+  useEffect(() => {
+    hydrateGroup(groupRef, DEFAULT_LAYOUT);
+  }, [hydrateGroup]);
+
+  // Imperative toggle: expand a collapsed Panel back to its rest size, or
+  // collapse it to 0. The main Panel absorbs/gives up the difference so the
+  // three sizes always total 100%. Uses the live layout, not assumptions.
+  const togglePanel = useCallback((panelId: ShellPanelId, restPct: number) => {
+    const current = groupRef.current?.getLayout();
+    if (!current) return;
+    const cur = current[panelId] ?? 0;
+    const curMain = current["shell-main"] ?? 0;
+    if (cur < 1) {
+      // Expand: reserve the rest size for this panel, leave the others as-is.
+      const others = SHELL_PANEL_IDS.filter((id) => id !== panelId && id !== "shell-main").reduce(
+        (sum, id) => sum + (current[id] ?? 0),
+        0,
+      );
+      groupRef.current?.setLayout({
+        ...current,
+        [panelId]: restPct,
+        "shell-main": Math.max(0, 100 - restPct - others),
+      });
+    } else {
+      // Collapse: hand this panel's space to the main Panel.
+      groupRef.current?.setLayout({ ...current, [panelId]: 0, "shell-main": curMain + cur });
+    }
+  }, []);
+  const toggleSidebar = useCallback(
+    () => togglePanel("shell-sidebar", SIDEBAR_REST_PCT),
+    [togglePanel],
+  );
+  const toggleRight = useCallback(() => togglePanel("shell-right", RIGHT_REST_PCT), [togglePanel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -27,10 +195,34 @@ export function Shell({ children }: { children: ReactNode }) {
         e.preventDefault();
         navigate({ to: "/tasks/new" });
       }
+      // ⌘\ (or Ctrl+\) toggles the sidebar so users can quickly reclaim
+      // horizontal space without leaving the keyboard.
+      if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
+        e.preventDefault();
+        toggleSidebar();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+        e.preventDefault();
+        toggleRight();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate]);
+  }, [navigate, toggleSidebar, toggleRight]);
+
+  // Track collapsed state so the seam's chevron button can switch its icon.
+  const [collapsed, setCollapsed] = useState({
+    sidebar: false,
+    right: false,
+  });
+  const onSidebarResize = (size: { asPercentage: number }) =>
+    setCollapsed((c) =>
+      c.sidebar === (size.asPercentage === 0) ? c : { ...c, sidebar: size.asPercentage === 0 },
+    );
+  const onRightResize = (size: { asPercentage: number }) =>
+    setCollapsed((c) =>
+      c.right === (size.asPercentage === 0) ? c : { ...c, right: size.asPercentage === 0 },
+    );
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-paper text-ink">
@@ -63,102 +255,98 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <aside
-          id="ade-sidebar"
-          className={`fixed top-9 bottom-0 left-0 z-40 w-64 shrink-0 flex-col overflow-y-auto border-r border-line bg-panel transition-transform duration-200 lg:static lg:z-auto lg:flex lg:w-56 lg:translate-x-0 ${
-            navOpen ? "flex translate-x-0" : "hidden -translate-x-full"
-          }`}
-          aria-label="Projects"
-        >
-          <div className="px-4 pt-5 pb-2">
-            <div className="font-display text-2xl leading-none tracking-wide">Projects</div>
-            <div className="label-mono mt-1 tracking-[0.16em]">
-              {state.projects.length} on this machine
-            </div>
-          </div>
-          <div className="space-y-1 px-3">
-            {state.projects.map((p) => {
-              const active = p.id === state.activeProjectId;
-              const sessions = state.sessions.filter((s) => s.projectId === p.id && isActive(s));
-              const running = state.processes.some(
-                (x) => x.projectId === p.id && (x.status === "running" || x.status === "starting"),
-              );
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    setNavOpen(false);
-                    selectProject(p.id);
-                    navigate({ to: "/" });
-                  }}
-                  aria-current={active ? "true" : undefined}
-                  className={`w-full overflow-hidden rounded-md px-3 py-2 text-left transition-colors ${active ? "bg-amber/10 ring-1 ring-amber/25" : "hover:bg-ink/[0.04]"}`}
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className={`size-2 shrink-0 rounded-full ${running ? "bg-teal" : "bg-dim"}`}
-                      aria-hidden
-                    />
-                    <span className={`min-w-0 truncate text-[13px] ${active ? "font-medium" : ""}`}>
-                      {p.name}
-                    </span>
-                    {sessions.length > 0 && (
-                      <span className="ml-auto shrink-0 font-mono text-[10px] text-dim">
-                        {sessions.length}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 break-all font-mono text-[10px] leading-snug text-dim">
-                    {p.path}
-                    {p.missing ? " · missing" : ""}
-                  </div>
-                </button>
-              );
-            })}
-            <Link
-              to="/projects/add"
-              className="block rounded-md px-3 py-2 text-[12px] text-dim hover:bg-ink/[0.04] hover:text-ink"
+        {!isDesktop && (
+          <>
+            {/* Mobile: off-canvas overlay sidebar (kept identical to the
+                previous mobile behavior so small screens keep their gestures). */}
+            <aside
+              id="ade-sidebar"
+              className={`fixed top-9 bottom-0 left-0 z-40 w-64 shrink-0 flex-col overflow-y-auto border-r border-line bg-panel transition-transform duration-200 ${
+                navOpen ? "flex translate-x-0" : "hidden -translate-x-full"
+              }`}
+              aria-label="Projects"
             >
-              + Add project
-            </Link>
-          </div>
-
-          <nav className="mt-6 px-3" aria-label="Workspace">
-            <div className="label-mono px-3 pb-1 tracking-[0.16em]">Workspace</div>
-            {NAV.map((n) => (
-              <Link
-                key={n.to}
-                to={n.to}
-                activeOptions={{ exact: n.to === "/" }}
-                activeProps={{ className: "bg-ink/[0.06] font-medium" }}
+              <SidebarBody onNavigate={() => setNavOpen(false)} />
+            </aside>
+            {navOpen && (
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-label="Close projects menu"
                 onClick={() => setNavOpen(false)}
-                className="block rounded-md px-3 py-1.5 text-[13px] hover:bg-ink/[0.04]"
-              >
-                {n.label}
-              </Link>
-            ))}
-          </nav>
-
-          <div className="mt-auto p-3">
-            <div className="rounded-md bg-ink px-3 py-2 text-center">
-              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-paper/70">
-                Open source · free
-              </span>
-            </div>
-          </div>
-        </aside>
-
-        {navOpen && (
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-label="Close projects menu"
-            onClick={() => setNavOpen(false)}
-            className="fixed top-9 right-0 bottom-0 left-0 z-30 bg-ink/40 lg:hidden"
-          />
+                className="fixed top-9 right-0 bottom-0 left-0 z-30 bg-ink/40"
+              />
+            )}
+          </>
         )}
 
-        {children}
+        {isDesktop && (
+          /* Desktop: resizable sidebar + main + right pane. */
+          <Group
+            id={SHELL_LAYOUT_ID}
+            groupRef={groupRef}
+            orientation="horizontal"
+            defaultLayout={DEFAULT_LAYOUT}
+            onLayoutChanged={onShellLayoutChanged}
+            style={{ flex: 1, minHeight: 0 }}
+            className="min-h-0 min-w-0 flex-1"
+          >
+            <Panel
+              id="shell-sidebar"
+              collapsible
+              collapsedSize={0}
+              minSize={`${SIDEBAR_MIN_PX}px`}
+              maxSize={`${SIDEBAR_MAX_PX}px`}
+              style={{ minWidth: 0, overflow: "hidden" }}
+              onResize={onSidebarResize}
+            >
+              <SidebarBody />
+            </Panel>
+            <PanelSash
+              orientation="vertical"
+              panelId="shell-sidebar"
+              side="left"
+              onToggleCollapsed={toggleSidebar}
+              collapsed={collapsed.sidebar}
+              collapseLabel="Hide projects"
+              expandLabel="Show projects"
+            />
+            <Panel id="shell-main" style={{ minWidth: 0, overflow: "hidden" }} minSize="40%">
+              <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+            </Panel>
+            <PanelSash
+              orientation="vertical"
+              panelId="shell-right"
+              side="right"
+              onToggleCollapsed={toggleRight}
+              collapsed={collapsed.right}
+              collapseLabel="Hide preview pane"
+              expandLabel="Show preview pane"
+            />
+            <Panel
+              id="shell-right"
+              collapsible
+              collapsedSize={0}
+              minSize={`${RIGHT_MIN_PX}px`}
+              maxSize={`${RIGHT_MAX_PX}px`}
+              style={{ minWidth: 0, overflow: "hidden" }}
+              onResize={onRightResize}
+            >
+              {/* Host for the route's right-pane portal (e.g. <PreviewPane/>). */}
+              <div
+                ref={onRightHostChange}
+                className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                aria-label="Preview"
+              />
+            </Panel>
+          </Group>
+        )}
+
+        {!isDesktop && (
+          /* Narrow layouts: single column with the route content. The sidebar
+             is the off-canvas overlay above; the right pane is omitted. */
+          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        )}
       </div>
 
       <footer className="flex h-8 shrink-0 items-center justify-between bg-ink px-4 text-paper/55">
@@ -169,6 +357,92 @@ export function Shell({ children }: { children: ReactNode }) {
           Loopback only · No ADE account · No hosted service
         </span>
       </footer>
+    </div>
+  );
+}
+
+function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
+  const { state, selectProject } = useAde();
+  const navigate = useNavigate();
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-panel">
+      <div className="px-4 pt-5 pb-2">
+        <div className="font-display text-2xl leading-none tracking-wide">Projects</div>
+        <div className="label-mono mt-1 tracking-[0.16em]">
+          {state.projects.length} on this machine
+        </div>
+      </div>
+      <div className="space-y-1 px-3">
+        {state.projects.map((p) => {
+          const active = p.id === state.activeProjectId;
+          const sessions = state.sessions.filter((s) => s.projectId === p.id && isActive(s));
+          const running = state.processes.some(
+            (x) => x.projectId === p.id && (x.status === "running" || x.status === "starting"),
+          );
+          return (
+            <button
+              key={p.id}
+              onClick={() => {
+                onNavigate?.();
+                selectProject(p.id);
+                navigate({ to: "/" });
+              }}
+              aria-current={active ? "true" : undefined}
+              className={`w-full overflow-hidden rounded-md px-3 py-2 text-left transition-colors ${active ? "bg-amber/10 ring-1 ring-amber/25" : "hover:bg-ink/[0.04]"}`}
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <span
+                  className={`size-2 shrink-0 rounded-full ${running ? "bg-teal" : "bg-dim"}`}
+                  aria-hidden
+                />
+                <span className={`min-w-0 truncate text-[13px] ${active ? "font-medium" : ""}`}>
+                  {p.name}
+                </span>
+                {sessions.length > 0 && (
+                  <span className="ml-auto shrink-0 font-mono text-[10px] text-dim">
+                    {sessions.length}
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 break-all font-mono text-[10px] leading-snug text-dim">
+                {p.path}
+                {p.missing ? " · missing" : ""}
+              </div>
+            </button>
+          );
+        })}
+        <Link
+          to="/projects/add"
+          onClick={() => onNavigate?.()}
+          className="block rounded-md px-3 py-2 text-[12px] text-dim hover:bg-ink/[0.04] hover:text-ink"
+        >
+          + Add project
+        </Link>
+      </div>
+
+      <nav className="mt-6 px-3" aria-label="Workspace">
+        <div className="label-mono px-3 pb-1 tracking-[0.16em]">Workspace</div>
+        {NAV.map((n) => (
+          <Link
+            key={n.to}
+            to={n.to}
+            activeOptions={{ exact: n.to === "/" }}
+            activeProps={{ className: "bg-ink/[0.06] font-medium" }}
+            onClick={() => onNavigate?.()}
+            className="block rounded-md px-3 py-1.5 text-[13px] hover:bg-ink/[0.04]"
+          >
+            {n.label}
+          </Link>
+        ))}
+      </nav>
+
+      <div className="mt-auto p-3">
+        <div className="rounded-md bg-ink px-3 py-2 text-center">
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-paper/70">
+            Open source · free
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

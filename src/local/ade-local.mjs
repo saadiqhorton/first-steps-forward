@@ -7,6 +7,7 @@ import path from "node:path";
 import { adapters } from "./adapters/index.mjs";
 import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
 import { listModels, MODEL_ID } from "./models.mjs";
+import { reconcileWorkspaceMessages, saveWorkspace } from "./workspace-persistence.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
@@ -32,18 +33,7 @@ const UNSUPPORTED_RISK =
   /\b(?:deploy(?:ment)?|publish|release (?:to )?prod(?:uction)?|production (?:deployment|database)|git push|push (?:to )?(?:origin|remote|github|gitlab)|open (?:a )?pull request|create (?:a )?pull request|drop database|wipe (?:all )?(?:data|files)|delete all|send (?:an? )?email|charge (?:a )?(?:credit )?card)\b/i;
 
 async function save() {
-  await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
-  const tmp = `${DATA_FILE}.${process.pid}.tmp`;
-  await fs.writeFile(
-    tmp,
-    JSON.stringify(
-      { projects: state.projects, sessions: state.sessions, processes: state.processes },
-      null,
-      2,
-    ),
-    { mode: 0o600 },
-  );
-  await fs.rename(tmp, DATA_FILE);
+  await saveWorkspace(DATA_FILE, state);
 }
 async function load() {
   try {
@@ -409,6 +399,7 @@ function addMessage(session, role, text) {
     last.text += text;
     last.at = now();
   } else session.messages.push({ id: id(), role, text, at: now() });
+  session.updatedAt = now();
 }
 function parseAgentOutput(session, line) {
   addLog(session, line);
@@ -584,6 +575,19 @@ export async function writeDevControlSkill(writer = fs.writeFile) {
     return false;
   }
 }
+async function otherServiceStatus(project) {
+  try {
+    const pkg = JSON.parse(await fs.readFile(path.join(project.path, "package.json"), "utf8"));
+    const scripts = Object.keys(pkg.scripts ?? {}).filter((name) =>
+      /^(dev[:_-]|(?:backend|api|server)(?:[:_-]|$))/.test(name),
+    );
+    return scripts.length
+      ? `Additional package scripts: ${scripts.slice(0, 8).join(", ")}. ADE does not verify whether these services are running.`
+      : "ADE does not verify other project services or backends; a running frontend preview does not prove they are running.";
+  } catch {
+    return "Other project services are unknown; ADE could not read package.json.";
+  }
+}
 export async function buildManifest(session, project) {
   const agent = state.agents.find((a) => a.id === session.agentId);
   const trackedFiles = await git(project, ["ls-files", "-co", "--exclude-standard"]);
@@ -603,11 +607,15 @@ export async function buildManifest(session, project) {
     },
     devServer: devServerStatus(project),
     devControl: devControlFor(project),
+    otherServices: await otherServiceStatus(project),
     constraints: [
       "Work only within the project directory",
       "No deployments, publishing, or external/shared-system changes without the user",
       "Do not revert or overwrite user changes",
-      "Use ADE's dev-server control for this project (the devControl section of this manifest; its endpoints are documented in the skill file): start, stop, and inspect the dev server only through those endpoints; never start a detached background server (no nohup, &, or disown) and never leave one running; if your sandbox cannot reach the ADE API, say so in your response and ask the user to start it in ADE",
+      "The devServer status is ADE's observed snapshot at turn start. If it includes a running URL, use that URL instead of asking the user which frontend port to open. Do not infer that other services are running from the preview.",
+      session.agentId === "pi"
+        ? "Pi has no shell or HTTP tool in ADE and cannot call the devControl curl commands. Use the devServer status supplied at the start of this turn; for a later status change or to start/stop the server, direct the user to ADE's Preview/Processes controls. Never start a detached background server or claim you verified other services."
+        : "Use ADE's dev-server control for this project (the devControl section of this manifest; its endpoints are documented in the skill file): start, stop, and inspect the dev server only through those endpoints; never start a detached background server (no nohup, &, or disown) and never leave one running; if your sandbox cannot reach the ADE API, say so in your response and ask the user to start it in ADE",
     ],
     relevantFiles: candidates.slice(0, 60),
     tools: agent?.tools ?? "agent's default CLI tools",
@@ -662,8 +670,11 @@ async function runAgent(session, prompt, continuing = false) {
       `Context manifest: project ${project.name} (${project.branch}); task: ${session.request}` +
       (session.criteria ? `; acceptance criteria: ${session.criteria}` : "") +
       `; model: ${session.model ?? "agent default"}` +
-      `; dev server: ${session.manifest.devServer}` +
-      `; dev control: ${devControlLine(session.manifest.devControl)}` +
+      `; dev server at turn start: ${session.manifest.devServer}` +
+      `; other services: ${session.manifest.otherServices}` +
+      (session.agentId === "pi"
+        ? "; dev control: unavailable to Pi (no shell or HTTP tool); ask the user to use ADE's controls"
+        : `; dev control: ${devControlLine(session.manifest.devControl)}`) +
       `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}` +
       (session.manifest.uncommittedFiles
         ? `; the user has uncommitted changes in these files: ${session.manifest.uncommittedFiles.join(", ")} — never revert, stash, commit, or overwrite them; work around them`
@@ -1181,6 +1192,7 @@ async function handle(req, res) {
     .map(decodeURIComponent);
   try {
     if (req.method === "GET" && parts[0] === "bootstrap") {
+      await reconcileWorkspaceMessages(DATA_FILE, state);
       const agents = await bootstrapAgents();
       // Return the persisted workspace snapshot immediately. Git inspection,
       // diffs, and dev-script re-scan update the next 2-second poll instead

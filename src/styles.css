@@ -230,3 +230,166 @@
     outline-offset: 2px;
   }
 }
+
+/* Resizable panel seams.
+ *
+ * The library sets cursor styles itself; we provide a subtle line plus a wider
+ * transparent hit area so the seam is easy to grab without looking heavy. */
+@layer components {
+  .panel-seam {
+    position: relative;
+    flex: 0 0 auto;
+    background: var(--line);
+    transition:
+      background-color 120ms ease,
+      box-shadow 120ms ease;
+  }
+  .panel-seam[data-orientation="vertical"] {
+    width: 4px;
+    cursor: col-resize;
+  }
+  /* Expand the pointer hit area beyond the visible line. */
+  .panel-seam[data-orientation="vertical"]::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 18px;
+    transform: translateX(-50%);
+  }
+  .panel-seam[data-orientation="horizontal"] {
+    height: 4px;
+    cursor: row-resize;
+  }
+  .panel-seam[data-orientation="horizontal"]::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 18px;
+    transform: translateY(-50%);
+  }
+  .panel-seam:hover,
+  .panel-seam:focus-visible,
+  .panel-seam[data-separator="active"],
+  .panel-seam[data-separator="hover"],
+  .panel-seam[data-separator="focus"] {
+    background: var(--amber);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--amber-deep) 35%, transparent);
+  }
+  .panel-seam:focus-visible {
+    outline: none;
+  }
+
+  /* Collapse handle — a small chevron anchored to the seam so users can
+     collapse/restore a side panel without dragging all the way to 0. It sits
+     above the seam's wider hit area (z-index) so both remain usable. */
+  .panel-collapse-handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--dim);
+    border: 1px solid var(--line);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    opacity: 0;
+    transition:
+      opacity 120ms ease,
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+  .panel-collapse-handle:hover,
+  .panel-collapse-handle:focus-visible {
+    opacity: 1;
+    background: var(--amber);
+    color: var(--ink);
+    border-color: var(--amber-deep);
+  }
+  /* Reveal on seam hover/focus, and keep it visible when the panel is
+     collapsed so the expand affordance stays discoverable. */
+  .panel-seam:hover .panel-collapse-handle,
+  .panel-seam:focus-within .panel-collapse-handle,
+  .panel-collapse-handle[data-always-visible="true"] {
+    opacity: 1;
+  }
+}
+
+/* Agent prose is formatted, but logs and structured output remain literal. */
+.ade-markdown > :first-child {
+  margin-top: 0;
+}
+.ade-markdown > :last-child {
+  margin-bottom: 0;
+}
+.ade-markdown p,
+.ade-markdown ul,
+.ade-markdown ol,
+.ade-markdown pre,
+.ade-markdown blockquote {
+  margin-block: 0.6em;
+}
+.ade-markdown ul {
+  list-style: disc;
+  padding-left: 1.5em;
+}
+.ade-markdown ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+}
+.ade-markdown h1,
+.ade-markdown h2,
+.ade-markdown h3 {
+  margin-block: 0.9em 0.4em;
+  font-weight: 650;
+}
+.ade-markdown h1 {
+  font-size: 1.25em;
+}
+.ade-markdown h2 {
+  font-size: 1.12em;
+}
+.ade-markdown a {
+  color: var(--teal-deep);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+.ade-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 5px;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0.8em;
+  white-space: pre;
+}
+.ade-markdown :not(pre) > code {
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  padding: 0.1em 0.25em;
+}
+.ade-markdown blockquote {
+  border-left: 2px solid var(--line);
+  padding-left: 0.9em;
+  color: var(--dim);
+}
+.ade-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.ade-markdown th,
+.ade-markdown td {
+  border: 1px solid var(--line);
+  padding: 0.3em 0.5em;
+}

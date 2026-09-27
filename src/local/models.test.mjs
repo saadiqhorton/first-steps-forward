@@ -53,6 +53,8 @@ const PI_TABLE = [
   "opencode-go  deepseek-v4-flash             1M       384K     yes       no    ",
   "opencode-go  gpt-5.6-luna                  1.1M     128K     yes       yes   ",
   "opencode-go  glm-5.1                       202.8K   32.8K    yes       no",
+  "openai-codex gpt-5.5                    128K     16K      yes       yes",
+  "ollama-cloud qwen3.5                    128K     16K      yes       no",
 ].join("\n");
 
 test("parseCodexModels keeps only visibility=list and sorts by priority", () => {
@@ -81,11 +83,30 @@ test("parsePiModels skips extension banner lines and parses the table", () => {
   const models = parsePiModels(PI_TABLE);
   assert.deepEqual(
     models.map((m) => m.id),
-    ["opencode-go/deepseek-v4-flash", "opencode-go/gpt-5.6-luna", "opencode-go/glm-5.1"],
+    [
+      "opencode-go/deepseek-v4-flash",
+      "opencode-go/gpt-5.6-luna",
+      "opencode-go/glm-5.1",
+      "openai-codex/gpt-5.5",
+      "ollama-cloud/qwen3.5",
+    ],
   );
   assert.equal(models[0].label, "deepseek-v4-flash");
   assert.equal(models[0].meta, "context 1M · max-out 384K");
   assert.deepEqual(parsePiModels("provider model context max-out thinking images"), []);
+});
+
+test("Pi model catalog includes extension models without asserting their auth status", async () => {
+  clearModelsCache();
+  const run = fakeRun({ "--offline --list-models": { code: 0, stdout: PI_TABLE } });
+  const result = await listModels("pi", run, { version: "0.87.1" });
+  assert.equal(result.available, true);
+  assert.deepEqual([...new Set(result.models.map((m) => m.id.split("/")[0]))].sort(), [
+    "ollama-cloud",
+    "openai-codex",
+    "opencode-go",
+  ]);
+  assert.deepEqual(run.calls, [["pi", "--offline", "--list-models"]]);
 });
 
 test("MODEL_ID refuses flag-looking values and accepts real ids", () => {
@@ -169,6 +190,12 @@ test("structured failures distinguish not-installed, cli-failed, and no provider
   assert.equal(missing.available, false);
   assert.equal(missing.reason, "not-installed");
   assert.match(missing.hint, /enter a model id manually/i);
+
+  clearModelsCache();
+  const noPiRows = fakeRun({ "--offline --list-models": { code: 0, stdout: "" } });
+  const piEmpty = await listModels("pi", noPiRows, { version: "0.87.1" });
+  assert.equal(piEmpty.available, false);
+  assert.match(piEmpty.hint, /does not indicate whether any provider is READY/);
 
   clearModelsCache();
   const failing = fakeRun({ default: { code: 1, stdout: "", stderr: "boom" } });

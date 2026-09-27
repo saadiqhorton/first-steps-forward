@@ -24,7 +24,7 @@ export function PreviewPane({
   const removed = session?.changes.reduce((n, c) => n + c.removed, 0) ?? 0;
   return (
     <aside
-      className="flex w-[300px] shrink-0 flex-col border-l border-line bg-panel"
+      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col bg-panel"
       aria-label="Preview"
     >
       <div className="flex h-9 items-center justify-between border-b border-line px-3">

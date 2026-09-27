@@ -23,8 +23,10 @@ const CACHE_TTL_MS = 60_000;
 // Persistent catalog cache (per agent, under ~/.ade, private 0600). TTL 300s
 // mirrors OpenCode's own catalog freshness window. Rows are only ever what a
 // probe returned; a corrupt or mismatched file is ignored, never merged.
+// Schema 2: pi probes now list extension-registered providers too, so caches
+// written by the older extension-less probe must not survive.
 const FILE_CACHE_TTL_MS = 300_000;
-const FILE_CACHE_SCHEMA = 1;
+const FILE_CACHE_SCHEMA = 2;
 const modelsCache = new Map();
 
 async function readFileCache(cacheDir, fingerprint) {
@@ -151,7 +153,12 @@ async function probe(agentId, run) {
     return { available: true, models, source: "live", command: "opencode models" };
   }
   if (agentId === "pi") {
-    const result = await run("pi", ["--offline", "--no-extensions", "--list-models"], {
+    // Extensions stay enabled: providers can be registered by packages
+    // (e.g. pi-ollama-cloud registers the ollama-cloud provider), so
+    // stripping them here would hide models the agent can actually use.
+    // --offline only blocks forced network refreshes, matching the other
+    // CLI probes.
+    const result = await run("pi", ["--offline", "--list-models"], {
       timeout: 20000,
     });
     if (result.code === 127)
@@ -163,7 +170,7 @@ async function probe(agentId, run) {
         available: false,
         reason: "no-providers-configured",
         hint:
-          "Pi lists only models for providers enabled in its own config. " +
+          "Pi's cached model catalog has no models to list. This does not indicate whether any provider is READY. " +
           MANUAL_HINT.toLowerCase(),
       };
     return {

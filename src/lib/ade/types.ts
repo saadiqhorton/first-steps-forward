@@ -115,6 +115,17 @@ export interface Session {
     constraints: string[];
     relevantFiles: string[];
     tools: string;
+    devServer?: string;
+    otherServices?: string;
+    devControl?: {
+      baseUrl: string | null;
+      projectId: string;
+      skill: string;
+      note?: string;
+      status?: string;
+      start?: string;
+      stop?: string;
+    };
     dirtyWorktree: boolean;
     uncommittedFiles?: string[];
   };

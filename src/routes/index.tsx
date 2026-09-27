@@ -1,5 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { PreviewPane } from "@/components/ade/PreviewPane";
+import { RightPanePortal } from "@/components/ade/RightPanePortal";
 import { SessionCard } from "@/components/ade/SessionCard";
 import type { LocalProcess } from "@/lib/ade/types";
 import { isActive, timeAgo, useActiveProject, useAde } from "@/lib/ade/store";
@@ -247,7 +248,9 @@ function ProjectHome() {
           </section>
         </div>
       </main>
-      <PreviewPane project={project} session={focus} />
+      <RightPanePortal>
+        <PreviewPane project={project} session={focus} />
+      </RightPanePortal>
     </>
   );
 }

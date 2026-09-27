@@ -598,5 +598,23 @@ test("manifest devControl carries the real base URL, curls, and skill path", asy
   assert.ok(bridge.includes("never start a detached background server"));
   assert.ok(bridge.includes("devControl"));
   assert.ok(bridge.includes("ask the user to start it in ADE"));
+
+  const piManifest = await buildManifest({ request: "preview it", agentId: "pi" }, project);
+  assert.match(piManifest.otherServices, /does not verify/);
+  assert.ok(
+    piManifest.constraints.some((c) => c.includes("cannot call the devControl curl commands")),
+  );
+  assert.ok(
+    piManifest.constraints.some((c) =>
+      c.includes("instead of asking the user which frontend port"),
+    ),
+  );
+  writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({ name: "x", scripts: { dev: "vite", "dev:backend": "backend dev" } }),
+  );
+  const serviceManifest = await buildManifest({ request: "preview it", agentId: "pi" }, project);
+  assert.match(serviceManifest.otherServices, /dev:backend/);
+  assert.match(serviceManifest.otherServices, /does not verify whether these services are running/);
   rmSync(dir, { recursive: true, force: true });
 });

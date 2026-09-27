@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { codex } from "./codex.mjs";
 import { opencode } from "./opencode.mjs";
 import { pi } from "./pi.mjs";
@@ -45,7 +48,7 @@ test("OpenCode adapter never opts into automatic permission approval", () => {
   assert.equal(session.agentSessionId, "oc-1");
 });
 
-test("Pi adapter disables extensions and shell tools and parses actual JSON events", () => {
+test("Pi adapter restricts shell tools and parses actual JSON events", () => {
   const [bin, args] = pi.command({
     prompt: "Inspect",
     session,
@@ -53,7 +56,9 @@ test("Pi adapter disables extensions and shell tools and parses actual JSON even
     dataDir: "/tmp/ade",
   });
   assert.equal(bin, "pi");
-  assert.ok(args.includes("--no-extensions"));
+  // Extensions stay enabled so package-registered providers resolve, but the
+  // tool allowlist still sandboxes the run.
+  assert.ok(!args.includes("--no-extensions"));
   assert.ok(args.includes("read,edit,write,grep,find,ls"));
   assert.ok(!args.includes("bash"));
   const event = pi.parse(
@@ -63,6 +68,82 @@ test("Pi adapter disables extensions and shell tools and parses actual JSON even
     }),
   );
   assert.equal(event.text, "Pi response");
+});
+
+test("Pi reports only auth-check READY providers, not credential or catalog counts", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "ade-pi-auth-"));
+  const previousHome = process.env.HOME;
+  try {
+    process.env.HOME = home;
+    mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
+    writeFileSync(
+      path.join(home, ".pi", "agent", "auth.json"),
+      JSON.stringify({
+        "opencode-go": {},
+        "openai-codex": {},
+        "ollama-cloud": {},
+        "bad\nname": {},
+      }),
+    );
+    const calls = [];
+    const auth = await pi.detectAuth(async (bin, args) => {
+      calls.push([bin, ...args]);
+      const ready = args[3] !== "ollama-cloud" && args[3] !== "bad\nname";
+      return {
+        code: ready ? 0 : 1,
+        stdout: JSON.stringify({ status: ready ? "ready" : "not_ready" }),
+      };
+    });
+    assert.deepEqual(auth, {
+      signedIn: true,
+      providers: ["openai-codex", "opencode-go"],
+      account: "2 READY providers: openai-codex, opencode-go",
+    });
+    assert.deepEqual(calls.map((call) => call[4]).sort(), [
+      "bad\nname",
+      "ollama-cloud",
+      "openai-codex",
+      "opencode-go",
+    ]);
+    const unusual = await pi.detectAuth(async (_bin, args) => ({
+      code: args[3] === "bad\nname" ? 0 : 1,
+      stdout: JSON.stringify({ status: args[3] === "bad\nname" ? "ready" : "not_ready" }),
+    }));
+    assert.deepEqual(unusual.providers, ["bad\nname"], "provider ID is preserved for Pi");
+    assert.equal(unusual.account, "1 READY provider: (unusual provider name)");
+    assert.ok(
+      calls.every(
+        (call) =>
+          call[0] === "pi" &&
+          call.includes("--json") &&
+          call.includes("--no-refresh") &&
+          !call.includes("--credentials"),
+      ),
+    );
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Pi does not label a configured but non-READY provider as signed in", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "ade-pi-auth-"));
+  const previousHome = process.env.HOME;
+  try {
+    process.env.HOME = home;
+    mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
+    writeFileSync(path.join(home, ".pi", "agent", "auth.json"), '{"ollama-cloud":{}}');
+    const auth = await pi.detectAuth(async () => ({
+      code: 1,
+      stdout: '{"status":"not_ready"}',
+    }));
+    assert.deepEqual(auth, { signedIn: false });
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("adapters omit the model flag entirely when no model is chosen", () => {

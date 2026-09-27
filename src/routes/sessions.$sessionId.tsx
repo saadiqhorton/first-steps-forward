@@ -1,12 +1,36 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
+import {
+  Group,
+  Panel,
+  Separator,
+  type GroupImperativeHandle,
+  type Layout,
+} from "react-resizable-panels";
 import { ChecksList } from "@/components/ade/ChecksList";
 import { DiffView } from "@/components/ade/DiffView";
 import { ModelPicker } from "@/components/ade/ModelPicker";
 import { PreviewPane } from "@/components/ade/PreviewPane";
+import { RightPanePortal } from "@/components/ade/RightPanePortal";
+import { SessionMessage } from "@/components/ade/SessionMessage";
+import { usePersistedLayout } from "@/components/ade/persistLayout";
 import { StatusPill } from "@/components/ade/StatusPill";
 import type { AgentId } from "@/lib/ade/types";
 import { timeAgo, useAde } from "@/lib/ade/store";
+
+const SESSION_BODY_LAYOUT_ID = "ade-session-body";
+const SESSION_BODY_DEFAULT_LAYOUT: Layout = {
+  "session-messages": 75,
+  "session-bottom": 25,
+};
+const SESSION_BOTTOM_MIN_PX = 140;
+const SESSION_BOTTOM_MAX_PCT = 70;
 
 export const Route = createFileRoute("/sessions/$sessionId")({
   head: () => ({ meta: [{ title: "Work session — ADE" }] }),
@@ -22,7 +46,9 @@ export const Route = createFileRoute("/sessions/$sessionId")({
     </main>
   ),
 });
+
 type Tab = "changes" | "checks" | "logs";
+
 function SessionPage() {
   const { sessionId } = Route.useParams();
   const { state, steer, complete, reopen, stop, runChecks, switchAgent, setSessionModel } =
@@ -48,6 +74,8 @@ function SessionPage() {
   const modelToggleRef = useRef<HTMLButtonElement>(null);
   const switchToggleRef = useRef<HTMLButtonElement>(null);
   const lastMessageRole = session?.messages[session.messages.length - 1]?.role;
+  const lastMessageLength = session?.messages[session.messages.length - 1]?.text.length;
+
   const onMessagesScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -128,20 +156,42 @@ function SessionPage() {
   useEffect(() => {
     if (stickToBottomRef.current || lastMessageRole === "user")
       endRef.current?.scrollIntoView({ block: "end" });
-  }, [session?.messages.length, session?.status, lastMessageRole]);
+  }, [session?.messages.length, session?.status, lastMessageRole, lastMessageLength]);
+
+  // Plain `find` lookups (not hooks) resolved before the early returns below so
+  // the hook order stays stable across every render.
+  const project = state.projects.find((p) => p.id === session?.projectId);
+  const agent = state.agents.find((a) => a.id === session?.agentId);
+
+  // Resizable bottom (Files / Checks / Logs) panel. Persisted per-session-id;
+  // SSR-safe because storage is only touched inside effects.
+  const bodyGroupRef = useRef<GroupImperativeHandle | null>(null);
+  const sessionLayoutKey = `${SESSION_BODY_LAYOUT_ID}:${sessionId}`;
+  const { onLayoutChanged: onBodyLayoutChanged, hydrateGroup: hydrateBody } =
+    usePersistedLayout(sessionLayoutKey);
+  const hydratedSessionId = session?.id;
+  useEffect(() => {
+    // Runs after the Group commits (its ref is set during commit), applying any
+    // persisted height once per session.
+    if (!hydratedSessionId) return;
+    hydrateBody(bodyGroupRef, SESSION_BODY_DEFAULT_LAYOUT);
+  }, [hydratedSessionId, hydrateBody]);
+
   if (!session) {
     if (!state.hydrated) return <main className="flex-1" />;
     throw notFound();
   }
-  const project = state.projects.find((p) => p.id === session.projectId);
-  const agent = state.agents.find((a) => a.id === session.agentId);
   if (!project) return <main className="flex-1 p-8">Project not found.</main>;
   const running = ["working", "verifying"].includes(session.status);
+  const dev = state.processes.find((p) => p.projectId === project.id);
+  const previewUrl =
+    dev?.status === "running" && dev.port > 0 ? `http://127.0.0.1:${dev.port}` : null;
   const switchBlockReason = running
     ? "Unavailable while a turn runs"
     : session.status === "complete"
       ? "Unavailable once complete"
       : null;
+
   const send = async () => {
     const outgoing = text.trim();
     if (!outgoing || sending) return;
@@ -194,10 +244,14 @@ function SessionPage() {
       setBusy(false);
     }
   };
+
   return (
     <>
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-line px-7 pt-5 pb-4">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Header sits above the resizable main/bottom split so it stays pinned
+            at the top regardless of how much vertical space the user gives
+            to the messages log. */}
+        <header className="shrink-0 border-b border-line px-7 pt-5 pb-4">
           <div className="flex items-center gap-2">
             <Link to="/" className="label-mono hover:text-ink">
               {project.name}
@@ -350,223 +404,285 @@ function SessionPage() {
               )}
             </div>
           </div>
-        </header>
-        <div
-          ref={scrollRef}
-          onScroll={onMessagesScroll}
-          className="flex-1 space-y-3 overflow-y-auto px-7 py-5"
-        >
-          {session.messages.map((m) => (
-            <div
-              key={m.id}
-              className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-4 py-2.5 text-[13.5px] leading-relaxed ${m.role === "user" ? "bg-ink text-paper" : m.role === "system" ? "border border-amber/40 bg-amber/10" : "card-panel"}`}
-              >
-                {m.role !== "user" && (
-                  <div className="label-mono mb-1">
-                    {m.role === "system" ? "ADE" : agent?.short}
-                  </div>
-                )}
-                {m.text}
-              </div>
-            </div>
-          ))}
-          {session.manifest && (
-            <details className="card-panel px-4 py-3 text-[12px]">
-              <summary className="label-mono cursor-pointer select-none">
-                Context manifest · {session.manifest.relevantFiles.length} candidate files ·{" "}
-                {session.manifest.tools}
-              </summary>
-              <dl className="mt-2 grid grid-cols-[100px_1fr] gap-y-1">
-                <dt className="text-dim">Project</dt>
-                <dd>
-                  {session.manifest.project.name} · {session.manifest.project.branch}
-                </dd>
-                <dt className="text-dim">Agent</dt>
-                <dd>
-                  {session.manifest.agent.id}
-                  {session.manifest.agent.account ? ` · ${session.manifest.agent.account}` : ""}
-                </dd>
-                <dt className="text-dim">Model</dt>
-                <dd>{session.manifest.agent.model ?? session.model ?? "agent default"}</dd>
-                <dt className="text-dim">Constraints</dt>
-                <dd>{session.manifest.constraints.join("; ")}</dd>
-                <dt className="text-dim">Files</dt>
-                <dd className="max-h-32 overflow-y-auto font-mono text-[10.5px] leading-relaxed">
-                  {session.manifest.relevantFiles.join("\n") || "(none listed)"}
-                </dd>
-              </dl>
-            </details>
-          )}
-          {running && (
-            <div className="flex items-center gap-2 text-[12px] text-dim">
-              <span className="size-1.5 animate-pulse-soft rounded-full bg-teal" />
-              {session.status === "verifying"
-                ? "Running checks…"
-                : `${agent?.short ?? "Agent"} is running locally…`}
-              {session.queuedMessages?.length ? " · follow-up queued" : ""}
-            </div>
-          )}
-          {session.status === "blocked" && (
-            <div
-              className={`rounded border p-3 text-[12px] ${session.failureKind && session.failureKind !== "process" ? "border-amber/40 bg-amber/5" : "border-danger/30 bg-danger/5"}`}
-            >
-              {session.failureKind === "provider_quota" ? (
-                <>
-                  <strong>Provider limit reached.</strong> The agent could not start: your provider
-                  reports no usage left (a billing/rate matter, not an ADE fault). Nothing in the
-                  project changed; your task is kept. Wait for the limit to reset, upgrade with your
-                  provider, or switch agents on this session.
-                </>
-              ) : session.failureKind === "model_not_found" ? (
-                <>
-                  <strong>Model not found.</strong> The agent rejected the selected model
-                  {session.model ? ` (“${session.model}”)` : ""}. Nothing in the project changed;
-                  your task is kept. Pick a different model with Change model above, or clear it to
-                  use the agent's configured default, then send a follow-up. The CLI's own "did you
-                  mean" suggestions, if any, are in its message and Logs.
-                </>
-              ) : session.failureKind === "provider_unavailable" ? (
-                <>
-                  <strong>Provider unavailable.</strong> The agent reported that its provider could
-                  not be used. ADE does not manage provider credentials — check this CLI's own
-                  provider setup on the Agents page. Nothing in the project changed.
-                </>
-              ) : session.failureKind === "auth_expired" ? (
-                <>
-                  <strong>Sign-in rejected.</strong> The agent's credentials were refused or
-                  expired. Re-authenticate with this CLI's own sign-in flow (Agents page → Set up);
-                  ADE never collects tokens. Nothing in the project changed; your task is kept.
-                </>
-              ) : session.failureKind === "context_overflow" ? (
-                <>
-                  <strong>Context window exceeded.</strong> The conversation outgrew the model's
-                  context. Shorten or summarize your follow-up, start a fresh session for a narrower
-                  task, or pick a larger-context model with Change model. Any project edits made
-                  before the failure were left in place.
-                </>
-              ) : (
-                <>
-                  The agent process exited unsuccessfully. Review its real output in Logs; existing
-                  files were not reset.
-                </>
-              )}
-            </div>
-          )}
-          {session.status === "ready" && (
-            <div className="card-panel p-4 ring-1 ring-teal/40">
-              <div className="label-mono text-teal">Ready to review</div>
-              <p className="mt-1 text-[13px]">
-                The CLI has exited. Inspect the actual project diff and run checks explicitly; ADE
-                did not run checks automatically.
-              </p>
-              <p className="mt-2 font-mono text-[10px] text-dim">
-                Use “Mark complete” in the header when the result looks right.
-              </p>
-            </div>
-          )}
-          <div ref={endRef} />
-        </div>
-        <div className="border-t border-line bg-panel">
           <div
-            className="flex flex-wrap items-center gap-1 px-7 pt-3"
-            role="tablist"
-            aria-label="Session panels"
+            className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-[11px] text-dim"
+            aria-label="Project environment"
           >
-            {(["changes", "checks", "logs"] as Tab[]).map((t) => (
-              <button
-                key={t}
-                ref={(el) => {
-                  tabRefs.current[t] = el;
-                }}
-                id={`session-tab-${t}`}
-                onClick={() => setTab(t)}
-                onKeyDown={(e) => onTabKeyDown(e, t)}
-                aria-selected={tab === t}
-                aria-controls={`session-panel-${t}`}
-                role="tab"
-                tabIndex={tab === t ? 0 : -1}
-                className={`rounded-md px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] ${tab === t ? "bg-ink text-paper" : "text-dim hover:text-ink"}`}
-              >
-                {t === "changes"
-                  ? `Files changed (${session.changes.length})`
-                  : t === "checks"
-                    ? `Checks (${session.checks.length})`
-                    : `Logs (${session.logs.length})`}
-              </button>
-            ))}
-          </div>
-          {(["changes", "checks", "logs"] as Tab[]).map((t) => (
-            <div
-              key={t}
-              id={`session-panel-${t}`}
-              aria-labelledby={`session-tab-${t}`}
-              role="tabpanel"
-              hidden={tab !== t}
-              tabIndex={0}
-              className="max-h-56 overflow-y-auto px-7 py-3"
-            >
-              {t === "changes" && <DiffView changes={session.changes} />}
-              {t === "checks" && (
-                <>
-                  <ChecksList checks={session.checks} />
-                  {session.status === "ready" && (
-                    <button
-                      disabled={busy}
-                      onClick={() => void checksClick()}
-                      className="btn-quiet mt-3 px-3 py-1.5 text-[12px]"
-                    >
-                      {busy ? "Running…" : "Run project checks"}
-                    </button>
-                  )}
-                </>
+            <span className="font-medium text-ink">Project environment</span>
+            <span>
+              Preview:{" "}
+              {previewUrl ? (
+                <a
+                  className="text-teal underline underline-offset-2"
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {previewUrl}
+                </a>
+              ) : dev?.status === "starting" ? (
+                "starting…"
+              ) : (
+                "not running in ADE"
               )}
-              {t === "logs" &&
-                (session.logs.length ? (
-                  <pre className="whitespace-pre-wrap rounded-md bg-ink px-3 py-2 font-mono text-[11px] leading-relaxed text-paper/80">
-                    {session.logs.join("\n")}
-                  </pre>
-                ) : (
-                  <p className="text-[12px] text-dim">No CLI output yet.</p>
-                ))}
-            </div>
-          ))}
-          <div className="flex gap-2 border-t border-line px-7 py-3">
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) void send();
-              }}
-              disabled={session.status === "complete"}
-              placeholder={
-                session.status === "complete"
-                  ? "Reopen the session to continue."
-                  : running
-                    ? "Queue a follow-up for after this turn…"
-                    : "Send a follow-up to the same agent session…"
-              }
-              aria-label="Message the agent"
-              className="flex-1 rounded-md border border-line bg-paper px-3 py-2 text-[13px] placeholder:text-dim/70 disabled:opacity-60"
-            />
-            <button
-              onClick={() => void send()}
-              disabled={!text.trim() || session.status === "complete" || sending}
-              className="btn-amber px-4 py-2 text-[13px] disabled:opacity-60"
-            >
-              {sending ? "Sending…" : "Send"}
-            </button>
+            </span>
+            <span>Other services: not verified by ADE</span>
+            {session.manifest && (
+              <span className="font-mono">
+                Last agent snapshot: {timeAgo(state.now, session.manifest.createdAt)}
+              </span>
+            )}
           </div>
-          {sendError && (
-            <p role="alert" className="px-7 pb-3 text-[12px] leading-relaxed text-danger">
-              Couldn’t send: {sendError} Your text is still in the composer.
-            </p>
-          )}
-        </div>
+        </header>
+
+        {/* Messages log (above) and the Files / Checks / Logs tabbed panel
+            (below) share the remaining vertical space. The seam between them
+            is draggable and persisted per-session-id in localStorage. */}
+        <Group
+          id={SESSION_BODY_LAYOUT_ID}
+          groupRef={bodyGroupRef}
+          orientation="vertical"
+          defaultLayout={SESSION_BODY_DEFAULT_LAYOUT}
+          onLayoutChanged={onBodyLayoutChanged}
+          style={{ display: "flex", flex: 1, minHeight: 0 }}
+        >
+          <Panel
+            id="session-messages"
+            minSize="30%"
+            style={{ minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}
+          >
+            <div
+              ref={scrollRef}
+              onScroll={onMessagesScroll}
+              className="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-7 py-5"
+            >
+              {session.messages.map((m) => (
+                <SessionMessage key={m.id} message={m} agentName={agent?.short} />
+              ))}
+              {session.manifest && (
+                <details className="card-panel px-4 py-3 text-[12px]">
+                  <summary className="label-mono cursor-pointer select-none">
+                    Agent context · {session.manifest.relevantFiles.length} candidate files
+                  </summary>
+                  <dl className="mt-3 grid min-w-0 grid-cols-[minmax(90px,120px)_minmax(0,1fr)] gap-x-3 gap-y-2 [overflow-wrap:anywhere]">
+                    <dt className="text-dim">Project</dt>
+                    <dd>
+                      {session.manifest.project.name} · {session.manifest.project.branch}
+                    </dd>
+                    <dt className="text-dim">Agent</dt>
+                    <dd>
+                      {session.manifest.agent.id}
+                      {session.manifest.agent.account ? ` · ${session.manifest.agent.account}` : ""}
+                    </dd>
+                    <dt className="text-dim">Model</dt>
+                    <dd>{session.manifest.agent.model ?? session.model ?? "agent default"}</dd>
+                    <dt className="text-dim">Dev server at turn start</dt>
+                    <dd>{session.manifest.devServer ?? "Not recorded"}</dd>
+                    <dt className="text-dim">Other services at turn start</dt>
+                    <dd>{session.manifest.otherServices ?? "Not verified by ADE"}</dd>
+                  </dl>
+                  <details className="mt-3 border-t border-line pt-2">
+                    <summary className="cursor-pointer text-dim">
+                      Technical details · tools, safety rules, files
+                    </summary>
+                    <div className="mt-2 text-dim">Tools: {session.manifest.tools}</div>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 [overflow-wrap:anywhere]">
+                      {session.manifest.constraints.map((constraint) => (
+                        <li key={constraint}>{constraint}</li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 text-dim">Candidate files</div>
+                    <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-relaxed [overflow-wrap:anywhere]">
+                      {session.manifest.relevantFiles.join("\n") || "(none listed)"}
+                    </pre>
+                  </details>
+                </details>
+              )}
+              {running && (
+                <div className="flex items-center gap-2 text-[12px] text-dim">
+                  <span className="size-1.5 animate-pulse-soft rounded-full bg-teal" />
+                  {session.status === "verifying"
+                    ? "Running checks…"
+                    : `${agent?.short ?? "Agent"} is running locally…`}
+                  {session.queuedMessages?.length ? " · follow-up queued" : ""}
+                </div>
+              )}
+              {session.status === "blocked" && (
+                <div
+                  className={`rounded border p-3 text-[12px] ${session.failureKind && session.failureKind !== "process" ? "border-amber/40 bg-amber/5" : "border-danger/30 bg-danger/5"}`}
+                >
+                  {session.failureKind === "provider_quota" ? (
+                    <>
+                      <strong>Provider limit reached.</strong> The agent could not start: your
+                      provider reports no usage left (a billing/rate matter, not an ADE fault).
+                      Nothing in the project changed; your task is kept. Wait for the limit to
+                      reset, upgrade with your provider, or switch agents on this session.
+                    </>
+                  ) : session.failureKind === "model_not_found" ? (
+                    <>
+                      <strong>Model not found.</strong> The agent rejected the selected model
+                      {session.model ? ` (“${session.model}”)` : ""}. Nothing in the project
+                      changed; your task is kept. Pick a different model with Change model above, or
+                      clear it to use the agent's configured default, then send a follow-up. The
+                      CLI's own "did you mean" suggestions, if any, are in its message and Logs.
+                    </>
+                  ) : session.failureKind === "provider_unavailable" ? (
+                    <>
+                      <strong>Provider unavailable.</strong> The agent reported that its provider
+                      could not be used. ADE does not manage provider credentials — check this CLI's
+                      own provider setup on the Agents page. Nothing in the project changed.
+                    </>
+                  ) : session.failureKind === "auth_expired" ? (
+                    <>
+                      <strong>Sign-in rejected.</strong> The agent's credentials were refused or
+                      expired. Re-authenticate with this CLI's own sign-in flow (Agents page → Set
+                      up); ADE never collects tokens. Nothing in the project changed; your task is
+                      kept.
+                    </>
+                  ) : session.failureKind === "context_overflow" ? (
+                    <>
+                      <strong>Context window exceeded.</strong> The conversation outgrew the model's
+                      context. Shorten or summarize your follow-up, start a fresh session for a
+                      narrower task, or pick a larger-context model with Change model. Any project
+                      edits made before the failure were left in place.
+                    </>
+                  ) : (
+                    <>
+                      The agent process exited unsuccessfully. Review its real output in Logs;
+                      existing files were not reset.
+                    </>
+                  )}
+                </div>
+              )}
+              {session.status === "ready" && (
+                <div className="card-panel p-4 ring-1 ring-teal/40">
+                  <div className="label-mono text-teal">Ready to review</div>
+                  <p className="mt-1 text-[13px]">
+                    The CLI has exited. Inspect the actual project diff and run checks explicitly;
+                    ADE did not run checks automatically.
+                  </p>
+                  <p className="mt-2 font-mono text-[10px] text-dim">
+                    Use “Mark complete” in the header when the result looks right.
+                  </p>
+                </div>
+              )}
+              <div ref={endRef} />
+            </div>
+          </Panel>
+          <Separator
+            id="seam-session-bottom"
+            className="panel-seam"
+            data-orientation="horizontal"
+          />
+          <Panel
+            id="session-bottom"
+            minSize={`${SESSION_BOTTOM_MIN_PX}px`}
+            maxSize={`${SESSION_BOTTOM_MAX_PCT}%`}
+            style={{ minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}
+          >
+            <div className="flex min-h-0 flex-1 flex-col bg-panel">
+              <div
+                className="flex shrink-0 flex-wrap items-center gap-1 px-7 pt-3"
+                role="tablist"
+                aria-label="Session panels"
+              >
+                {(["changes", "checks", "logs"] as Tab[]).map((t) => (
+                  <button
+                    key={t}
+                    ref={(el) => {
+                      tabRefs.current[t] = el;
+                    }}
+                    id={`session-tab-${t}`}
+                    onClick={() => setTab(t)}
+                    onKeyDown={(e) => onTabKeyDown(e, t)}
+                    aria-selected={tab === t}
+                    aria-controls={`session-panel-${t}`}
+                    role="tab"
+                    tabIndex={tab === t ? 0 : -1}
+                    className={`rounded-md px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] ${tab === t ? "bg-ink text-paper" : "text-dim hover:text-ink"}`}
+                  >
+                    {t === "changes"
+                      ? `Files changed (${session.changes.length})`
+                      : t === "checks"
+                        ? `Checks (${session.checks.length})`
+                        : `Logs (${session.logs.length})`}
+                  </button>
+                ))}
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-7 py-3">
+                {(["changes", "checks", "logs"] as Tab[]).map((t) => (
+                  <div
+                    key={t}
+                    id={`session-panel-${t}`}
+                    aria-labelledby={`session-tab-${t}`}
+                    role="tabpanel"
+                    hidden={tab !== t}
+                    tabIndex={0}
+                  >
+                    {t === "changes" && <DiffView changes={session.changes} />}
+                    {t === "checks" && (
+                      <>
+                        <ChecksList checks={session.checks} />
+                        {session.status === "ready" && (
+                          <button
+                            disabled={busy}
+                            onClick={() => void checksClick()}
+                            className="btn-quiet mt-3 px-3 py-1.5 text-[12px]"
+                          >
+                            {busy ? "Running…" : "Run project checks"}
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {t === "logs" &&
+                      (session.logs.length ? (
+                        <pre className="whitespace-pre-wrap break-words rounded-md bg-ink px-3 py-2 font-mono text-[11px] leading-relaxed text-paper/80 [overflow-wrap:anywhere]">
+                          {session.logs.join("\n")}
+                        </pre>
+                      ) : (
+                        <p className="text-[12px] text-dim">No CLI output yet.</p>
+                      ))}
+                  </div>
+                ))}
+              </div>
+              <div className="flex shrink-0 gap-2 border-t border-line px-7 py-3">
+                <input
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing) void send();
+                  }}
+                  disabled={session.status === "complete"}
+                  placeholder={
+                    session.status === "complete"
+                      ? "Reopen the session to continue."
+                      : running
+                        ? "Queue a follow-up for after this turn…"
+                        : "Send a follow-up to the same agent session…"
+                  }
+                  aria-label="Message the agent"
+                  className="flex-1 rounded-md border border-line bg-paper px-3 py-2 text-[13px] placeholder:text-dim/70 disabled:opacity-60"
+                />
+                <button
+                  onClick={() => void send()}
+                  disabled={!text.trim() || session.status === "complete" || sending}
+                  className="btn-amber px-4 py-2 text-[13px] disabled:opacity-60"
+                >
+                  {sending ? "Sending…" : "Send"}
+                </button>
+              </div>
+              {sendError && (
+                <p role="alert" className="px-7 pb-3 text-[12px] leading-relaxed text-danger">
+                  Couldn’t send: {sendError} Your text is still in the composer.
+                </p>
+              )}
+            </div>
+          </Panel>
+        </Group>
       </main>
-      <PreviewPane project={project} session={session} />
+      <RightPanePortal>
+        <PreviewPane project={project} session={session} />
+      </RightPanePortal>
     </>
   );
 }

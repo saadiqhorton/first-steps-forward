@@ -11,21 +11,12 @@ export const pi = {
   authNote:
     "Pi provides /login inside its interactive TUI; it does not expose a supported browser/device login command for this UI. Sign in with `pi`, then choose /login.",
   installHint: "Install from https://pi.dev/",
-  tools: "read, edit, write, grep, find, ls (no shell, no extensions)",
+  tools: "read, edit, write, grep, find, ls (no shell)",
   /**
-   * Enumerate the providers Pi actually has credentials for by reading the
-   * keys of Pi's own credential store (values are never read or logged),
-   * falling back to a fixed probe list when the store can't be read. Then
-   * confirm readiness with `pi auth check` per provider. Probing a fixed
-   * list alone wrongly reported "not signed in" for accounts authenticated
-   * via other providers (e.g. `opencode-go`).
-   */
-  /**
-   * Pi is multi-provider: it may hold API keys, subscriptions, or gateway
-   * credentials for several providers at once. Enumerate every provider in
-   * Pi's own credential store (keys only — values are never read or logged)
-   * and report all of them that report ready, so ADE never narrows Pi to a
-   * single provider or forces one at run time.
+   * Pi is multi-provider. Probe credential-store provider names (never
+   * inspect or log credential values), falling back to known names when the
+   * store is unavailable. Only `pi auth check` confirms READY status; the
+   * model catalog is separate and can list providers without ready auth.
    */
   async detectAuth(run) {
     let candidates = ["openai-codex", "openai", "anthropic", "google", "opencode-go"];
@@ -33,7 +24,7 @@ export const pi = {
       const store = JSON.parse(
         await fsp.readFile(path.join(os.homedir(), ".pi", "agent", "auth.json"), "utf8"),
       );
-      const configured = Object.keys(store ?? {}).filter((key) => typeof key === "string" && key);
+      const configured = Object.keys(store ?? {}).filter(Boolean);
       if (configured.length) candidates = configured;
     } catch {}
     const ready = [];
@@ -56,7 +47,9 @@ export const pi = {
     return {
       signedIn: true,
       providers: ready,
-      account: ready.length === 1 ? `Pi · ${ready[0]}` : `Pi · ${ready.length} providers`,
+      // Keep original provider IDs for Pi's CLI, but never put control
+      // characters or arbitrarily long store keys into the manifest/UI.
+      account: `${ready.length} READY ${ready.length === 1 ? "provider" : "providers"}: ${ready.map((name) => (/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) ? name : "(unusual provider name)")).join(", ")}`,
     };
   },
   command({ prompt, session, continuing, dataDir, providers, model }) {
@@ -67,7 +60,10 @@ export const pi = {
         "-p",
         "--mode",
         "json",
-        "--no-extensions",
+        // Extensions stay enabled so package-registered providers (e.g.
+        // ollama-cloud via pi-ollama-cloud) resolve for a picked model. The
+        // --tools allowlist below still sandboxes the run: extension tools
+        // (web search, subagents, shell) are never granted.
         "--tools",
         "read,edit,write,grep,find,ls",
         // A `provider/model` id embeds the provider, so --model wins outright.
