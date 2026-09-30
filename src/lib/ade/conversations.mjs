@@ -1,0 +1,75 @@
+/**
+ * Pure conversation-list filtering / unread helpers (plain JS for node:test).
+ * Re-exported from `viewed.ts` for the React UI.
+ */
+
+/**
+ * @typedef {"all" | "needs" | "working" | "unread"} ConversationFilter
+ */
+
+/**
+ * @param {{ id: string, updatedAt: number, createdAt: number }} session
+ * @param {Record<string, number>} viewed
+ */
+export function isUnread(session, viewed) {
+  const last = viewed[session.id] ?? session.createdAt;
+  return session.updatedAt > last;
+}
+
+/**
+ * @param {{ status: string }} session
+ * @param {boolean} showCompleted
+ */
+function passesCompleted(session, showCompleted) {
+  if (showCompleted) return true;
+  return session.status !== "complete";
+}
+
+/**
+ * @param {{ status: string, id: string, updatedAt: number, createdAt: number }} session
+ * @param {ConversationFilter} filter
+ * @param {Record<string, number>} viewed
+ */
+function passesFilter(session, filter, viewed) {
+  if (filter === "all") return true;
+  if (filter === "needs") return session.status === "ready" || session.status === "blocked";
+  if (filter === "working") return session.status === "working" || session.status === "verifying";
+  if (filter === "unread") return isUnread(session, viewed);
+  return true;
+}
+
+/**
+ * @param {{
+ *   request?: string,
+ *   summary?: string,
+ *   messages?: Array<{ text?: string }>
+ * }} session
+ * @param {string} query
+ */
+function passesQuery(session, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if ((session.request ?? "").toLowerCase().includes(q)) return true;
+  if ((session.summary ?? "").toLowerCase().includes(q)) return true;
+  const messages = session.messages ?? [];
+  for (const m of messages) {
+    if ((m.text ?? "").toLowerCase().includes(q)) return true;
+  }
+  return false;
+}
+
+/**
+ * @template {{ id: string, status: string, updatedAt: number, createdAt: number, request?: string, summary?: string, messages?: Array<{ text?: string }> }} S
+ * @param {S[]} sessions
+ * @param {{ filter: ConversationFilter, query: string, showCompleted: boolean, viewed: Record<string, number> }} o
+ * @returns {S[]}
+ */
+export function filterSessions(sessions, o) {
+  const { filter, query, showCompleted, viewed } = o;
+  return sessions
+    .filter((s) => passesCompleted(s, showCompleted))
+    .filter((s) => passesFilter(s, filter, viewed))
+    .filter((s) => passesQuery(s, query))
+    .slice()
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}

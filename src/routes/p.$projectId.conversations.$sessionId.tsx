@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link, createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { SessionView } from "@/components/ade/SessionView";
 import { useAde } from "@/lib/ade/store";
+import { markViewed } from "@/lib/ade/viewed";
 
 export const Route = createFileRoute("/p/$projectId/conversations/$sessionId")({
   head: () => ({ meta: [{ title: "Work session — ADE" }] }),
@@ -33,6 +34,13 @@ function ProjectSessionPage() {
       replace: true,
     });
   }, [state.hydrated, session, projectId, sessionId, navigate]);
+
+  const viewedSessionId = session?.id;
+  const viewedUpdatedAt = session?.updatedAt;
+  useEffect(() => {
+    if (viewedSessionId == null || viewedUpdatedAt == null) return;
+    markViewed(viewedSessionId, viewedUpdatedAt);
+  }, [viewedSessionId, viewedUpdatedAt]);
 
   if (state.hydrated && !session) throw notFound();
   if (session && session.projectId !== projectId) return <main className="flex-1" />;
