@@ -271,11 +271,16 @@ export function AgentPicker({
   const selectModel = (model: string) => {
     if (model === OTHER) {
       setShowOther(true);
-      onChange({ ...value, model: (otherText || value.model).trim() });
+      onChange({
+        ...value,
+        model: (otherText || value.model).trim(),
+        effort: "",
+        speed: "",
+      });
       return;
     }
     setShowOther(false);
-    onChange({ ...value, model });
+    onChange({ ...value, model, effort: "", speed: "" });
   };
 
   const selectEffort = (effort: string) => {
@@ -520,7 +525,12 @@ export function AgentPicker({
                     value={otherText || value.model}
                     onChange={(e) => {
                       setOtherText(e.target.value);
-                      onChange({ ...value, model: e.target.value.trim() });
+                      onChange({
+                        ...value,
+                        model: e.target.value.trim(),
+                        effort: "",
+                        speed: "",
+                      });
                     }}
                     maxLength={256}
                     placeholder="e.g. provider/model-id"
@@ -540,7 +550,12 @@ export function AgentPicker({
                   value={otherText || value.model}
                   onChange={(e) => {
                     setOtherText(e.target.value);
-                    onChange({ ...value, model: e.target.value.trim() });
+                    onChange({
+                      ...value,
+                      model: e.target.value.trim(),
+                      effort: "",
+                      speed: "",
+                    });
                   }}
                   maxLength={256}
                   placeholder="e.g. provider/model-id"
