@@ -1,4 +1,4 @@
-import { Play, Sparkles, X } from "lucide-react";
+import { FilePenLine, Play, Sparkles, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import type { Workflow } from "@/lib/ade/types";
 import { workflowAccent } from "./workflowFilters.mjs";
@@ -81,23 +81,22 @@ export function WorkflowDetailsPane({
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-4 py-3">
+        <button
+          type="button"
+          onClick={() => onEdit(workflow)}
+          className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px]"
+        >
+          <FilePenLine className="size-3.5" aria-hidden />
+          Edit workflow
+        </button>
         {!builtIn ? (
-          <>
-            <button
-              type="button"
-              onClick={() => onEdit(workflow)}
-              className="btn-quiet px-3 py-1.5 text-[12px]"
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete(workflow)}
-              className="btn-quiet px-3 py-1.5 text-[12px]"
-            >
-              Delete
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => onDelete(workflow)}
+            className="btn-quiet px-3 py-1.5 text-[12px]"
+          >
+            Delete
+          </button>
         ) : null}
         <Link
           to="/p/$projectId/conversations"
@@ -106,7 +105,7 @@ export function WorkflowDetailsPane({
           className="btn-amber ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px]"
         >
           <Play className="size-3.5" aria-hidden />
-          Run
+          Run workflow
         </Link>
       </div>
     </aside>

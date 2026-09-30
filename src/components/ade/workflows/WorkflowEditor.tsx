@@ -39,6 +39,7 @@ export function WorkflowEditor({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const editing = !!draft.id;
+  const fromBuiltIn = !!initial?.builtIn;
 
   const submit = async () => {
     if (busy) return;
@@ -70,7 +71,14 @@ export function WorkflowEditor({
         void submit();
       }}
     >
-      <div className="label-mono">{editing ? "Edit workflow" : "New workflow"}</div>
+      <div className="label-mono">
+        {editing ? "Edit workflow" : fromBuiltIn ? "Customize workflow" : "New workflow"}
+      </div>
+      {fromBuiltIn && !editing ? (
+        <p className="text-[12px] text-dim">
+          Saving creates your own copy under Yours. The built-in stays unchanged.
+        </p>
+      ) : null}
 
       <div>
         <label className="label-mono block" htmlFor="wf-name">
