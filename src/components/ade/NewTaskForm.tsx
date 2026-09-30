@@ -1,34 +1,42 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type AgentSelection } from "@/components/ade/AgentPicker";
 import { Composer } from "@/components/ade/Composer";
 import { SignInDialog } from "@/components/ade/SignInDialog";
-import type { Agent } from "@/lib/ade/types";
-import { useAde } from "@/lib/ade/store";
+import { WorkflowCards } from "@/components/ade/workflows/WorkflowCards";
+import type { Agent, Workflow } from "@/lib/ade/types";
+import { listWorkflows, useAde } from "@/lib/ade/store";
 
 export function NewTaskForm({
   projectId,
   initialText,
+  initialSelection,
+  prefillWorkflowId,
 }: {
   projectId: string;
   initialText?: string;
+  initialSelection?: Partial<Pick<AgentSelection, "agentId" | "permission">>;
+  prefillWorkflowId?: string;
 }) {
   const { state, startTask } = useAde();
   const navigate = useNavigate();
   const project = state.projects.find((p) => p.id === projectId);
   const [selection, setSelection] = useState<AgentSelection>(() => ({
-    agentId: project?.defaultAgent ?? "codex",
+    agentId: initialSelection?.agentId ?? project?.defaultAgent ?? "codex",
     model: "",
     effort: "",
     speed: "",
-    permission: "build",
+    permission: initialSelection?.permission ?? "build",
   }));
+  const [composerText, setComposerText] = useState(initialText);
   const [criteria, setCriteria] = useState("");
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [signing, setSigning] = useState<Agent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ackDirty, setAckDirty] = useState(false);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const appliedPrefill = useRef<string | null>(null);
   const agent = state.agents.find((a) => a.id === selection.agentId);
   const usable = !!agent?.installed && agent.signedIn;
   const overlapping =
@@ -37,6 +45,49 @@ export function NewTaskForm({
       (s) => s.projectId === project.id && ["working", "verifying"].includes(s.status),
     );
   const dirty = !!project && project.uncommittedFiles.length > 0;
+
+  const applyWorkflow = useCallback((workflow: Workflow) => {
+    setComposerText(workflow.prompt);
+    setSelection((prev) => ({
+      ...prev,
+      ...(workflow.agentId ? { agentId: workflow.agentId } : {}),
+      ...(workflow.permission ? { permission: workflow.permission } : {}),
+    }));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listWorkflows()
+      .then((list) => {
+        if (!cancelled) setWorkflows(list);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkflows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!prefillWorkflowId || workflows.length === 0) return;
+    if (appliedPrefill.current === prefillWorkflowId) return;
+    const workflow = workflows.find((w) => w.id === prefillWorkflowId);
+    if (!workflow) return;
+    appliedPrefill.current = prefillWorkflowId;
+    applyWorkflow(workflow);
+    // Clear the query param so refresh doesn't re-apply mid-edit.
+    void navigate({
+      to: "/p/$projectId/conversations",
+      params: { projectId },
+      search: (prev) => {
+        const next = { ...prev } as Record<string, unknown>;
+        delete next["workflow"];
+        return next as typeof prev;
+      },
+      replace: true,
+    });
+  }, [prefillWorkflowId, workflows, projectId, applyWorkflow, navigate]);
 
   const onSend = async (text: string) => {
     if (!project || busy) return false;
@@ -177,6 +228,8 @@ export function NewTaskForm({
     </div>
   );
 
+  const preview = workflows.slice(0, 3);
+
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-7 py-10">
@@ -184,6 +237,31 @@ export function NewTaskForm({
           What are you working on?
         </h1>
         <p className="mt-3 text-[13px] text-dim">Describe a change and an agent gets started.</p>
+        {preview.length > 0 && (
+          <div className="mt-8">
+            <div className="label-mono">Start with a workflow</div>
+            <div className="mt-3">
+              <WorkflowCards workflows={preview} onSelect={applyWorkflow} />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-4 text-[13px]">
+              <Link
+                to="/p/$projectId/workflows"
+                params={{ projectId }}
+                className="text-dim underline-offset-2 hover:text-ink hover:underline"
+              >
+                Browse all workflows →
+              </Link>
+              <Link
+                to="/p/$projectId/workflows"
+                params={{ projectId }}
+                search={{ new: true }}
+                className="text-dim underline-offset-2 hover:text-ink hover:underline"
+              >
+                + New workflow
+              </Link>
+            </div>
+          </div>
+        )}
         <div className="mt-8">
           <Composer
             mode="new"
@@ -194,7 +272,7 @@ export function NewTaskForm({
             sending={busy}
             error={error}
             onSend={onSend}
-            {...(initialText !== undefined ? { initialText } : {})}
+            {...(composerText !== undefined ? { initialText: composerText } : {})}
             extra={extra}
           />
         </div>
