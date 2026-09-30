@@ -87,7 +87,7 @@ export function upsertWorkflow(stored, input, { id, agentIds } = {}) {
     return {
       ok: false,
       status: 400,
-      error: "Built-in workflows can't be edited. Duplicate it instead.",
+      error: "Built-in workflows can't be edited.",
     };
 
   const index = current.findIndex((workflow) => workflow.id === id);
@@ -109,7 +109,7 @@ export function deleteWorkflow(stored, id) {
     return {
       ok: false,
       status: 400,
-      error: "Built-in workflows can't be deleted. Duplicate it instead.",
+      error: "Built-in workflows can't be deleted.",
     };
   const current = [...(stored ?? [])];
   const index = current.findIndex((workflow) => workflow.id === id);

@@ -145,7 +145,7 @@ test("upsertWorkflow creates, updates, and protects built-ins", () => {
   );
   assert.equal(builtin.ok, false);
   assert.equal(builtin.status, 400);
-  assert.equal(builtin.error, "Built-in workflows can't be edited. Duplicate it instead.");
+  assert.equal(builtin.error, "Built-in workflows can't be edited.");
 
   const missing = upsertWorkflow(
     [],
@@ -184,6 +184,7 @@ test("deleteWorkflow removes stored workflows and protects built-ins", () => {
   const builtin = deleteWorkflow(seeded, "builtin-explain-codebase");
   assert.equal(builtin.ok, false);
   assert.equal(builtin.status, 400);
+  assert.equal(builtin.error, "Built-in workflows can't be deleted.");
 
   const missing = deleteWorkflow(seeded, "wf-missing");
   assert.equal(missing.ok, false);
