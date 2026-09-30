@@ -125,7 +125,7 @@ export function Composer({
             onClick={() => setPickerOpen((v) => !v)}
             aria-expanded={pickerOpen}
             aria-haspopup="dialog"
-            className="btn-quiet flex min-w-0 max-w-[55%] items-center gap-2 px-2.5 py-1.5 text-left"
+            className="btn-quiet flex min-w-0 max-w-[55%] items-center gap-2 px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/40 aria-expanded:bg-ink/[0.06]"
           >
             <span className="min-w-0 truncate">
               <span className="block truncate text-[12.5px] font-medium leading-tight">

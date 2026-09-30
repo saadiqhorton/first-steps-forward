@@ -6,7 +6,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { Check } from "lucide-react";
+import { Check, Search } from "lucide-react";
 import { REASON_TEXT } from "@/components/ade/ModelPicker";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import { HarnessDialog } from "@/components/ade/HarnessDialog";
@@ -147,6 +147,7 @@ export function AgentPicker({
   const [caps, setCaps] = useState<OptionCapabilities | null>(null);
   const [showOther, setShowOther] = useState(false);
   const [otherText, setOtherText] = useState("");
+  const [modelQuery, setModelQuery] = useState("");
   const [closeAfter, setCloseAfter] = useState(readCloseAfter);
   const [focusCol, setFocusCol] = useState<Column>("agent");
   const [focusRow, setFocusRow] = useState(0);
@@ -163,6 +164,7 @@ export function AgentPicker({
     setModels(null);
     setShowOther(false);
     setOtherText("");
+    setModelQuery("");
     agentModels(value.agentId)
       .then((r) => !cancelled && setModels(r))
       .catch(
@@ -237,6 +239,18 @@ export function AgentPicker({
     rows.push({ id: OTHER, label: "Other model id…" });
     return rows;
   }, [listedModels]);
+
+  const filteredModelRows = useMemo(() => {
+    const q = modelQuery.trim().toLowerCase();
+    if (!q) return modelRows;
+    const matched = modelRows.filter(
+      (row) =>
+        row.id !== OTHER &&
+        (row.id.toLowerCase().includes(q) || row.label.toLowerCase().includes(q)),
+    );
+    const other = modelRows.find((row) => row.id === OTHER);
+    return other ? [...matched, other] : matched;
+  }, [modelRows, modelQuery]);
 
   const effortRows = useMemo(() => {
     const efforts = caps?.efforts ?? [];
@@ -318,7 +332,7 @@ export function AgentPicker({
 
   const columnItems = (col: Column): string[] => {
     if (col === "agent") return state.agents.map((a) => a.id);
-    if (col === "model") return modelRows.map((r) => r.id);
+    if (col === "model") return filteredModelRows.map((r) => r.id);
     if (col === "effort") return effortRows.map((r) => r.id);
     if (col === "speed") return speedRows.map((r) => r.id);
     return permissionRows.map((r) => r.id);
@@ -413,6 +427,8 @@ export function AgentPicker({
   const note = caps?.permissionNotes?.[value.permission] ?? "";
   const modelManual =
     showOther || (!!value.model && !listedModels.some((m) => m.id === value.model));
+  const pickerGrid =
+    "grid grid-cols-[minmax(0,1.05fr)_minmax(0,1.55fr)_minmax(0,0.85fr)_minmax(0,0.75fr)_minmax(0,0.9fr)] gap-px bg-line";
 
   return (
     <>
@@ -422,9 +438,9 @@ export function AgentPicker({
         aria-label="Agent picker"
         tabIndex={-1}
         onKeyDown={onPanelKeyDown}
-        className="card-panel w-[min(880px,100%)] shadow-lg outline-none"
+        className="card-panel w-[min(1080px,100%)] shadow-lg outline-none"
       >
-        <div className="grid grid-cols-5 gap-px border-b border-line bg-line">
+        <div className={`${pickerGrid} border-b border-line`}>
           {(["Agent", "Model", "Effort", "Speed", "Permissions"] as const).map((heading, i) => (
             <div key={heading} className="bg-panel px-3 py-2">
               <div className="label-mono">{heading}</div>
@@ -433,10 +449,10 @@ export function AgentPicker({
           ))}
         </div>
 
-        <div className="grid grid-cols-5 gap-px bg-line">
+        <div className={pickerGrid}>
           {/* Agent */}
           <div
-            className="max-h-72 overflow-y-auto bg-panel p-1.5"
+            className="max-h-96 overflow-y-auto bg-panel p-1.5"
             onFocusCapture={() => setFocusCol("agent")}
           >
             {agentLocked && (
@@ -516,58 +532,80 @@ export function AgentPicker({
 
           {/* Model */}
           <div
-            className="max-h-72 overflow-y-auto bg-panel p-1.5"
+            className="flex max-h-96 flex-col bg-panel"
             onFocusCapture={() => setFocusCol("model")}
           >
             {modelsLoading ? (
-              <p className="px-2 py-1.5 font-mono text-[11px] text-dim">Reading model list…</p>
+              <p className="px-3 py-2 font-mono text-[11px] text-dim">Reading model list…</p>
             ) : models?.available ? (
               <>
-                {modelRows.map((row, i) => (
-                  <RowButton
-                    key={row.id || "default"}
-                    selected={
-                      row.id === OTHER ? modelManual : !modelManual && value.model === row.id
-                    }
-                    rowRef={setRowRef("model", i)}
-                    onFocus={() => {
-                      setFocusCol("model");
-                      setFocusRow(i);
-                    }}
-                    onClick={() => selectModel(row.id)}
-                  >
-                    {row.label}
-                  </RowButton>
-                ))}
-                {modelManual && (
-                  <input
-                    id={otherId}
-                    value={otherText || value.model}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setOtherText(next);
-                      const trimmed = next.trim();
-                      if (trimmed) writeLastModel(value.agentId, trimmed);
-                      onChange({
-                        ...value,
-                        model: trimmed,
-                        effort: "",
-                        speed: "",
-                      });
-                    }}
-                    maxLength={256}
-                    placeholder="e.g. provider/model-id"
-                    className="mt-1 w-full rounded-md border border-line bg-panel px-2 py-1.5 font-mono text-[11px] placeholder:text-dim/70"
-                  />
-                )}
-                {models.source === "bundled" && (
-                  <p className="mt-1 px-2 font-mono text-[10px] text-dim">
-                    Offline bundled catalog — may omit newer models.
-                  </p>
-                )}
+                <div className="shrink-0 border-b border-line p-1.5">
+                  <label className="relative block">
+                    <span className="sr-only">Search models</span>
+                    <Search
+                      className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-dim"
+                      aria-hidden
+                    />
+                    <input
+                      type="search"
+                      value={modelQuery}
+                      onChange={(e) => setModelQuery(e.target.value)}
+                      placeholder="Search models"
+                      className="w-full rounded-md border border-line bg-paper py-1.5 pr-2 pl-8 font-mono text-[11px] placeholder:text-dim/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/50"
+                    />
+                  </label>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+                  {filteredModelRows.filter((row) => row.id !== OTHER).length === 0 &&
+                  modelQuery.trim() ? (
+                    <p className="px-2 py-1.5 font-mono text-[11px] text-dim">No models match.</p>
+                  ) : null}
+                  {filteredModelRows.map((row, i) => (
+                    <RowButton
+                      key={row.id || "default"}
+                      selected={
+                        row.id === OTHER ? modelManual : !modelManual && value.model === row.id
+                      }
+                      rowRef={setRowRef("model", i)}
+                      onFocus={() => {
+                        setFocusCol("model");
+                        setFocusRow(i);
+                      }}
+                      onClick={() => selectModel(row.id)}
+                    >
+                      {row.label}
+                    </RowButton>
+                  ))}
+                  {modelManual && (
+                    <input
+                      id={otherId}
+                      value={otherText || value.model}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setOtherText(next);
+                        const trimmed = next.trim();
+                        if (trimmed) writeLastModel(value.agentId, trimmed);
+                        onChange({
+                          ...value,
+                          model: trimmed,
+                          effort: "",
+                          speed: "",
+                        });
+                      }}
+                      maxLength={256}
+                      placeholder="e.g. provider/model-id"
+                      className="mt-1 w-full rounded-md border border-line bg-paper px-2 py-1.5 font-mono text-[11px] placeholder:text-dim/70"
+                    />
+                  )}
+                  {models.source === "bundled" && (
+                    <p className="mt-1 px-2 font-mono text-[10px] text-dim">
+                      Offline bundled catalog — may omit newer models.
+                    </p>
+                  )}
+                </div>
               </>
             ) : (
-              <>
+              <div className="overflow-y-auto p-1.5">
                 <input
                   id={otherId}
                   value={otherText || value.model}
@@ -585,7 +623,7 @@ export function AgentPicker({
                   }}
                   maxLength={256}
                   placeholder="e.g. provider/model-id"
-                  className="w-full rounded-md border border-line bg-panel px-2 py-1.5 font-mono text-[11px] placeholder:text-dim/70"
+                  className="w-full rounded-md border border-line bg-paper px-2 py-1.5 font-mono text-[11px] placeholder:text-dim/70"
                 />
                 <p className="mt-2 rounded-md bg-amber/10 px-2 py-1.5 text-[11px] leading-relaxed">
                   <span className="font-medium">
@@ -594,13 +632,13 @@ export function AgentPicker({
                   {models?.hint ??
                     "You can enter a model id manually; availability depends on your account."}
                 </p>
-              </>
+              </div>
             )}
           </div>
 
           {/* Effort */}
           <div
-            className="max-h-72 overflow-y-auto bg-panel p-1.5"
+            className="max-h-96 overflow-y-auto bg-panel p-1.5"
             onFocusCapture={() => setFocusCol("effort")}
           >
             {effortRows.map((row, i) => (
@@ -630,7 +668,7 @@ export function AgentPicker({
 
           {/* Speed */}
           <div
-            className="max-h-72 overflow-y-auto bg-panel p-1.5"
+            className="max-h-96 overflow-y-auto bg-panel p-1.5"
             onFocusCapture={() => setFocusCol("speed")}
           >
             {speedRows.map((row, i) => (
@@ -660,7 +698,7 @@ export function AgentPicker({
 
           {/* Permissions */}
           <div
-            className="max-h-72 overflow-y-auto bg-panel p-1.5"
+            className="max-h-96 overflow-y-auto bg-panel p-1.5"
             onFocusCapture={() => setFocusCol("permission")}
           >
             {permissionRows.map((row, i) => (
