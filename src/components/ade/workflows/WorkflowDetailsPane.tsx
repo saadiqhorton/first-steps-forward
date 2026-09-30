@@ -34,7 +34,7 @@ export function WorkflowDetailsPane({
   const permissionLabel = permissionTagLabel(workflow.permission);
 
   return (
-    <aside className="flex h-full min-h-0 w-full min-w-[20rem] max-w-md flex-col border-l border-line bg-panel">
+    <aside className="flex h-full min-h-0 w-full flex-col bg-panel">
       <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-3">
         <h2 className="label-mono">Workflow details</h2>
         <button
@@ -48,10 +48,7 @@ export function WorkflowDetailsPane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <div
-          className={`grid size-12 place-items-center rounded-lg ${accent}`}
-          aria-hidden
-        >
+        <div className={`grid size-12 place-items-center rounded-lg ${accent}`} aria-hidden>
           <Sparkles className="size-5 text-ink/70" />
         </div>
         <p className="label-mono mt-4">{builtIn ? "Built-in" : "Yours"}</p>
