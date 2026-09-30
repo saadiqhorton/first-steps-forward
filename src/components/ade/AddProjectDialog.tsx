@@ -18,7 +18,7 @@ export function AddProjectDialog({
   const navigate = useNavigate();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto border-line bg-paper p-0 sm:rounded-lg">
+      <DialogContent className="flex max-h-[min(90vh,40rem)] max-w-xl flex-col gap-0 overflow-hidden border-line bg-paper p-0 sm:rounded-lg">
         <DialogHeader className="sr-only">
           <DialogTitle>Add project</DialogTitle>
           <DialogDescription>Point ADE at a local folder on this machine.</DialogDescription>
