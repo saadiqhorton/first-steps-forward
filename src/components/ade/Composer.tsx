@@ -86,33 +86,38 @@ export function Composer({
   };
 
   return (
-    <div className="relative">
-      {pickerOpen && (
-        <div ref={pickerWrapRef} className="absolute bottom-full left-0 z-30 mb-2 w-full">
-          <AgentPicker
-            value={selection}
-            onChange={onSelectionChange}
-            onClose={() => setPickerOpen(false)}
-            {...(agentLocked ? { agentLocked } : {})}
-          />
-        </div>
-      )}
-      <div className="card-panel overflow-hidden">
-        {extra ? <div className="border-b border-line px-4 py-3">{extra}</div> : null}
-        <label htmlFor={labelId} className="sr-only">
-          {mode === "new" ? "Describe a change" : "Follow-up message"}
-        </label>
-        <textarea
-          id={labelId}
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          disabled={!!disabledReason}
-          placeholder={disabledReason ?? placeholder}
-          rows={mode === "new" ? 3 : 1}
-          className="block w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed placeholder:text-dim/70 disabled:opacity-60"
-        />
+    <div className="card-panel overflow-visible">
+      {extra ? <div className="border-b border-line px-4 py-3">{extra}</div> : null}
+      <label htmlFor={labelId} className="sr-only">
+        {mode === "new" ? "Describe a change" : "Follow-up message"}
+      </label>
+      <textarea
+        id={labelId}
+        ref={textareaRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={onKeyDown}
+        disabled={!!disabledReason}
+        placeholder={disabledReason ?? placeholder}
+        rows={mode === "new" ? 3 : 1}
+        className="block w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed placeholder:text-dim/70 disabled:opacity-60"
+      />
+      {/*
+        Anchor the picker to this footer only. A relative wrapper around the
+        whole card (including acceptance-criteria `extra`) made bottom-full
+        float the panel above that block mid-page.
+      */}
+      <div className="relative">
+        {pickerOpen && (
+          <div ref={pickerWrapRef} className="absolute inset-x-0 bottom-full z-30 mb-2">
+            <AgentPicker
+              value={selection}
+              onChange={onSelectionChange}
+              onClose={() => setPickerOpen(false)}
+              {...(agentLocked ? { agentLocked } : {})}
+            />
+          </div>
+        )}
         <div className="flex items-center gap-2 px-3 pb-3">
           <button
             ref={chipRef}
@@ -146,15 +151,15 @@ export function Composer({
             <ArrowUp className="size-4" aria-hidden />
           </button>
         </div>
-        {error ? (
-          <p
-            role="alert"
-            className="border-t border-line px-4 py-2 text-[12px] leading-relaxed text-danger"
-          >
-            {error}
-          </p>
-        ) : null}
       </div>
+      {error ? (
+        <p
+          role="alert"
+          className="border-t border-line px-4 py-2 text-[12px] leading-relaxed text-danger"
+        >
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
