@@ -67,7 +67,12 @@ export async function saveWorkspace(file, current) {
     await fs.writeFile(
       tmp,
       JSON.stringify(
-        { projects: current.projects, sessions: current.sessions, processes: current.processes },
+        {
+          projects: current.projects,
+          sessions: current.sessions,
+          processes: current.processes,
+          workflows: current.workflows ?? [],
+        },
         null,
         2,
       ),

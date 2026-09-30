@@ -1,4 +1,5 @@
 export type AgentId = "codex" | "opencode" | "pi";
+export type Permission = "build" | "plan";
 
 export interface Agent {
   id: AgentId;
@@ -13,6 +14,11 @@ export interface Agent {
   authNote: string;
   carriesConversation: boolean;
   installHint: string;
+  installMethod?: "npm" | "other" | "missing";
+  installPath?: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+  harness?: { install: string; update: string };
 }
 
 export interface Project {
@@ -66,6 +72,42 @@ export interface AgentModel {
   id: string;
   label?: string;
   meta?: string;
+  efforts?: string[];
+  defaultEffort?: string;
+  speeds?: string[];
+}
+export interface OptionCapabilities {
+  efforts: string[];
+  speeds: string[];
+  permissions: Permission[];
+  effortNote: string;
+  speedNote: string;
+  permissionNotes: Record<Permission, string>;
+}
+export interface HarnessJob {
+  agentId: AgentId;
+  kind: "install" | "update";
+  status: "idle" | "running" | "succeeded" | "failed";
+  command: string;
+  output: string[];
+  exitCode?: number;
+  startedAt?: number;
+  finishedAt?: number;
+}
+export interface Workflow {
+  id: string;
+  name: string;
+  description: string;
+  prompt: string;
+  agentId?: AgentId;
+  permission?: Permission;
+  builtIn?: boolean;
+}
+export interface ProjectDocument {
+  path: string;
+  name: string;
+  modifiedAt: number;
+  size: number;
 }
 export interface AgentModelsResult {
   available: boolean;
@@ -99,6 +141,9 @@ export interface Session {
   completedAt?: number;
   agentSessionId?: string;
   model?: string;
+  effort?: string;
+  speed?: string;
+  permission?: Permission;
   /** Files dirty before the agent's first turn — shown as pre-existing. */
   baselineFiles?: string[];
   failureKind?:

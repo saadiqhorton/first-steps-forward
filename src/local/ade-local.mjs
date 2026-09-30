@@ -6,12 +6,22 @@ import os from "node:os";
 import path from "node:path";
 import { adapters } from "./adapters/index.mjs";
 import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
-import { listModels, MODEL_ID } from "./models.mjs";
+import { listModels, MODEL_ID, clearModelsCache } from "./models.mjs";
+import { optionCapabilities, validateOptions } from "./capabilities.mjs";
+import {
+  HARNESS,
+  commandLine,
+  compareVersions,
+  detectInstallMethod,
+  latestVersion,
+  createHarnessJobs,
+} from "./harness.mjs";
+import { listWorkflows, upsertWorkflow, deleteWorkflow as removeWorkflow } from "./workflows.mjs";
 import { reconcileWorkspaceMessages, saveWorkspace } from "./workspace-persistence.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
-const state = { projects: [], sessions: [], processes: [], agents: [] };
+const state = { projects: [], sessions: [], processes: [], agents: [], workflows: [] };
 const children = new Map();
 const authChildren = new Map();
 // Process ids whose dev-server port has been confirmed to accept a
@@ -62,6 +72,7 @@ async function load() {
     state.projects = Array.isArray(saved.projects) ? saved.projects : [];
     state.sessions = Array.isArray(saved.sessions) ? saved.sessions : [];
     state.processes = Array.isArray(saved.processes) ? saved.processes : [];
+    state.workflows = Array.isArray(saved.workflows) ? saved.workflows : [];
     let changed = false;
     for (const p of state.processes) {
       const project = state.projects.find((item) => item.id === p.projectId);
@@ -166,12 +177,44 @@ async function executable(bin) {
   const res = await run(bin, ["--version"], { timeout: 5000 });
   return res.code === 0 ? (res.stdout || res.stderr).trim().split(/\r?\n/)[0].slice(0, 100) : null;
 }
+async function which(bin) {
+  const res = await run(process.platform === "win32" ? "where" : "which", [bin], {
+    timeout: 3000,
+  });
+  if (res.code !== 0) return null;
+  const line = (res.stdout || "").trim().split(/\r?\n/)[0]?.trim();
+  return line || null;
+}
+async function npmRoot() {
+  const res = await run("npm", ["root", "-g"], { timeout: 5000 });
+  if (res.code !== 0) return null;
+  const root = (res.stdout || "").trim().split(/\r?\n/)[0]?.trim();
+  return root || null;
+}
+const harnessDetectDeps = {
+  which,
+  npmRoot,
+  realpath: (p) => fs.realpath(p),
+};
+const harnessJobs = createHarnessJobs({
+  spawn,
+  onFinished: () => {
+    clearModelsCache();
+    agentStatus().catch(() => {});
+  },
+});
+
 async function agentStatus() {
   const results = await Promise.all(
     Object.values(adapters).map(async (adapter) => {
       const version = await executable(adapter.bin);
       const auth = version ? await adapter.detectAuth(run) : { signedIn: false };
-      return {
+      const install = await detectInstallMethod(adapter.id, harnessDetectDeps);
+      const entry = HARNESS[adapter.id];
+      const harness = entry
+        ? { install: commandLine(entry.install), update: commandLine(entry.update) }
+        : { install: "", update: "" };
+      const row = {
         id: adapter.id,
         name: adapter.name,
         short: adapter.short,
@@ -183,7 +226,11 @@ async function agentStatus() {
         ...(version ? { version: version.replace(/^.*?\s/, "") } : {}),
         ...auth,
         carriesConversation: true,
+        installMethod: install.method,
+        ...(install.path ? { installPath: install.path } : {}),
+        harness,
       };
+      return row;
     }),
   );
   state.agents = results;
@@ -195,6 +242,26 @@ async function agentStatus() {
       { mode: 0o600 },
     );
   } catch {}
+  // Background, non-blocking latest-version checks — next bootstrap poll picks them up.
+  for (const agent of results) {
+    void (async () => {
+      const latest = await latestVersion(agent.id, run);
+      if (latest == null) return;
+      const current = state.agents.find((a) => a.id === agent.id);
+      if (!current) return;
+      current.latestVersion = latest;
+      if (current.version && compareVersions(current.version, latest) < 0)
+        current.updateAvailable = true;
+      else delete current.updateAvailable;
+      try {
+        await fs.writeFile(
+          AGENTS_STATUS_FILE,
+          JSON.stringify({ fetchedAt: Date.now(), agents: state.agents }),
+          { mode: 0o600 },
+        );
+      } catch {}
+    })();
+  }
   return results;
 }
 
@@ -214,10 +281,18 @@ async function bootstrapAgents() {
     // Caches written before agentStatus copied the adapter tools string lack
     // it: backfill from the adapter so buildManifest resolves the real tool
     // set immediately, while the background probe refreshes the rest.
-    state.agents = cached.agents.map((agent) => ({
-      ...agent,
-      tools: agent.tools ?? adapters[agent.id]?.tools,
-    }));
+    state.agents = cached.agents.map((agent) => {
+      const entry = HARNESS[agent.id];
+      return {
+        ...agent,
+        tools: agent.tools ?? adapters[agent.id]?.tools,
+        harness:
+          agent.harness ??
+          (entry
+            ? { install: commandLine(entry.install), update: commandLine(entry.update) }
+            : undefined),
+      };
+    });
   }
   // Never make the project list wait on CLI version/auth probes. If there's
   // no cache yet, return the current (possibly empty) agent list; the normal
@@ -540,7 +615,25 @@ export function classifyTurnFailure(session, code, logStart, messageStart) {
   else session.failureKind = kind;
   return { kind, texts };
 }
-function agentCommand(session, project, prompt, continuing) {
+/** Resolve and validate effort/speed/permission against the model's capability row. */
+async function resolveSessionOptions(agentId, modelId, options) {
+  const version = state.agents.find((a) => a.id === agentId)?.version ?? "";
+  const listed = await listModels(agentId, run, { version, cacheDir: DATA_DIR });
+  const modelRow =
+    modelId && listed?.available
+      ? (listed.models?.find((m) => m.id === modelId) ?? { id: modelId })
+      : undefined;
+  return validateOptions(agentId, options, modelRow);
+}
+
+function syncOptionFields(session, value, cleared) {
+  for (const key of ["effort", "speed", "permission"]) {
+    if (cleared.has(key)) delete session[key];
+    else if (value[key] !== undefined) session[key] = value[key];
+  }
+}
+
+export function agentCommand(session, project, prompt, continuing) {
   const adapter = adapters[session.agentId];
   return adapter.command({
     projectPath: project.path,
@@ -550,6 +643,9 @@ function agentCommand(session, project, prompt, continuing) {
     dataDir: DATA_DIR,
     providers: state.agents.find((a) => a.id === session.agentId)?.providers,
     model: session.model,
+    effort: session.effort,
+    speed: session.speed,
+    permission: session.permission,
   });
 }
 /**
@@ -1379,10 +1475,15 @@ async function handle(req, res) {
       authRequired: true,
     });
   }
-  // Host terminal and file editing stay on loopback even when ADE_TOKEN exposes
-  // other API routes. Both can operate directly on the user's machine.
+  // Host terminal, file editing, and harness install/update stay on loopback
+  // even when ADE_TOKEN exposes other API routes. All can operate directly on
+  // the user's machine.
+  const harnessRoute =
+    parts[0] === "agents" &&
+    parts.length === 3 &&
+    ["install", "update", "harness"].includes(parts[2]);
   if (
-    ["terminal", "editor"].includes(parts[0]) &&
+    (["terminal", "editor"].includes(parts[0]) || harnessRoute) &&
     (!isLoopbackAddress(req.socket?.remoteAddress) ||
       !["127.0.0.1", "localhost", "::1"].includes(hostnameOf(req.headers.host)))
   )
@@ -1476,6 +1577,8 @@ async function handle(req, res) {
             200,
             await editor.readEditorFile(project.path, url.searchParams.get("path") ?? ""),
           );
+        if (parts.length === 3 && req.method === "GET" && parts[2] === "documents")
+          return json(res, 200, { documents: await editor.listDocuments(project.path) });
         if (parts.length === 3 && req.method === "POST" && parts[2] === "file") {
           const data = await body(req);
           return json(
@@ -1669,6 +1772,12 @@ async function handle(req, res) {
       const project = state.projects.find((p) => p.id === data.projectId);
       const agent = state.agents.find((a) => a.id === data.agentId);
       if (!project || !agent) return json(res, 400, { error: "Select a valid project and agent." });
+      const optionCheck = await resolveSessionOptions(agent.id, model || undefined, {
+        effort: data.effort,
+        speed: data.speed,
+        permission: data.permission,
+      });
+      if (!optionCheck.ok) return json(res, 400, { error: optionCheck.error });
       if (!agent.installed || !agent.signedIn)
         return json(res, 400, {
           error: `${agent.name} must be installed and authenticated using its supported sign-in flow first.`,
@@ -1724,6 +1833,7 @@ async function handle(req, res) {
         updatedAt: now(),
         queuedMessages: [],
         ...(model ? { model } : {}),
+        ...optionCheck.value,
       };
       state.sessions.unshift(s);
       // Hold the single-turn slot across the awaits inside runAgent so an
@@ -2095,12 +2205,195 @@ async function handle(req, res) {
       // The response reports both the old and new effective values.
       return json(res, 200, { ...s, model: s.model ?? null, previousModel });
     }
+    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "options") {
+      const s = state.sessions.find((x) => x.id === parts[1]);
+      if (!s) return json(res, 404, { error: "Session not found." });
+      const data = await body(req);
+      if (s.status === "complete")
+        return json(res, 409, {
+          error: "Reopen this session before changing its model or options.",
+        });
+      const modelProvided = Object.prototype.hasOwnProperty.call(data, "model");
+      let nextModel = s.model;
+      if (modelProvided) {
+        const model = String(data.model ?? "").trim();
+        if (model && !MODEL_ID.test(model))
+          return json(res, 400, {
+            error:
+              "Model ids must start with a letter or digit and may then contain letters, digits, and . _ / : [ ] - + (max 256 characters), so they can never read as a CLI flag. Nothing was changed.",
+          });
+        nextModel = model || undefined;
+      }
+      const cleared = new Set();
+      const optionInput = {};
+      for (const key of ["effort", "speed", "permission"]) {
+        if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+        const raw = data[key];
+        if (raw === undefined || raw === null || raw === "") cleared.add(key);
+        else optionInput[key] = raw;
+      }
+      const optionCheck = await resolveSessionOptions(s.agentId, nextModel, optionInput);
+      if (!optionCheck.ok) return json(res, 400, { error: optionCheck.error });
+      const previousModel = s.model ?? null;
+      let changed = false;
+      if (modelProvided && previousModel !== (nextModel ?? null)) {
+        if (nextModel) s.model = nextModel;
+        else delete s.model;
+        changed = true;
+        addMessage(
+          s,
+          "system",
+          nextModel
+            ? `Model set to "${nextModel}". It applies from the next CLI turn; a turn already running keeps its current model. The current conversation continues — per-CLI semantics of changing models mid-conversation are not verified; the CLI may treat context differently under the new model.`
+            : `Model cleared; the next turn uses ${s.agentId}'s configured default. A turn already running keeps its current model.`,
+        );
+      }
+      const before = {
+        effort: s.effort,
+        speed: s.speed,
+        permission: s.permission,
+      };
+      syncOptionFields(s, optionCheck.value, cleared);
+      if (
+        before.effort !== s.effort ||
+        before.speed !== s.speed ||
+        before.permission !== s.permission
+      ) {
+        changed = true;
+        const bits = [];
+        if (optionCheck.value.effort || cleared.has("effort"))
+          bits.push(
+            cleared.has("effort") ? "effort cleared" : `effort "${optionCheck.value.effort}"`,
+          );
+        if (optionCheck.value.speed || cleared.has("speed"))
+          bits.push(cleared.has("speed") ? "speed cleared" : `speed "${optionCheck.value.speed}"`);
+        if (optionCheck.value.permission || cleared.has("permission"))
+          bits.push(
+            cleared.has("permission")
+              ? "permission cleared"
+              : `permission "${optionCheck.value.permission}"`,
+          );
+        if (bits.length)
+          addMessage(
+            s,
+            "system",
+            `Options updated (${bits.join(", ")}). They apply from the next CLI turn; a turn already running keeps its current options.`,
+          );
+      }
+      if (changed) {
+        s.updatedAt = now();
+        await save();
+      }
+      return json(res, 200, {
+        ...s,
+        model: s.model ?? null,
+        previousModel,
+      });
+    }
+    if (req.method === "GET" && parts[0] === "agents" && parts[2] === "capabilities") {
+      const agentId = parts[1];
+      if (!adapters[agentId])
+        return json(res, 404, { error: "Unknown agent. Available: codex, opencode, pi." });
+      const modelId = url.searchParams.get("model") || undefined;
+      const version = state.agents.find((a) => a.id === agentId)?.version ?? "";
+      const listed = await listModels(agentId, run, { version, cacheDir: DATA_DIR });
+      const modelRow =
+        modelId && listed?.available
+          ? (listed.models?.find((m) => m.id === modelId) ?? { id: modelId })
+          : undefined;
+      return json(res, 200, optionCapabilities(agentId, modelRow));
+    }
+    if (
+      parts[0] === "agents" &&
+      parts.length === 3 &&
+      (parts[2] === "install" || parts[2] === "update" || parts[2] === "harness")
+    ) {
+      const agentId = parts[1];
+      if (!adapters[agentId] || !HARNESS[agentId])
+        return json(res, 404, { error: "Unknown agent. Available: codex, opencode, pi." });
+      const agent = state.agents.find((a) => a.id === agentId);
+      if (req.method === "GET" && parts[2] === "harness") {
+        const job = harnessJobs.get(agentId);
+        return json(res, 200, { ...job, agentId, kind: job.kind ?? "install" });
+      }
+      if (req.method !== "POST" || (parts[2] !== "install" && parts[2] !== "update"))
+        return json(res, 404, { error: "Not found." });
+      const kind = parts[2];
+      if (
+        state.sessions.some(
+          (s) => s.agentId === agentId && ["working", "verifying"].includes(s.status),
+        )
+      )
+        return json(res, 409, {
+          error:
+            "This agent still has a running task. Wait until it stops before installing or updating.",
+        });
+      const method = agent?.installMethod ?? "missing";
+      if (kind === "install" && method !== "missing")
+        return json(res, 409, {
+          error: `${agent?.name ?? agentId} is already installed.`,
+        });
+      if (kind === "update" && method !== "npm") {
+        if (method === "other")
+          return json(res, 409, {
+            error: `Installed outside npm at ${agent?.installPath ?? "unknown path"}; update it where you installed it.`,
+          });
+        return json(res, 409, {
+          error: `${agent?.name ?? agentId} is not installed yet. Install it first.`,
+        });
+      }
+      try {
+        const job = harnessJobs.start(agentId, kind, HARNESS[agentId][kind]);
+        return json(res, 200, job);
+      } catch (error) {
+        if (error?.code === "BUSY") return json(res, 409, { error: error.message });
+        throw error;
+      }
+    }
+    if (parts[0] === "workflows") {
+      const agentIds = Object.keys(adapters);
+      if (req.method === "GET" && parts.length === 1)
+        return json(res, 200, { workflows: listWorkflows(state.workflows) });
+      if (req.method === "POST" && parts.length === 1) {
+        const data = await body(req);
+        const result = upsertWorkflow(state.workflows, data, { agentIds });
+        if (!result.ok) return json(res, result.status ?? 400, { error: result.error });
+        state.workflows = result.stored;
+        await save();
+        return json(res, 201, { workflow: result.workflow });
+      }
+      if (req.method === "POST" && parts.length === 2) {
+        const data = await body(req);
+        const result = upsertWorkflow(state.workflows, data, { id: parts[1], agentIds });
+        if (!result.ok) return json(res, result.status ?? 400, { error: result.error });
+        state.workflows = result.stored;
+        await save();
+        return json(res, 200, { workflow: result.workflow });
+      }
+      if (req.method === "POST" && parts.length === 3 && parts[2] === "delete") {
+        const result = removeWorkflow(state.workflows, parts[1]);
+        if (!result.ok) return json(res, result.status ?? 400, { error: result.error });
+        state.workflows = result.stored;
+        await save();
+        return json(res, 200, { ok: true });
+      }
+      return json(res, 404, { error: "Not found." });
+    }
     if (req.method === "GET" && parts[0] === "agents")
       return json(res, 200, { agents: await agentStatus() });
     return json(res, 404, { error: "Not found." });
   } catch (error) {
     return json(res, 500, { error: error?.message ?? String(error) });
   }
+}
+/** Test-only: pin agent rows so route tests are not raced by CLI probes. */
+export function _setAgentsForTest(agents) {
+  state.agents = agents;
+}
+/** Test-only: adjust a session status without going through HTTP. */
+export function _setSessionStatusForTest(sessionId, status) {
+  const session = state.sessions.find((item) => item.id === sessionId);
+  if (session) session.status = status;
 }
 await load();
 await writeDevControlSkill();

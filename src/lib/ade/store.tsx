@@ -7,7 +7,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { AdeState, AgentId, AgentModelsResult, Project, Session } from "./types";
+import type {
+  AdeState,
+  AgentId,
+  AgentModelsResult,
+  HarnessJob,
+  OptionCapabilities,
+  Permission,
+  Project,
+  ProjectDocument,
+  Session,
+  Workflow,
+} from "./types";
 import { TokenGate } from "@/components/ade/TokenGate";
 
 const empty: AdeState = {
@@ -33,6 +44,9 @@ type Api = {
     request: string;
     criteria: string;
     model?: string;
+    effort?: string;
+    speed?: string;
+    permission?: Permission;
   }) => Promise<Session>;
   steer: (sessionId: string, text: string) => Promise<void>;
   complete: (sessionId: string) => Promise<void>;
@@ -40,6 +54,12 @@ type Api = {
   stop: (sessionId: string) => void;
   switchAgent: (sessionId: string, agentId: AgentId) => Promise<void>;
   setSessionModel: (sessionId: string, model: string) => Promise<void>;
+  setSessionOptions: (
+    sessionId: string,
+    o: { model?: string; effort?: string; speed?: string; permission?: Permission },
+  ) => Promise<void>;
+  harnessCommand: (agentId: AgentId, kind: "install" | "update") => string;
+  startHarness: (agentId: AgentId, kind: "install" | "update") => Promise<HarnessJob>;
   process: (id: string, op: ProcessOp) => void;
   signIn: (agentId: AgentId) => Promise<{ output?: string; running?: boolean }>;
   agentModels: (agentId: AgentId) => Promise<AgentModelsResult>;
@@ -69,6 +89,33 @@ async function request<T>(url: string, method = "GET", data?: unknown): Promise<
 // 2-second polling refresh) so dependent effects do not refetch constantly.
 export const agentModels = (agentId: AgentId) =>
   request<AgentModelsResult>(`/api/agents/${agentId}/models`);
+export const harnessJob = (agentId: AgentId) =>
+  request<HarnessJob>(`/api/agents/${agentId}/harness`);
+export const optionCapabilities = (agentId: AgentId, model?: string) => {
+  const query = model ? `?model=${encodeURIComponent(model)}` : "";
+  return request<OptionCapabilities>(`/api/agents/${agentId}/capabilities${query}`);
+};
+export const listWorkflows = async () => {
+  const data = await request<{ workflows: Workflow[] }>("/api/workflows");
+  return data.workflows;
+};
+export const saveWorkflow = async (
+  w: Omit<Workflow, "id" | "builtIn"> & { id?: string },
+): Promise<Workflow> => {
+  const data = w.id
+    ? await request<{ workflow: Workflow }>(`/api/workflows/${w.id}`, "POST", w)
+    : await request<{ workflow: Workflow }>("/api/workflows", "POST", w);
+  return data.workflow;
+};
+export const deleteWorkflow = async (id: string) => {
+  await request(`/api/workflows/${id}/delete`, "POST");
+};
+export const listDocuments = async (projectId: string) => {
+  const data = await request<{ documents: ProjectDocument[] }>(
+    `/api/editor/${projectId}/documents`,
+  );
+  return data.documents;
+};
 
 export function AdeProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AdeState>(empty);
@@ -163,6 +210,19 @@ export function AdeProvider({ children }: { children: ReactNode }) {
       setSessionModel: async (sessionId, model) => {
         await request(`/api/sessions/${sessionId}/model`, "POST", { model });
         await refresh();
+      },
+      setSessionOptions: async (sessionId, o) => {
+        await request(`/api/sessions/${sessionId}/options`, "POST", o);
+        await refresh();
+      },
+      harnessCommand: (agentId, kind) => {
+        const agent = state.agents.find((a) => a.id === agentId);
+        return agent?.harness?.[kind] ?? "";
+      },
+      startHarness: async (agentId, kind) => {
+        const job = await request<HarnessJob>(`/api/agents/${agentId}/${kind}`, "POST");
+        await refresh();
+        return job;
       },
       process: (id, op) => {
         void request(`/api/processes/${id}/${op}`, "POST")
