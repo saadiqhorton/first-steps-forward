@@ -222,7 +222,10 @@ function ProjectHome() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[13px]">{s.summary ?? s.request}</div>
                       <div className="mt-0.5 font-mono text-[10px] text-dim">
-                        {s.changes.length} files changed · {timeAgo(state.now, s.completedAt)} ·{" "}
+                        {s.changeCountUnavailable
+                          ? "Changes unavailable"
+                          : `${s.changes.length} files changed`}{" "}
+                        · {timeAgo(state.now, s.completedAt)} ·{" "}
                         {state.agents.find((a) => a.id === s.createdBy)?.short}
                       </div>
                     </div>

@@ -80,7 +80,9 @@ function History() {
                     <div className="mt-1 truncate text-[13px]">{s.request}</div>
                     {s.summary && <div className="truncate text-[11px] text-dim">{s.summary}</div>}
                   </div>
-                  <span className="font-mono text-[10px] text-dim">{s.changes.length} files</span>
+                  <span className="font-mono text-[10px] text-dim">
+                    {s.changeCountUnavailable ? "Changes unavailable" : `${s.changes.length} files`}
+                  </span>
                   {s.status === "complete" && (
                     <button
                       onClick={() => reopen(s.id)}

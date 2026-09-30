@@ -1,0 +1,317 @@
+import { FitAddon } from "@xterm/addon-fit";
+import { useXTerm } from "react-xtermjs";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type Props = {
+  projectId: string;
+  projectName: string;
+  projectPath: string;
+  visible: boolean;
+  registerClose: (close: (() => Promise<void>) | null) => void;
+};
+type Session = { id: string; shell: string; cwd: string };
+type Output = {
+  data: string;
+  cursor: number;
+  truncated: boolean;
+  hasMore: boolean;
+  exited: boolean;
+  exitCode: number | null;
+};
+
+const options = {
+  fontFamily: '"IBM Plex Mono", monospace',
+  fontSize: 12,
+  lineHeight: 1.45,
+  cursorBlink: true,
+  cursorStyle: "block" as const,
+  scrollback: 3000,
+  theme: {
+    background: "#171715",
+    foreground: "#e9ece3",
+    cursor: "#e1ad61",
+    selectionBackground: "#79aaa455",
+    black: "#171715",
+    green: "#8dc4b7",
+    yellow: "#e1ad61",
+    brightBlack: "#9fb0aa",
+  },
+};
+
+async function api<T>(url: string, data?: object): Promise<T> {
+  const response = await fetch(
+    url,
+    data === undefined
+      ? undefined
+      : {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(data),
+        },
+  );
+  const result = await response.json();
+  if (!response.ok) {
+    const error = new Error(result.error || "Terminal request failed.") as Error & {
+      status: number;
+    };
+    error.status = response.status;
+    throw error;
+  }
+  return result as T;
+}
+
+export function HostTerminalPane({
+  projectId,
+  projectName,
+  projectPath,
+  visible,
+  registerClose,
+}: Props) {
+  const fitAddon = useMemo(() => new FitAddon(), []);
+  const addons = useMemo(() => [fitAddon], [fitAddon]);
+  const sessionRef = useRef<string | null>(null);
+  const openingRef = useRef<Promise<Session> | null>(null);
+  const sendChain = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingInput = useRef("");
+  const inputTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [status, setStatus] = useState<"connecting" | "connected" | "exited" | "error">(
+    "connecting",
+  );
+  const [message, setMessage] = useState("");
+  const [shell, setShell] = useState("");
+  const [generation, setGeneration] = useState(0);
+
+  const flushInput = useCallback(() => {
+    if (inputTimer.current) clearTimeout(inputTimer.current);
+    inputTimer.current = null;
+    const id = sessionRef.current;
+    if (!id) {
+      pendingInput.current = "";
+      return;
+    }
+    while (pendingInput.current) {
+      const data = pendingInput.current.slice(0, 8192);
+      pendingInput.current = pendingInput.current.slice(8192);
+      sendChain.current = sendChain.current
+        .catch(() => undefined)
+        .then(() => api(`/api/terminal/${id}/input`, { data }))
+        .catch((error) => {
+          setMessage(error instanceof Error ? error.message : String(error));
+        });
+    }
+  }, []);
+  const onData = useCallback(
+    (data: string) => {
+      if (!sessionRef.current) return;
+      pendingInput.current += data;
+      if (data.includes("\r") || pendingInput.current.length >= 8192) flushInput();
+      else if (!inputTimer.current) inputTimer.current = setTimeout(flushInput, 16);
+    },
+    [flushInput],
+  );
+  const listeners = useMemo(() => ({ onData }), [onData]);
+  const { ref, instance } = useXTerm({ options, addons, listeners });
+
+  useEffect(() => {
+    registerClose(async () => {
+      if (!sessionRef.current && openingRef.current) {
+        try {
+          await openingRef.current;
+        } catch {
+          // A failed open did not create a shell to close.
+          return;
+        }
+      }
+      const id = sessionRef.current;
+      if (!id) return;
+      try {
+        await api(`/api/terminal/${id}/close`, {});
+      } catch (error) {
+        if ((error as Error & { status?: number }).status !== 404) throw error;
+      }
+      sessionRef.current = null;
+    });
+    return () => registerClose(null);
+  }, [registerClose]);
+
+  useEffect(() => {
+    if (!instance || !projectId || !ref.current) return;
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    let currentId: string | null = null;
+    let cursor = 0;
+    setStatus("connecting");
+    setMessage("");
+
+    const fit = () => {
+      if (!ref.current?.clientWidth || !ref.current?.clientHeight) return;
+      fitAddon.fit();
+      if (currentId) {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (!cancelled && currentId)
+            void api(`/api/terminal/${currentId}/resize`, {
+              cols: instance.cols,
+              rows: instance.rows,
+            }).catch(() => undefined);
+        }, 100);
+      }
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(ref.current);
+    const closeOnPageHide = () => {
+      if (!currentId) return;
+      const id = currentId;
+      currentId = null;
+      sessionRef.current = null;
+      const payload = new Blob(["{}"], { type: "application/json" });
+      if (!navigator.sendBeacon(`/api/terminal/${id}/close`, payload))
+        void fetch(`/api/terminal/${id}/close`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+          keepalive: true,
+        }).catch(() => undefined);
+    };
+    window.addEventListener("pagehide", closeOnPageHide);
+
+    const poll = async () => {
+      if (!currentId || cancelled) return;
+      try {
+        const output = await api<Output>(`/api/terminal/${currentId}?cursor=${cursor}`);
+        if (cancelled) return;
+        if (output.truncated) instance.writeln("\r\n[Earlier output was discarded]\r");
+        if (output.data) instance.write(output.data);
+        cursor = output.cursor;
+        if (output.exited && !output.hasMore) {
+          const finishedId = currentId;
+          currentId = null;
+          sessionRef.current = null;
+          if (finishedId) void api(`/api/terminal/${finishedId}/close`, {}).catch(() => undefined);
+          setStatus("exited");
+          setMessage(`Shell exited with code ${output.exitCode ?? "unknown"}.`);
+          return;
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setStatus("error");
+          setMessage(error instanceof Error ? error.message : String(error));
+        }
+        return;
+      }
+      pollTimer = setTimeout(poll, 150);
+    };
+
+    const opening = api<Session>("/api/terminal", {
+      projectId,
+      cols: Math.max(20, instance.cols),
+      rows: Math.max(5, instance.rows),
+    });
+    openingRef.current = opening;
+    void opening
+      .then((session) => {
+        if (cancelled) {
+          void api(`/api/terminal/${session.id}/close`, {}).catch(() => undefined);
+          return;
+        }
+        currentId = session.id;
+        sessionRef.current = session.id;
+        setShell(session.shell);
+        setStatus("connected");
+        instance.clear();
+        fit();
+        void poll();
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setStatus("error");
+          setMessage(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (openingRef.current === opening) openingRef.current = null;
+      observer.disconnect();
+      window.removeEventListener("pagehide", closeOnPageHide);
+      clearTimeout(pollTimer);
+      clearTimeout(resizeTimer);
+      pendingInput.current = "";
+      if (inputTimer.current) clearTimeout(inputTimer.current);
+      inputTimer.current = null;
+      if (currentId && sessionRef.current === currentId) {
+        sessionRef.current = null;
+        void fetch(`/api/terminal/${currentId}/close`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+          keepalive: true,
+        }).catch(() => undefined);
+      }
+    };
+  }, [instance, projectId, generation, fitAddon, ref]);
+
+  useEffect(() => {
+    if (visible && instance) {
+      requestAnimationFrame(() => {
+        if (ref.current?.clientWidth) fitAddon.fit();
+        instance.focus();
+      });
+    }
+  }, [visible, instance, fitAddon, ref]);
+
+  return (
+    <section
+      className="host-terminal flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#171715] text-[#e9ece3]"
+      aria-label="Host terminal"
+    >
+      <div className="shrink-0 border-b border-white/10 px-3 py-3">
+        <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#8dc4b7]">
+          Active environment / local host
+        </div>
+        <div
+          className="mt-1 truncate font-display text-[22px] leading-none tracking-wide"
+          title={projectName}
+        >
+          {projectName}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2 font-mono text-[10px]">
+        <span className="truncate text-[#e1ad61]">›_ {shell || "Console"}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={status === "connected" ? "text-[#8dc4b7]" : "text-white/50"}>
+            {status === "connected" ? "● LIVE" : status.toUpperCase()}
+          </span>
+        </div>
+      </div>
+      <div className="min-h-0 min-w-0 flex-1 py-3 pl-3">
+        <div ref={ref} className="h-full w-full min-w-0" aria-label="Interactive host terminal" />
+      </div>
+      <div className="shrink-0 border-t border-white/10 px-3 py-2">
+        <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
+          <span className="min-w-0 truncate text-white/45" title={projectPath}>
+            {projectPath}
+          </span>
+          {(status === "exited" || status === "error") && (
+            <button
+              type="button"
+              className="shrink-0 text-[#e1ad61] hover:underline"
+              onClick={() => {
+                setGeneration((n) => n + 1);
+              }}
+            >
+              New shell
+            </button>
+          )}
+        </div>
+        {message && (
+          <div role="status" className="mt-1 font-mono text-[10px] text-[#e1ad61]">
+            {message}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

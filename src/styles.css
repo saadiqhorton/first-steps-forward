@@ -393,3 +393,27 @@
   border: 1px solid var(--line);
   padding: 0.3em 0.5em;
 }
+
+/* Command deck scrollback stays visible without the browser's bright scrollbar. */
+.host-terminal .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: #5a8179 #171715;
+}
+
+.host-terminal .xterm-viewport::-webkit-scrollbar {
+  width: 9px;
+}
+
+.host-terminal .xterm-viewport::-webkit-scrollbar-track {
+  background: #171715;
+}
+
+.host-terminal .xterm-viewport::-webkit-scrollbar-thumb {
+  border: 2px solid #171715;
+  border-radius: 999px;
+  background: #5a8179;
+}
+
+.host-terminal .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: #8dc4b7;
+}

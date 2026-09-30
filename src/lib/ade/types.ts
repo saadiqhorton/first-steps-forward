@@ -89,6 +89,8 @@ export interface Session {
   status: SessionStatus;
   messages: Message[];
   changes: FileChange[];
+  /** Historical non-Git task whose file count cannot be reconstructed. */
+  changeCountUnavailable?: boolean;
   checks: Check[];
   summary?: string;
   logs: string[];

@@ -89,6 +89,35 @@ async function load() {
         changed = true;
       }
     }
+    // Older ADE versions queried Git only at the selected folder. Recover a
+    // completed task's missing count when a nested repo's changed files still
+    // have timestamps inside that task's run. Never attribute later edits.
+    for (const session of state.sessions) {
+      const project = state.projects.find((item) => item.id === session.projectId);
+      if (
+        session.status !== "complete" ||
+        session.changes?.length ||
+        session.changeCountUnavailable ||
+        !session.completedAt ||
+        project?.branch !== "not a git repository"
+      )
+        continue;
+      const diff = await getDiff(project);
+      const recovered = [];
+      for (const change of diff.changes) {
+        try {
+          const stat = await fs.lstat(path.join(project.path, change.path));
+          if (
+            stat.mtimeMs >= session.createdAt - 1000 &&
+            stat.mtimeMs <= session.completedAt + 1000
+          )
+            recovered.push(change);
+        } catch {}
+      }
+      if (recovered.length && recovered.length === diff.changes.length) session.changes = recovered;
+      else session.changeCountUnavailable = true;
+      changed = true;
+    }
     if (changed) await save();
   } catch {}
 }
@@ -243,8 +272,35 @@ function refreshBootstrapInBackground() {
     });
 }
 const safeProject = (p) => ({ ...p });
-async function git(project, args) {
-  return run("git", ["-C", project.path, ...args], { timeout: 10000 });
+async function gitAt(directory, args) {
+  return run("git", ["-C", directory, ...args], { timeout: 10000 });
+}
+// Users can select a workspace folder whose actual repository is one level
+// down (for example project/code/.git). Keep paths relative to the selected
+// folder so the UI, manifests, and diff views all refer to the same files.
+async function gitRepositories(project) {
+  const root = await gitAt(project.path, ["rev-parse", "--show-toplevel"]);
+  if (root.code === 0) return [{ directory: project.path, prefix: "" }];
+  let entries;
+  try {
+    entries = await fs.readdir(project.path, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const repositories = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const directory = path.join(project.path, entry.name);
+    try {
+      await fs.stat(path.join(directory, ".git"));
+    } catch {
+      continue;
+    }
+    const found = await gitAt(directory, ["rev-parse", "--show-toplevel"]);
+    if (found.code === 0 && path.resolve(found.stdout.trim()) === path.resolve(directory))
+      repositories.push({ directory, prefix: `${entry.name}/` });
+  }
+  return repositories;
 }
 async function projectInfo(project) {
   try {
@@ -257,66 +313,92 @@ async function projectInfo(project) {
     project.ahead = 0;
     return safeProject(project);
   }
-  const branchRes = await git(project, ["branch", "--show-current"]);
-  const statusRes = await git(project, ["status", "--porcelain=v1", "-uall"]);
-  const changedFiles = statusRes.stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((l) => l.slice(3));
-  const aheadRes = await git(project, ["rev-list", "--count", "@{upstream}..HEAD"]);
+  const repositories = await gitRepositories(project);
+  const changedFiles = [];
+  const branches = [];
+  let ahead = 0;
+  for (const repo of repositories) {
+    const branchRes = await gitAt(repo.directory, ["branch", "--show-current"]);
+    const statusRes = await gitAt(repo.directory, ["status", "--porcelain=v1", "-uall"]);
+    const aheadRes = await gitAt(repo.directory, ["rev-list", "--count", "@{upstream}..HEAD"]);
+    branches.push(branchRes.code === 0 ? branchRes.stdout.trim() || "(detached)" : "unknown");
+    changedFiles.push(
+      ...statusRes.stdout
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => `${repo.prefix}${line.slice(3)}`),
+    );
+    if (aheadRes.code === 0) ahead += Number(aheadRes.stdout.trim()) || 0;
+  }
   project.branch =
-    branchRes.code === 0 ? branchRes.stdout.trim() || "(detached)" : "not a git repository";
+    branches.length === 0
+      ? "not a git repository"
+      : branches.length === 1
+        ? branches[0]
+        : `${branches.length} repositories`;
   project.uncommittedFiles = [...new Set(changedFiles)];
-  project.ahead = aheadRes.code === 0 ? Number(aheadRes.stdout.trim()) || 0 : 0;
+  project.ahead = ahead;
   return safeProject(project);
 }
 async function getDiff(project) {
-  const tracked = await git(project, ["diff", "HEAD", "--no-ext-diff", "--unified=3"]);
-  const names = await git(project, ["status", "--porcelain=v1", "-uall"]);
-  const diff = tracked.stdout;
+  const repositories = await gitRepositories(project);
+  const diffs = [];
+  const files = [];
   const changes = [];
-  let current;
-  for (const line of diff.split(/\r?\n/)) {
-    if (line.startsWith("diff --git ")) {
-      const filePath =
-        line.match(/ (?:b|w)\/(.*)$/)?.[1] ?? line.slice("diff --git ".length).split(/\s+/).at(-1);
-      current = { path: filePath, added: 0, removed: 0, hunk: [] };
-      changes.push(current);
-    } else if (current && line.startsWith("@@")) current.hunk.push(line);
-    else if (current && (line.startsWith("+") || line.startsWith("-") || line.startsWith(" "))) {
-      current.hunk.push(line);
-      if (line.startsWith("+") && !line.startsWith("+++")) current.added++;
-      if (line.startsWith("-") && !line.startsWith("---")) current.removed++;
+  for (const repo of repositories) {
+    const tracked = await gitAt(repo.directory, ["diff", "HEAD", "--no-ext-diff", "--unified=3"]);
+    const names = await gitAt(repo.directory, ["status", "--porcelain=v1", "-uall"]);
+    const diff = tracked.stdout;
+    diffs.push(diff);
+    let current;
+    for (const line of diff.split(/\r?\n/)) {
+      if (line.startsWith("diff --git ")) {
+        const filePath =
+          line.match(/ (?:b|w)\/(.*)$/)?.[1] ??
+          line.slice("diff --git ".length).split(/\s+/).at(-1);
+        current = { path: `${repo.prefix}${filePath}`, added: 0, removed: 0, hunk: [] };
+        changes.push(current);
+      } else if (current && line.startsWith("@@")) current.hunk.push(line);
+      else if (current && (line.startsWith("+") || line.startsWith("-") || line.startsWith(" "))) {
+        current.hunk.push(line);
+        if (line.startsWith("+") && !line.startsWith("+++")) current.added++;
+        if (line.startsWith("-") && !line.startsWith("---")) current.removed++;
+      }
     }
-  }
-  const files = names.stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => ({ status: line.slice(0, 2).trim(), path: line.slice(3) }));
-  for (const f of files) {
-    if (changes.some((c) => c.path === f.path)) continue;
-    const absolute = path.resolve(project.path, f.path);
-    const rel = path.relative(project.path, absolute);
-    let hunk = [`${f.status || "??"} · diff unavailable (binary, oversized, or unreadable file)`];
-    let added = 0;
-    if (f.status === "??" && rel && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) {
-      try {
-        const stat = await fs.lstat(absolute);
-        if (stat.isFile() && stat.size <= 262144) {
-          const content = await fs.readFile(absolute);
-          if (!content.includes(0)) {
-            const lines = content.toString("utf8").split(/\r?\n/);
-            added = lines.filter(
-              (line, index) => index < lines.length - 1 || line.length > 0,
-            ).length;
-            hunk = ["@@ added file @@", ...lines.map((line) => `+${line}`)];
+    for (const line of names.stdout.split(/\r?\n/).filter(Boolean)) {
+      const file = { status: line.slice(0, 2).trim(), path: `${repo.prefix}${line.slice(3)}` };
+      files.push(file);
+      if (changes.some((change) => change.path === file.path)) continue;
+      const absolute = path.resolve(project.path, file.path);
+      const rel = path.relative(project.path, absolute);
+      let hunk = [
+        `${file.status || "??"} · diff unavailable (binary, oversized, or unreadable file)`,
+      ];
+      let added = 0;
+      if (
+        file.status === "??" &&
+        rel &&
+        !rel.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(rel)
+      ) {
+        try {
+          const stat = await fs.lstat(absolute);
+          if (stat.isFile() && stat.size <= 262144) {
+            const content = await fs.readFile(absolute);
+            if (!content.includes(0)) {
+              const lines = content.toString("utf8").split(/\r?\n/);
+              added = lines.filter(
+                (line, index) => index < lines.length - 1 || line.length > 0,
+              ).length;
+              hunk = ["@@ added file @@", ...lines.map((line) => `+${line}`)];
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      }
+      changes.push({ path: file.path, added, removed: 0, hunk });
     }
-    changes.push({ path: f.path, added, removed: 0, hunk });
   }
-  return { diff, files, changes };
+  return { diff: diffs.join("\n"), files, changes };
 }
 async function allocatePort() {
   return await new Promise((resolve, reject) => {
@@ -616,8 +698,20 @@ async function otherServiceStatus(project) {
 }
 export async function buildManifest(session, project) {
   const agent = state.agents.find((a) => a.id === session.agentId);
-  const trackedFiles = await git(project, ["ls-files", "-co", "--exclude-standard"]);
-  const files = trackedFiles.stdout.split(/\r?\n/).filter(Boolean).slice(0, 400);
+  const repositories = await gitRepositories(project);
+  const files = (
+    await Promise.all(
+      repositories.map(async (repo) => {
+        const tracked = await gitAt(repo.directory, ["ls-files", "-co", "--exclude-standard"]);
+        return tracked.stdout
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .map((file) => `${repo.prefix}${file}`);
+      }),
+    )
+  )
+    .flat()
+    .slice(0, 400);
   const candidates = files.filter((file) =>
     /(readme|package\.json|src|app|lib|components|routes|pages|server|api|test|spec)/i.test(file),
   );
@@ -679,6 +773,7 @@ async function runAgent(session, prompt, continuing = false) {
     session.status = "working";
     await save();
     await projectInfo(project);
+    delete session.changeCountUnavailable;
     // Refresh the preserved-changes baseline at the start of every turn so it
     // reflects the tree as it is right now (the user may edit between turns).
     if (project.uncommittedFiles.length) {
@@ -1284,6 +1379,14 @@ async function handle(req, res) {
       authRequired: true,
     });
   }
+  // Host terminal and file editing stay on loopback even when ADE_TOKEN exposes
+  // other API routes. Both can operate directly on the user's machine.
+  if (
+    ["terminal", "editor"].includes(parts[0]) &&
+    (!isLoopbackAddress(req.socket?.remoteAddress) ||
+      !["127.0.0.1", "localhost", "::1"].includes(hostnameOf(req.headers.host)))
+  )
+    return json(res, 403, { error: "Host tools are available only on this machine." });
   // Remember the real base URL of this serving instance for the agent-facing
   // dev-control curls. Only LOCAL requests count (the agent CLIs run on this
   // machine), and only with loopback Host names — a LAN browser polling
@@ -1298,6 +1401,96 @@ async function handle(req, res) {
   )
     lastApiBaseUrl = `http://${req.headers.host}`;
   try {
+    if (parts[0] === "terminal") {
+      const terminal = await import("./terminal.mjs");
+      if (req.method === "POST" && parts.length === 1) {
+        const data = await body(req);
+        const project = state.projects.find((item) => item.id === data.projectId);
+        if (!project) return json(res, 404, { error: "Select an existing project first." });
+        const size = terminal.terminalSize(data.cols, data.rows);
+        if (!size) return json(res, 400, { error: "Invalid terminal dimensions." });
+        let cwd;
+        try {
+          cwd = await fs.realpath(project.path);
+          if (!(await fs.stat(cwd)).isDirectory()) throw new Error("Not a directory");
+        } catch {
+          return json(res, 400, { error: "The project folder is unavailable." });
+        }
+        try {
+          return json(res, 201, terminal.openTerminal(cwd, size));
+        } catch (error) {
+          return json(res, 503, { error: error.message });
+        }
+      }
+      if (parts.length === 2 && req.method === "GET") {
+        const cursor = Number(url.searchParams.get("cursor") ?? "0");
+        if (!Number.isInteger(cursor) || cursor < 0)
+          return json(res, 400, { error: "Invalid output cursor." });
+        const output = terminal.readTerminal(parts[1], cursor);
+        return output
+          ? json(res, 200, output)
+          : json(res, 404, { error: "Terminal session ended." });
+      }
+      if (parts.length === 3 && req.method === "POST") {
+        const data = await body(req);
+        if (parts[2] === "input") {
+          if (typeof data.data !== "string" || !data.data.length || data.data.length > 8192)
+            return json(res, 400, { error: "Invalid terminal input." });
+          return terminal.writeTerminal(parts[1], data.data)
+            ? json(res, 200, { ok: true })
+            : json(res, 404, { error: "Terminal session ended." });
+        }
+        if (parts[2] === "resize") {
+          const size = terminal.terminalSize(data.cols, data.rows);
+          if (!size) return json(res, 400, { error: "Invalid terminal dimensions." });
+          return terminal.resizeTerminal(parts[1], size)
+            ? json(res, 200, { ok: true })
+            : json(res, 404, { error: "Terminal session ended." });
+        }
+        if (parts[2] === "close")
+          return terminal.closeTerminal(parts[1])
+            ? json(res, 200, { ok: true })
+            : json(res, 404, { error: "Terminal session ended." });
+      }
+      return json(res, 404, { error: "Not found." });
+    }
+    if (parts[0] === "editor") {
+      const editor = await import("./editor.mjs");
+      const project = state.projects.find((item) => item.id === parts[1]);
+      if (!project) return json(res, 404, { error: "Select an existing project first." });
+      try {
+        if (parts.length === 3 && req.method === "GET" && parts[2] === "entries")
+          return json(res, 200, {
+            entries: await editor.listEditorEntries(
+              project.path,
+              url.searchParams.get("path") ?? "",
+            ),
+          });
+        if (parts.length === 3 && req.method === "GET" && parts[2] === "search")
+          return json(res, 200, {
+            entries: await editor.searchEditorFiles(project.path, url.searchParams.get("q") ?? ""),
+          });
+        if (parts.length === 3 && req.method === "GET" && parts[2] === "file")
+          return json(
+            res,
+            200,
+            await editor.readEditorFile(project.path, url.searchParams.get("path") ?? ""),
+          );
+        if (parts.length === 3 && req.method === "POST" && parts[2] === "file") {
+          const data = await body(req);
+          return json(
+            res,
+            200,
+            await editor.writeEditorFile(project.path, data.path, data.content, data.version),
+          );
+        }
+      } catch (error) {
+        if (error instanceof editor.EditorError)
+          return json(res, error.status, { error: error.message });
+        throw error;
+      }
+      return json(res, 404, { error: "Not found." });
+    }
     // Token exchange for exposed mode: browsers POST the token once and get an
     // HttpOnly cookie; scripts use `Authorization: Bearer` directly. Loopback
     // callers can also use this route (no-op there).

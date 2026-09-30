@@ -16,7 +16,14 @@ import {
   PanelRightOpen,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { isActive, useAde } from "@/lib/ade/store";
 import { RightPaneHostContext } from "./rightPaneContext";
 import { usePersistedLayout } from "./persistLayout";
@@ -143,6 +150,74 @@ function ShellInner({
   const { state, selectProject } = useAde();
   const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
+  const [rightTab, setRightTab] = useState<"preview" | "editor" | "terminal">("preview");
+  const [editorOpened, setEditorOpened] = useState(false);
+  const [terminalOpened, setTerminalOpened] = useState(false);
+  const [terminalClosing, setTerminalClosing] = useState(false);
+  const [terminalCloseError, setTerminalCloseError] = useState("");
+  const previewTabRef = useRef<HTMLButtonElement | null>(null);
+  const editorTabRef = useRef<HTMLButtonElement | null>(null);
+  const terminalCloseRef = useRef<(() => Promise<void>) | null>(null);
+  const registerTerminalClose = useCallback((close: (() => Promise<void>) | null) => {
+    terminalCloseRef.current = close;
+  }, []);
+  const openTerminal = () => {
+    setTerminalCloseError("");
+    setTerminalOpened(true);
+    setRightTab("terminal");
+  };
+  const closeTerminal = async () => {
+    if (terminalClosing) return;
+    setTerminalClosing(true);
+    setTerminalCloseError("");
+    try {
+      await terminalCloseRef.current?.();
+      setRightTab((current) => (current === "terminal" ? "preview" : current));
+      setTerminalOpened(false);
+      (rightTab === "editor" ? editorTabRef : previewTabRef).current?.focus();
+    } catch (error) {
+      setTerminalCloseError(
+        `${error instanceof Error ? error.message : "Could not close terminal."} Click X to retry.`,
+      );
+    } finally {
+      setTerminalClosing(false);
+    }
+  };
+  const [HostEditor, setHostEditor] = useState<ComponentType<{
+    projectId: string;
+    projectName: string;
+    projectPath: string;
+  }> | null>(null);
+  const [HostTerminal, setHostTerminal] = useState<ComponentType<{
+    projectId: string;
+    projectName: string;
+    projectPath: string;
+    visible: boolean;
+    registerClose: (close: (() => Promise<void>) | null) => void;
+  }> | null>(null);
+  const terminalProject =
+    state.projects.find((project) => project.id === state.activeProjectId) ?? state.projects[0];
+
+  useEffect(() => {
+    if (!editorOpened) return;
+    let active = true;
+    import("./HostEditorPane").then(({ HostEditorPane }) => {
+      if (active) setHostEditor(() => HostEditorPane);
+    });
+    return () => {
+      active = false;
+    };
+  }, [editorOpened]);
+  useEffect(() => {
+    if (!terminalOpened) return;
+    let active = true;
+    import("./HostTerminalPane").then(({ HostTerminalPane }) => {
+      if (active) setHostTerminal(() => HostTerminalPane);
+    });
+    return () => {
+      active = false;
+    };
+  }, [terminalOpened]);
   const isDesktop = useIsDesktop();
   const groupRef = useRef<GroupImperativeHandle | null>(null);
   // SSR-safe persistence: hydrate from storage after mount and persist on
@@ -332,12 +407,141 @@ function ShellInner({
               style={{ minWidth: 0, overflow: "hidden" }}
               onResize={onRightResize}
             >
-              {/* Host for the route's right-pane portal (e.g. <PreviewPane/>). */}
-              <div
-                ref={onRightHostChange}
-                className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-                aria-label="Preview"
-              />
+              <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+                <div
+                  role="tablist"
+                  aria-label="Right panel"
+                  className="flex h-9 shrink-0 border-b border-line bg-panel px-2"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    id="right-preview-tab"
+                    ref={previewTabRef}
+                    aria-selected={rightTab === "preview"}
+                    aria-controls="right-preview-panel"
+                    onClick={() => setRightTab("preview")}
+                    className={`border-b-2 px-3 font-mono text-[10px] uppercase tracking-[0.12em] ${rightTab === "preview" ? "border-amber text-ink" : "border-transparent text-dim hover:text-ink"}`}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    id="right-editor-tab"
+                    ref={editorTabRef}
+                    aria-selected={rightTab === "editor"}
+                    aria-controls="right-editor-panel"
+                    onClick={() => {
+                      setEditorOpened(true);
+                      setRightTab("editor");
+                    }}
+                    className={`border-b-2 px-2 font-mono text-[10px] uppercase tracking-[0.12em] ${rightTab === "editor" ? "border-amber text-ink" : "border-transparent text-dim hover:text-ink"}`}
+                  >
+                    Editor
+                  </button>
+                  {terminalOpened ? (
+                    <div
+                      className={`flex items-center border-b-2 ${rightTab === "terminal" ? "border-amber text-ink" : "border-transparent text-dim"}`}
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        id="right-terminal-tab"
+                        aria-selected={rightTab === "terminal"}
+                        aria-controls="right-terminal-panel"
+                        onClick={() => setRightTab("terminal")}
+                        className="h-full pl-3 pr-1 font-mono text-[10px] uppercase tracking-[0.12em] hover:text-ink"
+                      >
+                        Terminal
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Close terminal tab"
+                        title="Close terminal"
+                        onClick={() => void closeTerminal()}
+                        disabled={terminalClosing}
+                        className="mx-1 grid size-5 place-items-center rounded text-dim hover:bg-ink/10 hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:opacity-40"
+                      >
+                        <X className="size-3" aria-hidden />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={openTerminal}
+                      aria-label="Open terminal"
+                      className="ml-auto flex items-center gap-1.5 px-2 font-mono text-[10px] uppercase tracking-[0.12em] text-dim hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+                    >
+                      <span aria-hidden>›_</span> Terminal
+                    </button>
+                  )}
+                </div>
+                <div
+                  id="right-preview-panel"
+                  role="tabpanel"
+                  aria-labelledby="right-preview-tab"
+                  className={`min-h-0 flex-1 ${rightTab === "preview" ? "flex" : "hidden"}`}
+                >
+                  <div
+                    ref={onRightHostChange}
+                    className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                    aria-label="Preview"
+                  />
+                </div>
+                <div
+                  id="right-editor-panel"
+                  role="tabpanel"
+                  aria-labelledby="right-editor-tab"
+                  className={`min-h-0 min-w-0 flex-1 overflow-hidden ${rightTab === "editor" ? "flex" : "hidden"}`}
+                >
+                  {editorOpened && terminalProject && HostEditor ? (
+                    <HostEditor
+                      key={terminalProject.id}
+                      projectId={terminalProject.id}
+                      projectName={terminalProject.name}
+                      projectPath={terminalProject.path}
+                    />
+                  ) : (
+                    <div className="grid flex-1 place-items-center bg-[#fbf8f1] px-5 text-center font-mono text-[11px] text-dim">
+                      {terminalProject ? "Opening editor…" : "Add a project to browse files."}
+                    </div>
+                  )}
+                </div>
+                {terminalOpened && (
+                  <div
+                    id="right-terminal-panel"
+                    role="tabpanel"
+                    aria-labelledby="right-terminal-tab"
+                    className={`relative min-h-0 min-w-0 flex-1 overflow-hidden ${rightTab === "terminal" ? "flex" : "hidden"}`}
+                  >
+                    {terminalCloseError && (
+                      <div
+                        role="alert"
+                        className="absolute bottom-10 left-3 right-3 z-10 border border-[#e1ad61]/40 bg-[#282320] px-2 py-1 font-mono text-[10px] text-[#e1ad61]"
+                      >
+                        {terminalCloseError}
+                      </div>
+                    )}
+                    {terminalProject && HostTerminal ? (
+                      <HostTerminal
+                        key={terminalProject.id}
+                        projectId={terminalProject.id}
+                        projectName={terminalProject.name}
+                        projectPath={terminalProject.path}
+                        visible={rightTab === "terminal"}
+                        registerClose={registerTerminalClose}
+                      />
+                    ) : (
+                      <div className="grid flex-1 place-items-center bg-[#1d2928] px-5 text-center font-mono text-[11px] text-white/60">
+                        {terminalProject
+                          ? "Opening terminal…"
+                          : "Add a project to open a terminal."}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </Panel>
           </Group>
         )}

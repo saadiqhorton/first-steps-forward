@@ -602,7 +602,9 @@ function SessionPage() {
                     className={`rounded-md px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] ${tab === t ? "bg-ink text-paper" : "text-dim hover:text-ink"}`}
                   >
                     {t === "changes"
-                      ? `Files changed (${session.changes.length})`
+                      ? session.changeCountUnavailable
+                        ? "Files changed"
+                        : `Files changed (${session.changes.length})`
                       : t === "checks"
                         ? `Checks (${session.checks.length})`
                         : `Logs (${session.logs.length})`}
@@ -619,7 +621,12 @@ function SessionPage() {
                     hidden={tab !== t}
                     tabIndex={0}
                   >
-                    {t === "changes" && <DiffView changes={session.changes} />}
+                    {t === "changes" && (
+                      <DiffView
+                        changes={session.changes}
+                        unavailable={!!session.changeCountUnavailable}
+                      />
+                    )}
                     {t === "checks" && (
                       <>
                         <ChecksList checks={session.checks} />
@@ -634,9 +641,9 @@ function SessionPage() {
                         )}
                         {session.status === "blocked" && (
                           <p className="mt-3 text-[12px] text-dim">
-                            Checks run once the session is ready to review. Clear the blocker
-                            above — re-authenticate, switch agents, or send a follow-up — then run
-                            them here.
+                            Checks run once the session is ready to review. Clear the blocker above
+                            — re-authenticate, switch agents, or send a follow-up — then run them
+                            here.
                           </p>
                         )}
                       </>

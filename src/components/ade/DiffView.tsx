@@ -1,8 +1,16 @@
 import { useState } from "react";
 import type { FileChange } from "@/lib/ade/types";
 
-export function DiffView({ changes }: { changes: FileChange[] }) {
+export function DiffView({
+  changes,
+  unavailable = false,
+}: {
+  changes: FileChange[];
+  unavailable?: boolean;
+}) {
   const [open, setOpen] = useState<string | null>(null);
+  if (unavailable)
+    return <p className="text-[12px] text-dim">Changes unavailable for this earlier task.</p>;
   if (!changes.length) return <p className="text-[12px] text-dim">No files changed yet.</p>;
   const added = changes.reduce((n, c) => n + c.added, 0);
   const removed = changes.reduce((n, c) => n + c.removed, 0);
