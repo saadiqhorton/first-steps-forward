@@ -19,7 +19,15 @@ const HIDDEN_SCAN_DIRS = new Set([
   "node_modules",
   "venv",
 ]);
-
+const DOCUMENT_SKIP_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  ".output",
+  ".next",
+  ".tanstack",
+]);
+const DOCUMENT_EXTENSIONS = new Set([".md", ".mdx"]);
 export class EditorError extends Error {
   constructor(status, message) {
     super(message);
@@ -169,4 +177,61 @@ export async function searchEditorFiles(projectPath, query) {
     }
   }
   return results.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function shouldSkipDocumentDir(name) {
+  return name.startsWith(".") || DOCUMENT_SKIP_DIRS.has(name);
+}
+
+export async function listDocuments(projectPath, { limit = 12, maxDepth = 4 } = {}) {
+  const { root } = await resolveInside(projectPath, "");
+  const folders = [{ absolute: root, depth: 0 }];
+  const found = [];
+
+  while (folders.length) {
+    const { absolute, depth } = folders.shift();
+    let entries;
+    try {
+      entries = await fs.readdir(absolute, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      const child = path.join(absolute, entry.name);
+      if (!within(root, child)) continue;
+      if (entry.isDirectory()) {
+        if (depth < maxDepth && !shouldSkipDocumentDir(entry.name))
+          folders.push({ absolute: child, depth: depth + 1 });
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const ext = path.extname(entry.name).toLowerCase();
+      if (!DOCUMENT_EXTENSIONS.has(ext)) continue;
+      let stat;
+      try {
+        stat = await fs.lstat(child);
+      } catch {
+        continue;
+      }
+      if (stat.isSymbolicLink() || !stat.isFile()) continue;
+      let real;
+      try {
+        real = await fs.realpath(child);
+      } catch {
+        continue;
+      }
+      if (!within(root, real)) continue;
+      found.push({
+        path: toPosix(path.relative(root, child)),
+        name: entry.name,
+        modifiedAt: stat.mtimeMs,
+        size: stat.size,
+      });
+    }
+  }
+
+  return found
+    .sort((a, b) => b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path))
+    .slice(0, limit);
 }

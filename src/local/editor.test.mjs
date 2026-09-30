@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -44,6 +45,7 @@ writeFileSync(
 );
 process.env.HOME = home;
 const { handleLocalApi } = await import("./ade-local.mjs");
+const { listDocuments } = await import("./editor.mjs");
 
 async function call(pathname, data, remoteAddress = "127.0.0.1") {
   const request = {
@@ -115,6 +117,63 @@ test("editor rejects traversal, external symlinks, binary files, and remote peer
   assert.equal((await call("/api/editor/p1/file?path=outside-link")).status, 403);
   assert.equal((await call("/api/editor/p1/file?path=src%2Fbinary.bin")).status, 415);
   assert.equal((await call("/api/editor/p1/entries", undefined, "203.0.113.5")).status, 403);
+});
+
+test("listDocuments returns recent Markdown files and skips ignored paths", async () => {
+  const docsRoot = mkdtempSync(path.join(os.tmpdir(), "ade-docs-"));
+  try {
+    mkdirSync(path.join(docsRoot, "docs", "nested"), { recursive: true });
+    mkdirSync(path.join(docsRoot, "node_modules", "pkg"), { recursive: true });
+    mkdirSync(path.join(docsRoot, ".hidden"), { recursive: true });
+    mkdirSync(path.join(docsRoot, "dist"), { recursive: true });
+    mkdirSync(path.join(docsRoot, "build"), { recursive: true });
+    mkdirSync(path.join(docsRoot, ".tanstack"), { recursive: true });
+
+    const older = path.join(docsRoot, "README.md");
+    const newer = path.join(docsRoot, "docs", "guide.md");
+    const nested = path.join(docsRoot, "docs", "nested", "deep.mdx");
+    writeFileSync(older, "# older\n");
+    writeFileSync(newer, "# newer\n");
+    writeFileSync(nested, "# nested\n");
+    writeFileSync(path.join(docsRoot, "notes.txt"), "skip me\n");
+    writeFileSync(path.join(docsRoot, "node_modules", "pkg", "README.md"), "# dep\n");
+    writeFileSync(path.join(docsRoot, ".hidden", "secret.md"), "# secret\n");
+    writeFileSync(path.join(docsRoot, "dist", "out.md"), "# dist\n");
+    writeFileSync(path.join(docsRoot, "build", "out.md"), "# build\n");
+    writeFileSync(path.join(docsRoot, ".tanstack", "route.md"), "# tanstack\n");
+
+    const outsideMd = path.join(os.tmpdir(), `ade-outside-${Date.now()}.md`);
+    writeFileSync(outsideMd, "# outside\n");
+    symlinkSync(outsideMd, path.join(docsRoot, "outside.md"));
+
+    const tOlder = new Date("2024-01-01T00:00:00Z");
+    const tNewer = new Date("2024-06-01T00:00:00Z");
+    const tNested = new Date("2024-03-01T00:00:00Z");
+    utimesSync(older, tOlder, tOlder);
+    utimesSync(newer, tNewer, tNewer);
+    utimesSync(nested, tNested, tNested);
+
+    const docs = await listDocuments(docsRoot);
+    assert.deepEqual(
+      docs.map((doc) => doc.path),
+      ["docs/guide.md", "docs/nested/deep.mdx", "README.md"],
+    );
+    assert.equal(docs[0].name, "guide.md");
+    assert.equal(docs[0].modifiedAt, tNewer.getTime());
+    assert.equal(docs[0].size, Buffer.byteLength("# newer\n"));
+    assert.ok(!docs.some((doc) => doc.path.includes("node_modules")));
+    assert.ok(!docs.some((doc) => doc.path.startsWith(".")));
+    assert.ok(!docs.some((doc) => doc.path === "outside.md"));
+
+    const limited = await listDocuments(docsRoot, { limit: 2 });
+    assert.equal(limited.length, 2);
+    assert.deepEqual(
+      limited.map((doc) => doc.path),
+      ["docs/guide.md", "docs/nested/deep.mdx"],
+    );
+  } finally {
+    rmSync(docsRoot, { recursive: true, force: true });
+  }
 });
 
 test.after(() => rmSync(home, { recursive: true, force: true }));
