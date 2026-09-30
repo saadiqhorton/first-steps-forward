@@ -16,29 +16,35 @@ test("built-in workflows use the Enjoy-style starter prompts", () => {
     BUILT_IN_WORKFLOWS.map((w) => w.id),
     ["builtin-design-workshop", "builtin-explain-codebase", "builtin-plan-feature"],
   );
-  assert.equal(BUILT_IN_WORKFLOWS[0].name, "Design workshop");
+  assert.equal(BUILT_IN_WORKFLOWS[0].name, "Design Workshop");
   assert.equal(
     BUILT_IN_WORKFLOWS[0].description,
-    "Build an interactive design workshop for the interface.",
+    "Build an interactive design workshop for the interface, component, or motion I want to explore.",
   );
   assert.equal(BUILT_IN_WORKFLOWS[0].permission, "build");
-  assert.equal(
-    BUILT_IN_WORKFLOWS[0].prompt,
-    "Run a design workshop for: <describe the screen or feature>.\n\nCreate three distinct directions as disposable preview files under .ade/workshop/ — do not change production code. For each direction, summarize the idea and its trade-offs so I can pick one.",
-  );
+  assert.match(BUILT_IN_WORKFLOWS[0].prompt, /artifacts\/<workshop-name>\/index\.html/);
+  assert.match(BUILT_IN_WORKFLOWS[0].prompt, /Favorites alone do not authorize implementation/);
   assert.equal(BUILT_IN_WORKFLOWS[1].name, "Explain this codebase");
+  assert.equal(
+    BUILT_IN_WORKFLOWS[1].description,
+    "Write a practical introduction to this codebase for a new teammate.",
+  );
   assert.equal(BUILT_IN_WORKFLOWS[1].permission, "plan");
-  assert.equal(
-    BUILT_IN_WORKFLOWS[1].prompt,
-    "Write a practical introduction to this codebase for a new contributor: what it does, how it is structured, how to run it, and where to start for common changes. Read the code; do not modify any files.",
-  );
+  assert.match(BUILT_IN_WORKFLOWS[1].prompt, /under 1,000 words/);
+  assert.match(BUILT_IN_WORKFLOWS[1].prompt, /Keep it in this conversation/);
   assert.equal(BUILT_IN_WORKFLOWS[2].name, "Plan the next feature");
-  assert.equal(BUILT_IN_WORKFLOWS[2].permission, "plan");
   assert.equal(
-    BUILT_IN_WORKFLOWS[2].prompt,
-    "Turn this feature request into an implementation plan: <describe the feature>.\n\nRead the relevant code, then list the files to change, the steps in order, the risks, and how to verify it. Do not modify any files yet.",
+    BUILT_IN_WORKFLOWS[2].description,
+    "Turn my feature request into an implementation plan grounded in this repository.",
   );
-  for (const workflow of BUILT_IN_WORKFLOWS) assert.equal(workflow.builtIn, true);
+  assert.equal(BUILT_IN_WORKFLOWS[2].permission, "plan");
+  assert.match(BUILT_IN_WORKFLOWS[2].prompt, /smallest useful first slice/);
+  assert.match(BUILT_IN_WORKFLOWS[2].prompt, /does not implement it/);
+  for (const workflow of BUILT_IN_WORKFLOWS) {
+    assert.equal(workflow.builtIn, true);
+    assert.ok(workflow.prompt.length <= 8000);
+    assert.ok(workflow.description.length <= 200);
+  }
 });
 
 test("listWorkflows puts built-ins first, then stored workflows sorted by name", () => {
