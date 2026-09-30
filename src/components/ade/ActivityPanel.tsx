@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ActivityLogs } from "@/components/ade/ActivityLogs";
 import { ChecksList } from "@/components/ade/ChecksList";
 import { DiffView } from "@/components/ade/DiffView";
 import type { Session } from "@/lib/ade/types";
@@ -111,15 +112,9 @@ export function ActivityPanel({ session }: { session: Session }) {
         </section>
 
         <section>
-          <h2 className="label-mono">Logs ({session.logs.length})</h2>
+          <h2 className="label-mono">Logs</h2>
           <div className="mt-2">
-            {session.logs.length ? (
-              <pre className="whitespace-pre-wrap break-words rounded-md bg-ink px-3 py-2 font-mono text-[11px] leading-relaxed text-paper/80 [overflow-wrap:anywhere]">
-                {session.logs.join("\n")}
-              </pre>
-            ) : (
-              <p className="text-[12px] text-dim">No CLI output yet.</p>
-            )}
+            <ActivityLogs lines={session.logs} />
           </div>
         </section>
       </div>
