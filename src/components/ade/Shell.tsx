@@ -36,7 +36,7 @@ const RIGHT_MIN_PX = 240;
 const RIGHT_MAX_PX = 540;
 const RIGHT_REST_PCT = 26;
 
-const RIGHT_TABS: RightTab[] = ["activity", "preview", "editor", "terminal"];
+const RIGHT_TABS: RightTab[] = ["activity", "preview", "terminal"];
 
 /**
  * Tracks whether we're on the `lg` breakpoint or wider. Renders `true` on the
@@ -128,13 +128,11 @@ function ShellInner({
   const searchStr = useRouterState({ select: (s) => s.location.searchStr });
   const [rightTab, setRightTab] = useState<RightTab>("activity");
   const [dialog, setDialog] = useState<ShellDialog | null>(null);
-  const [editorOpened, setEditorOpened] = useState(false);
   const [terminalOpened, setTerminalOpened] = useState(false);
   const [terminalClosing, setTerminalClosing] = useState(false);
   const [terminalCloseError, setTerminalCloseError] = useState("");
   const activityTabRef = useRef<HTMLButtonElement | null>(null);
   const previewTabRef = useRef<HTMLButtonElement | null>(null);
-  const editorTabRef = useRef<HTMLButtonElement | null>(null);
   const terminalCloseRef = useRef<(() => Promise<void>) | null>(null);
   const listToggleRef = useRef<(() => void) | null>(null);
 
@@ -163,7 +161,7 @@ function ShellInner({
       await terminalCloseRef.current?.();
       setRightTab((current) => (current === "terminal" ? "activity" : current));
       setTerminalOpened(false);
-      (rightTab === "editor" ? editorTabRef : activityTabRef).current?.focus();
+      activityTabRef.current?.focus();
     } catch (error) {
       setTerminalCloseError(
         `${error instanceof Error ? error.message : "Could not close terminal."} Click X to retry.`,
@@ -173,11 +171,6 @@ function ShellInner({
     }
   };
 
-  const [HostEditor, setHostEditor] = useState<ComponentType<{
-    projectId: string;
-    projectName: string;
-    projectPath: string;
-  }> | null>(null);
   const [HostTerminal, setHostTerminal] = useState<ComponentType<{
     projectId: string;
     projectName: string;
@@ -189,16 +182,6 @@ function ShellInner({
   const activeProject =
     state.projects.find((project) => project.id === state.activeProjectId) ?? state.projects[0];
 
-  useEffect(() => {
-    if (!editorOpened) return;
-    let active = true;
-    import("./HostEditorPane").then(({ HostEditorPane }) => {
-      if (active) setHostEditor(() => HostEditorPane);
-    });
-    return () => {
-      active = false;
-    };
-  }, [editorOpened]);
   useEffect(() => {
     if (!terminalOpened) return;
     let active = true;
@@ -214,16 +197,16 @@ function ShellInner({
   useEffect(() => {
     const paneRaw = search["pane"];
     const dialogRaw = search["dialog"];
+    const obsoleteEditor = paneRaw === "editor";
     const pane =
       typeof paneRaw === "string" && (RIGHT_TABS as string[]).includes(paneRaw)
         ? (paneRaw as RightTab)
         : undefined;
     const nextDialog =
       dialogRaw === "agents" || dialogRaw === "add-project" ? dialogRaw : undefined;
-    if (!pane && !nextDialog) return;
+    if (!pane && !nextDialog && !obsoleteEditor) return;
 
     if (pane) {
-      if (pane === "editor") setEditorOpened(true);
       if (pane === "terminal") setTerminalOpened(true);
       setRightTab(pane);
     }
@@ -340,21 +323,6 @@ function ShellInner({
         >
           Preview
         </button>
-        <button
-          type="button"
-          role="tab"
-          id="right-editor-tab"
-          ref={editorTabRef}
-          aria-selected={rightTab === "editor"}
-          aria-controls="right-editor-panel"
-          onClick={() => {
-            setEditorOpened(true);
-            setRightTab("editor");
-          }}
-          className={`border-b-2 px-2 font-mono text-[10px] uppercase tracking-[0.12em] ${rightTab === "editor" ? "border-amber text-ink" : "border-transparent text-dim hover:text-ink"}`}
-        >
-          Editor
-        </button>
         {terminalOpened ? (
           <div
             className={`flex items-center border-b-2 ${rightTab === "terminal" ? "border-amber text-ink" : "border-transparent text-dim"}`}
@@ -424,26 +392,6 @@ function ShellInner({
         ) : (
           <div className="grid flex-1 place-items-center px-5 text-center font-mono text-[11px] text-dim">
             Add a project to see its preview.
-          </div>
-        )}
-      </div>
-
-      <div
-        id="right-editor-panel"
-        role="tabpanel"
-        aria-labelledby="right-editor-tab"
-        className={`min-h-0 min-w-0 flex-1 overflow-hidden ${rightTab === "editor" ? "flex" : "hidden"}`}
-      >
-        {editorOpened && activeProject && HostEditor ? (
-          <HostEditor
-            key={activeProject.id}
-            projectId={activeProject.id}
-            projectName={activeProject.name}
-            projectPath={activeProject.path}
-          />
-        ) : (
-          <div className="grid flex-1 place-items-center bg-[#fbf8f1] px-5 text-center font-mono text-[11px] text-dim">
-            {activeProject ? "Opening editor…" : "Add a project to browse files."}
           </div>
         )}
       </div>

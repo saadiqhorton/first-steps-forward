@@ -16,11 +16,16 @@ import { HighlightedCodeEditor } from "./HighlightedCodeEditor";
 import "./host-editor.css";
 
 type Props = { projectId: string; projectName: string; projectPath: string };
-type Entry = { name: string; path: string; kind: "folder" | "file" };
-type Document = { saved: string; draft: string; version: string };
-type ApiError = Error & { status?: number };
 
-async function editorApi<T>(url: string, data?: object): Promise<T> {
+/** Entry from `/api/editor/:id/entries` or search. */
+export type EditorEntry = { name: string; path: string; kind: "folder" | "file" };
+
+/** In-memory open document with draft + optimistic concurrency version. */
+export type EditorDocument = { saved: string; draft: string; version: string };
+
+export type EditorApiError = Error & { status?: number };
+
+export async function editorApi<T>(url: string, data?: object): Promise<T> {
   const response = await fetch(
     url,
     data === undefined
@@ -33,27 +38,60 @@ async function editorApi<T>(url: string, data?: object): Promise<T> {
   );
   const value = await response.json();
   if (!response.ok) {
-    const error = new Error(value.error || "File request failed.") as ApiError;
+    const error = new Error(value.error || "File request failed.") as EditorApiError;
     error.status = response.status;
     throw error;
   }
   return value as T;
 }
 
-function fileIcon(file: string) {
+export function editorFileIcon(file: string) {
   if (file.endsWith(".json")) return <FileJson2 size={13} aria-hidden />;
-  if (file.endsWith(".md") || file.endsWith(".txt")) return <FileText size={13} aria-hidden />;
+  if (file.endsWith(".md") || file.endsWith(".txt") || file.endsWith(".mdx"))
+    return <FileText size={13} aria-hidden />;
   return <FileCode2 size={13} aria-hidden />;
 }
 
+export function isMarkdownPath(file: string) {
+  return /\.(md|mdx)$/i.test(file);
+}
+
+export async function loadEditorFile(projectId: string, file: string) {
+  const params = new URLSearchParams({ path: file });
+  return editorApi<{ content: string; version: string }>(`/api/editor/${projectId}/file?${params}`);
+}
+
+export async function saveEditorFile(
+  projectId: string,
+  file: string,
+  content: string,
+  version: string,
+) {
+  return editorApi<{ version: string }>(`/api/editor/${projectId}/file`, {
+    path: file,
+    content,
+    version,
+  });
+}
+
+export async function listEditorEntries(projectId: string, directory = "") {
+  const params = new URLSearchParams({ path: directory });
+  return editorApi<{ entries: EditorEntry[] }>(`/api/editor/${projectId}/entries?${params}`);
+}
+
+export async function searchEditorFiles(projectId: string, query: string) {
+  const params = new URLSearchParams({ q: query });
+  return editorApi<{ entries: EditorEntry[] }>(`/api/editor/${projectId}/search?${params}`);
+}
+
 export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
-  const [directories, setDirectories] = useState<Record<string, Entry[]>>({});
+  const [directories, setDirectories] = useState<Record<string, EditorEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Entry[]>([]);
+  const [results, setResults] = useState<EditorEntry[]>([]);
   const [searching, setSearching] = useState(false);
-  const [docs, setDocs] = useState<Record<string, Document>>({});
+  const [docs, setDocs] = useState<Record<string, EditorDocument>>({});
   const [active, setActive] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -75,10 +113,7 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
     async (directory: string) => {
       setLoadingFolders((previous) => new Set(previous).add(directory));
       try {
-        const params = new URLSearchParams({ path: directory });
-        const value = await editorApi<{ entries: Entry[] }>(
-          `/api/editor/${projectId}/entries?${params}`,
-        );
+        const value = await listEditorEntries(projectId, directory);
         setDirectories((previous) => ({ ...previous, [directory]: value.entries }));
         setError("");
       } catch (reason) {
@@ -108,8 +143,7 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
     let cancelled = false;
     const timer = setTimeout(() => {
       setSearching(true);
-      const params = new URLSearchParams({ q: term });
-      void editorApi<{ entries: Entry[] }>(`/api/editor/${projectId}/search?${params}`)
+      void searchEditorFiles(projectId, term)
         .then((value) => {
           if (!cancelled) {
             setResults(value.entries);
@@ -157,10 +191,7 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
     if (docs[file]) return;
     setOpening(true);
     try {
-      const params = new URLSearchParams({ path: file });
-      const value = await editorApi<{ content: string; version: string }>(
-        `/api/editor/${projectId}/file?${params}`,
-      );
+      const value = await loadEditorFile(projectId, file);
       setDocs((previous) => ({
         ...previous,
         [file]: { saved: value.content, draft: value.content, version: value.version },
@@ -179,11 +210,7 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
     setSaving(true);
     setError("");
     try {
-      const value = await editorApi<{ version: string }>(`/api/editor/${projectId}/file`, {
-        path: file,
-        content: draft,
-        version: current.version,
-      });
+      const value = await saveEditorFile(projectId, file, draft, current.version);
       setDocs((previous) => {
         const existing = previous[file];
         return existing
@@ -204,10 +231,7 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
     setOpening(true);
     setError("");
     try {
-      const params = new URLSearchParams({ path: file });
-      const value = await editorApi<{ content: string; version: string }>(
-        `/api/editor/${projectId}/file?${params}`,
-      );
+      const value = await loadEditorFile(projectId, file);
       setDocs((previous) => ({
         ...previous,
         [file]: { saved: value.content, draft: value.content, version: value.version },
@@ -273,7 +297,7 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
           onClick={() => void openFile(entry.path)}
           title={entry.path}
         >
-          {fileIcon(entry.path)}
+          {editorFileIcon(entry.path)}
           <span>{entry.name}</span>
           {isDirtyPath(entry.path) && (
             <span className="ed-dirty-dot" aria-label="Unsaved changes" />
@@ -325,7 +349,7 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
                   onClick={() => void openFile(entry.path)}
                   title={entry.path}
                 >
-                  {fileIcon(entry.path)}
+                  {editorFileIcon(entry.path)}
                   <span>{entry.path}</span>
                   {isDirtyPath(entry.path) && (
                     <span className="ed-dirty-dot" aria-label="Unsaved changes" />
@@ -361,7 +385,7 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
                   aria-label={`Show ${file}`}
                   aria-current={active === file ? "page" : undefined}
                 >
-                  {fileIcon(file)}
+                  {editorFileIcon(file)}
                   <span>{file.split("/").at(-1)}</span>
                   {isDirtyPath(file) && (
                     <i className="host-editor-dirty" aria-label="Unsaved changes" />
