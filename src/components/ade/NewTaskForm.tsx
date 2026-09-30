@@ -6,6 +6,7 @@ import { SignInDialog } from "@/components/ade/SignInDialog";
 import { WorkflowCards } from "@/components/ade/workflows/WorkflowCards";
 import type { Agent, Workflow } from "@/lib/ade/types";
 import { agentModels, listWorkflows, useAde } from "@/lib/ade/store";
+import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 
 export function NewTaskForm({
   projectId,
@@ -69,27 +70,38 @@ export function NewTaskForm({
     };
   }, []);
 
-  // Pin the first catalog model when none is chosen (no "Model default").
+  // Last model for this agent/provider, else first catalog entry.
   useEffect(() => {
     let cancelled = false;
     const agentId = selection.agentId;
     void agentModels(agentId)
       .then((result) => {
-        if (cancelled || !result.available || !result.models?.length) return;
-        const first = result.models[0]?.id;
-        if (!first) return;
+        if (cancelled) return;
+        const catalogIds = result.available ? (result.models ?? []).map((m) => m.id) : [];
         setSelection((prev) => {
           if (prev.agentId !== agentId || prev.model.trim()) return prev;
-          return { ...prev, model: first, effort: "", speed: "" };
+          const resolved = resolveModelForAgent(agentId, catalogIds, "");
+          if (!resolved) return prev;
+          return { ...prev, model: resolved, effort: "", speed: "" };
         });
       })
       .catch(() => {
-        /* listing unavailable — user can still type Other model id */
+        if (cancelled) return;
+        setSelection((prev) => {
+          if (prev.agentId !== agentId || prev.model.trim()) return prev;
+          const resolved = resolveModelForAgent(agentId, [], "");
+          if (!resolved) return prev;
+          return { ...prev, model: resolved, effort: "", speed: "" };
+        });
       });
     return () => {
       cancelled = true;
     };
   }, [selection.agentId]);
+
+  useEffect(() => {
+    if (selection.model.trim()) writeLastModel(selection.agentId, selection.model);
+  }, [selection.agentId, selection.model]);
 
   useEffect(() => {
     if (!prefillWorkflowId || workflows.length === 0) return;

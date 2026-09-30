@@ -11,6 +11,7 @@ import { REASON_TEXT } from "@/components/ade/ModelPicker";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import { HarnessDialog } from "@/components/ade/HarnessDialog";
 import { agentModels, optionCapabilities, useAde } from "@/lib/ade/store";
+import { readLastModel, resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 import type {
   Agent,
   AgentId,
@@ -198,15 +199,16 @@ export function AgentPicker({
     }
   }, [models, value.model]);
 
-  // No "Model default" row — once the catalog loads, pin the first listed model
-  // when the selection is still empty (e.g. after switching agents).
+  // Prefer last model for this agent/provider; fall back to first catalog entry.
   useEffect(() => {
-    if (modelsLoading || !models?.available) return;
-    const first = models.models?.[0]?.id;
-    if (!first || value.model.trim()) return;
+    if (value.model.trim()) return;
+    const catalogIds =
+      !modelsLoading && models?.available ? (models.models ?? []).map((m) => m.id) : [];
+    const resolved = resolveModelForAgent(value.agentId, catalogIds, "");
+    if (!resolved) return;
     onChange({
       agentId: value.agentId,
-      model: first,
+      model: resolved,
       effort: "",
       speed: "",
       permission: value.permission,
@@ -276,7 +278,7 @@ export function AgentPicker({
     if (agentId === value.agentId) return;
     onChange({
       agentId,
-      model: "",
+      model: readLastModel(agentId) ?? "",
       effort: "",
       speed: "",
       permission: "build",
@@ -286,14 +288,17 @@ export function AgentPicker({
   const selectModel = (model: string) => {
     if (model === OTHER) {
       setShowOther(true);
+      const next = (otherText || value.model).trim();
+      if (next) writeLastModel(value.agentId, next);
       onChange({
         ...value,
-        model: (otherText || value.model).trim(),
+        model: next,
         effort: "",
         speed: "",
       });
       return;
     }
+    writeLastModel(value.agentId, model);
     setShowOther(false);
     onChange({ ...value, model, effort: "", speed: "" });
   };
@@ -539,10 +544,13 @@ export function AgentPicker({
                     id={otherId}
                     value={otherText || value.model}
                     onChange={(e) => {
-                      setOtherText(e.target.value);
+                      const next = e.target.value;
+                      setOtherText(next);
+                      const trimmed = next.trim();
+                      if (trimmed) writeLastModel(value.agentId, trimmed);
                       onChange({
                         ...value,
-                        model: e.target.value.trim(),
+                        model: trimmed,
                         effort: "",
                         speed: "",
                       });
@@ -564,10 +572,13 @@ export function AgentPicker({
                   id={otherId}
                   value={otherText || value.model}
                   onChange={(e) => {
-                    setOtherText(e.target.value);
+                    const next = e.target.value;
+                    setOtherText(next);
+                    const trimmed = next.trim();
+                    if (trimmed) writeLastModel(value.agentId, trimmed);
                     onChange({
                       ...value,
-                      model: e.target.value.trim(),
+                      model: trimmed,
                       effort: "",
                       speed: "",
                     });

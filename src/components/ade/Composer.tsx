@@ -86,7 +86,7 @@ export function Composer({
   };
 
   return (
-    <div className="card-panel overflow-visible">
+    <div className="card-panel overflow-visible has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-amber/35 has-[textarea:focus-visible]:ring-inset">
       {extra ? <div className="border-b border-line px-4 py-3">{extra}</div> : null}
       <label htmlFor={labelId} className="sr-only">
         {mode === "new" ? "Describe a change" : "Follow-up message"}
@@ -100,7 +100,7 @@ export function Composer({
         disabled={!!disabledReason}
         placeholder={disabledReason ?? placeholder}
         rows={mode === "new" ? 3 : 1}
-        className="block w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed placeholder:text-dim/70 disabled:opacity-60"
+        className="block w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed placeholder:text-dim/70 focus-visible:outline-none disabled:opacity-60"
       />
       {/*
         Anchor the picker to this footer only. A relative wrapper around the

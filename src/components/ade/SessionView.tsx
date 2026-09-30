@@ -7,6 +7,7 @@ import { RightPanePortal } from "@/components/ade/RightPanePortal";
 import { SessionMessage } from "@/components/ade/SessionMessage";
 import { StatusPill } from "@/components/ade/StatusPill";
 import { agentModels, timeAgo, useAde } from "@/lib/ade/store";
+import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 
 function selectionFromSession(session: {
   agentId: AgentSelection["agentId"];
@@ -65,25 +66,36 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     session?.permission,
   ]);
 
-  // Sessions with no pinned model get the first catalog entry (no "Model default").
+  // Prefer last model for this agent when the session has none pinned.
   useEffect(() => {
     if (!session) return;
     const agentId = session.agentId;
-    if (session.model?.trim()) return;
+    if (session.model?.trim()) {
+      writeLastModel(agentId, session.model);
+      return;
+    }
     let cancelled = false;
     void agentModels(agentId)
       .then((result) => {
-        if (cancelled || !result.available || !result.models?.length) return;
-        const first = result.models[0]?.id;
-        if (!first) return;
+        if (cancelled) return;
+        const catalogIds = result.available ? (result.models ?? []).map((m) => m.id) : [];
         setSelection((prev) => {
           const base = prev ?? selectionFromSession(session);
           if (base.agentId !== agentId || base.model.trim()) return prev;
-          return { ...base, model: first, effort: "", speed: "" };
+          const resolved = resolveModelForAgent(agentId, catalogIds, "");
+          if (!resolved) return prev;
+          return { ...base, model: resolved, effort: "", speed: "" };
         });
       })
       .catch(() => {
-        /* ignore */
+        if (cancelled) return;
+        setSelection((prev) => {
+          const base = prev ?? selectionFromSession(session);
+          if (base.agentId !== agentId || base.model.trim()) return prev;
+          const resolved = resolveModelForAgent(agentId, [], "");
+          if (!resolved) return prev;
+          return { ...base, model: resolved, effort: "", speed: "" };
+        });
       });
     return () => {
       cancelled = true;
@@ -138,6 +150,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   const onSelectionChange = (next: AgentSelection) => {
     const prev = activeSelection;
     setSelection(next);
+    if (next.model.trim()) writeLastModel(next.agentId, next.model);
     if (next.agentId !== prev.agentId) {
       void switchAgent(session.id, next.agentId)
         .then(() =>
