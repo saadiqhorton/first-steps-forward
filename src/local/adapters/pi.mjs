@@ -52,8 +52,9 @@ export const pi = {
       account: `${ready.length} READY ${ready.length === 1 ? "provider" : "providers"}: ${ready.map((name) => (/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) ? name : "(unusual provider name)")).join(", ")}`,
     };
   },
-  command({ prompt, session, continuing, dataDir, providers, model }) {
+  command({ prompt, session, continuing, dataDir, providers, model, effort, permission }) {
     const sessionFile = `${dataDir}/sessions/${session.id}.jsonl`;
+    const tools = permission === "plan" ? "read,grep,find,ls" : "read,edit,write,grep,find,ls";
     return [
       "pi",
       [
@@ -65,7 +66,7 @@ export const pi = {
         // --tools allowlist below still sandboxes the run: extension tools
         // (web search, subagents, shell) are never granted.
         "--tools",
-        "read,edit,write,grep,find,ls",
+        tools,
         // A `provider/model` id embeds the provider, so --model wins outright.
         // With exactly one ready provider, pin it so Pi's own default can't
         // resolve to something unauthenticated. With several, stay out of the
@@ -76,6 +77,7 @@ export const pi = {
           : providers?.length === 1
             ? ["--provider", providers[0]]
             : []),
+        ...(effort ? ["--thinking", effort] : []),
         "--session",
         sessionFile,
         ...(continuing ? ["--continue"] : []),

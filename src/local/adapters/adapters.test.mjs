@@ -236,3 +236,146 @@ test("Codex resume carries the model flag and Pi drops --provider when a model i
   assert.ok(!piArgs.includes("--provider"));
   assert.ok(piArgs.includes("--continue"));
 });
+
+test("adapters omit effort/speed/permission flags when options are absent (byte-for-byte)", () => {
+  const base = {
+    projectPath: "/tmp/project",
+    prompt: "Go",
+    session: { id: "s", agentSessionId: undefined },
+    continuing: false,
+  };
+  assert.deepEqual(codex.command(base)[1], [
+    "exec",
+    "--json",
+    "--cd",
+    "/tmp/project",
+    "--sandbox",
+    "workspace-write",
+    "Go",
+  ]);
+  assert.deepEqual(opencode.command(base)[1], [
+    "run",
+    "--format",
+    "json",
+    "--dir",
+    "/tmp/project",
+    "Go",
+  ]);
+  assert.deepEqual(pi.command({ ...base, dataDir: "/tmp/ade", providers: ["opencode-go"] })[1], [
+    "-p",
+    "--mode",
+    "json",
+    "--tools",
+    "read,edit,write,grep,find,ls",
+    "--provider",
+    "opencode-go",
+    "--session",
+    "/tmp/ade/sessions/s.jsonl",
+    "Go",
+  ]);
+});
+
+test("Codex maps effort, speed, and plan permission onto argv", () => {
+  const newPlan = codex.command({
+    projectPath: "/tmp/project",
+    prompt: "Plan it",
+    session: { id: "s" },
+    continuing: false,
+    effort: "high",
+    speed: "fast",
+    permission: "plan",
+  })[1];
+  assert.deepEqual(newPlan, [
+    "exec",
+    "--json",
+    "-c",
+    'model_reasoning_effort="high"',
+    "-c",
+    'service_tier="fast"',
+    "--cd",
+    "/tmp/project",
+    "--sandbox",
+    "read-only",
+    "Plan it",
+  ]);
+
+  const resumedPlan = codex.command({
+    projectPath: "/tmp/project",
+    prompt: "Continue planning",
+    session: { id: "s", agentSessionId: "thread-9" },
+    continuing: true,
+    effort: "medium",
+    permission: "plan",
+  })[1];
+  assert.deepEqual(resumedPlan, [
+    "exec",
+    "resume",
+    "--json",
+    "-c",
+    'model_reasoning_effort="medium"',
+    "-c",
+    'sandbox_mode="read-only"',
+    "thread-9",
+    "Continue planning",
+  ]);
+});
+
+test("OpenCode maps effort to --variant and plan to --agent plan", () => {
+  const args = opencode.command({
+    projectPath: "/tmp/project",
+    prompt: "Inspect",
+    session: { id: "s" },
+    continuing: false,
+    model: "opencode/ling",
+    effort: "high",
+    permission: "plan",
+  })[1];
+  assert.deepEqual(args, [
+    "run",
+    "--format",
+    "json",
+    "--dir",
+    "/tmp/project",
+    "-m",
+    "opencode/ling",
+    "--variant",
+    "high",
+    "--agent",
+    "plan",
+    "Inspect",
+  ]);
+  const build = opencode.command({
+    projectPath: "/tmp/project",
+    prompt: "Build",
+    session: { id: "s" },
+    continuing: false,
+    permission: "build",
+  })[1];
+  assert.ok(!build.includes("--agent"));
+});
+
+test("Pi maps effort to --thinking and plan to a read-only tools allowlist", () => {
+  const planArgs = pi.command({
+    prompt: "Review",
+    session: { id: "s" },
+    continuing: false,
+    dataDir: "/tmp/ade",
+    providers: ["opencode-go"],
+    model: "opencode-go/gpt-5.6-luna",
+    effort: "high",
+    permission: "plan",
+  })[1];
+  assert.equal(planArgs[planArgs.indexOf("--thinking") + 1], "high");
+  assert.equal(planArgs[planArgs.indexOf("--tools") + 1], "read,grep,find,ls");
+  assert.ok(!planArgs.includes("read,edit,write,grep,find,ls"));
+
+  const buildArgs = pi.command({
+    prompt: "Edit",
+    session: { id: "s" },
+    continuing: false,
+    dataDir: "/tmp/ade",
+    providers: ["opencode-go"],
+    permission: "build",
+  })[1];
+  assert.equal(buildArgs[buildArgs.indexOf("--tools") + 1], "read,edit,write,grep,find,ls");
+});

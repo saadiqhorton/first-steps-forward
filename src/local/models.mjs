@@ -23,11 +23,14 @@ const CACHE_TTL_MS = 60_000;
 // Persistent catalog cache (per agent, under ~/.ade, private 0600). TTL 300s
 // mirrors OpenCode's own catalog freshness window. Rows are only ever what a
 // probe returned; a corrupt or mismatched file is ignored, never merged.
-// Schema 2: pi probes now list extension-registered providers too, so caches
-// written by the older extension-less probe must not survive.
+// Schema 3: rows may carry efforts/defaultEffort/speeds from verbose/catalog
+// probes (schema 2 only covered extension-provider pi listings).
 const FILE_CACHE_TTL_MS = 300_000;
-const FILE_CACHE_SCHEMA = 2;
+const FILE_CACHE_SCHEMA = 3;
 const modelsCache = new Map();
+
+/** Thinking levels Pi accepts via `--thinking` (clamped per model by Pi itself). */
+export const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 async function readFileCache(cacheDir, fingerprint) {
   try {
@@ -75,7 +78,22 @@ export function parseCodexModels(stdout) {
   return list
     .filter((m) => m?.visibility === "list" && typeof m.slug === "string" && m.slug)
     .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
-    .map((m) => ({ id: m.slug, ...(m.display_name ? { label: m.display_name } : {}) }));
+    .map((m) => {
+      const row = { id: m.slug, ...(m.display_name ? { label: m.display_name } : {}) };
+      if (Array.isArray(m.supported_reasoning_levels)) {
+        const efforts = m.supported_reasoning_levels
+          .map((level) => level?.effort)
+          .filter((effort) => typeof effort === "string" && effort);
+        if (efforts.length) row.efforts = efforts;
+      }
+      if (typeof m.default_reasoning_level === "string" && m.default_reasoning_level) {
+        row.defaultEffort = m.default_reasoning_level;
+      }
+      if (Array.isArray(m.additional_speed_tiers) && m.additional_speed_tiers.length) {
+        row.speeds = m.additional_speed_tiers.filter((tier) => typeof tier === "string" && tier);
+      }
+      return row;
+    });
 }
 
 /** Parse `opencode models` plain lines of `provider/model`. */
@@ -85,6 +103,53 @@ export function parseOpencodeModels(stdout) {
     .map((line) => line.trim())
     .filter((line) => line && !/\s/.test(line) && line.includes("/"));
   return ids.length ? ids.map((id) => ({ id })) : [];
+}
+
+/**
+ * Parse `opencode models --verbose`: each `provider/model` line followed by a
+ * JSON object. Returns null when the stream cannot be parsed as that shape.
+ */
+export function parseOpencodeVerboseModels(stdout) {
+  if (typeof stdout !== "string" || !stdout.trim()) return null;
+  const lines = stdout.split(/\r?\n/);
+  const models = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    i += 1;
+    if (!line) continue;
+    if (/\s/.test(line) || !line.includes("/")) return null;
+    while (i < lines.length && !lines[i].trim()) i += 1;
+    if (i >= lines.length || lines[i].trim()[0] !== "{") return null;
+    let depth = 0;
+    let json = "";
+    for (; i < lines.length; i += 1) {
+      const raw = lines[i];
+      json += (json ? "\n" : "") + raw;
+      for (const ch of raw) {
+        if (ch === "{") depth += 1;
+        else if (ch === "}") depth -= 1;
+      }
+      if (depth === 0) {
+        i += 1;
+        break;
+      }
+    }
+    if (depth !== 0) return null;
+    let meta;
+    try {
+      meta = JSON.parse(json);
+    } catch {
+      return null;
+    }
+    const variants = meta?.variants;
+    const efforts =
+      variants && typeof variants === "object" && !Array.isArray(variants)
+        ? Object.keys(variants)
+        : [];
+    models.push({ id: line, efforts });
+  }
+  return models.length ? models : null;
 }
 
 /**
@@ -106,10 +171,16 @@ export function parsePiModels(stdout) {
     if (cols.length < 5 || cols.length > 6) continue;
     const [provider, model, context, maxOut] = cols;
     if (!provider || !model) continue;
+    const thinking = cols[4];
     const meta = [context ? `context ${context}` : "", maxOut ? `max-out ${maxOut}` : ""]
       .filter(Boolean)
       .join(" · ");
-    models.push({ id: `${provider}/${model}`, label: model, ...(meta ? { meta } : {}) });
+    models.push({
+      id: `${provider}/${model}`,
+      label: model,
+      ...(meta ? { meta } : {}),
+      ...(thinking === "yes" ? { efforts: [...PI_THINKING_LEVELS] } : {}),
+    });
   }
   return models;
 }
@@ -137,7 +208,30 @@ async function probe(agentId, run) {
   }
   if (agentId === "opencode") {
     // Never pass --refresh here: that is an opt-in network refresh elsewhere.
-    const result = await run("opencode", ["models"], { timeout: 20000 });
+    // Prefer --verbose so variant keys become efforts; fall back to plain lines.
+    let result = await run("opencode", ["models", "--verbose"], { timeout: 20000 });
+    if (result.code === 127)
+      return { available: false, reason: "not-installed", hint: MANUAL_HINT };
+    if (result.code === 0) {
+      const verboseModels = parseOpencodeVerboseModels(result.stdout);
+      if (verboseModels !== null) {
+        if (!verboseModels.length)
+          return {
+            available: false,
+            reason: "no-providers-configured",
+            hint:
+              "OpenCode lists only models from providers configured in its own auth store. Run `opencode auth login` in a terminal, or " +
+              MANUAL_HINT.toLowerCase(),
+          };
+        return {
+          available: true,
+          models: verboseModels,
+          source: "live",
+          command: "opencode models --verbose",
+        };
+      }
+    }
+    result = await run("opencode", ["models"], { timeout: 20000 });
     if (result.code === 127)
       return { available: false, reason: "not-installed", hint: MANUAL_HINT };
     if (result.code !== 0) return { available: false, reason: "cli-failed", hint: MANUAL_HINT };

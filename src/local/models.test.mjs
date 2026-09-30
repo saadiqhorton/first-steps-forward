@@ -5,10 +5,12 @@ import path from "node:path";
 import {
   parseCodexModels,
   parseOpencodeModels,
+  parseOpencodeVerboseModels,
   parsePiModels,
   listModels,
   clearModelsCache,
   MODEL_ID,
+  PI_THINKING_LEVELS,
 } from "./models.mjs";
 
 // Fixtures mirror the real shapes captured on this machine:
@@ -216,21 +218,127 @@ test("file cache under cacheDir survives the memory cache but not a version chan
   const dir = mkdtempSync(path.join(tmpdir(), "ade-models-"));
   try {
     clearModelsCache();
+    // Verbose probe fails to parse empty stdout, so the probe falls back to plain `models`.
     const run = fakeRun({ models: { code: 0, stdout: OPENCODE_LINES } });
     const first = await listModels("opencode", run, { version: "1.18.30", cacheDir: dir });
     assert.equal(first.cached, undefined);
-    assert.equal(run.calls.length, 1);
+    assert.equal(run.calls.length, 2, "verbose then plain fallback");
     // Simulate a server restart: memory cache gone, file cache still fresh.
     clearModelsCache();
     const second = await listModels("opencode", run, { version: "1.18.30", cacheDir: dir });
     assert.equal(second.cached, true);
     assert.equal(second.models.length, 4);
-    assert.equal(run.calls.length, 1, "file cache hit must not re-spawn");
+    assert.equal(run.calls.length, 2, "file cache hit must not re-spawn");
     // Upgraded CLI: fingerprint mismatch forces a re-probe (no stale rows).
     clearModelsCache();
     await listModels("opencode", run, { version: "2.0.0", cacheDir: dir });
-    assert.equal(run.calls.length, 2);
+    assert.equal(run.calls.length, 4);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+const CODEX_WITH_OPTIONS = JSON.stringify({
+  models: [
+    {
+      slug: "gpt-6-astra",
+      display_name: "GPT-6-Astra",
+      default_reasoning_level: "low",
+      visibility: "list",
+      priority: 1,
+      supported_reasoning_levels: [
+        { effort: "low", description: "Fast" },
+        { effort: "medium", description: "Balanced" },
+        { effort: "high", description: "Deep" },
+        { effort: "xhigh", description: "Extra" },
+        { effort: "max", description: "Max" },
+        { effort: "ultra", description: "Ultra" },
+      ],
+      additional_speed_tiers: ["fast"],
+    },
+    {
+      slug: "gpt-basic",
+      visibility: "list",
+      priority: 2,
+    },
+  ],
+});
+
+test("parseCodexModels carries efforts, defaultEffort, and speeds from the catalog", () => {
+  const models = parseCodexModels(CODEX_WITH_OPTIONS);
+  assert.deepEqual(models[0].efforts, ["low", "medium", "high", "xhigh", "max", "ultra"]);
+  assert.equal(models[0].defaultEffort, "low");
+  assert.deepEqual(models[0].speeds, ["fast"]);
+  assert.equal(models[1].efforts, undefined);
+  assert.equal(models[1].defaultEffort, undefined);
+  assert.equal(models[1].speeds, undefined);
+});
+
+const OPENCODE_VERBOSE = [
+  "opencode/big-pickle",
+  "{",
+  '  "id": "big-pickle",',
+  '  "variants": {}',
+  "}",
+  "opencode/ling-3.0-flash",
+  "{",
+  '  "id": "ling-3.0-flash",',
+  '  "variants": {',
+  '    "low": { "reasoningEffort": "low" },',
+  '    "medium": { "reasoningEffort": "medium" },',
+  '    "high": { "reasoningEffort": "high" }',
+  "  }",
+  "}",
+  "",
+].join("\n");
+
+test("parseOpencodeVerboseModels reads variants as efforts (empty map → [])", () => {
+  const models = parseOpencodeVerboseModels(OPENCODE_VERBOSE);
+  assert.deepEqual(models, [
+    { id: "opencode/big-pickle", efforts: [] },
+    { id: "opencode/ling-3.0-flash", efforts: ["low", "medium", "high"] },
+  ]);
+  assert.equal(parseOpencodeVerboseModels("not verbose"), null);
+  assert.equal(parseOpencodeVerboseModels(""), null);
+  assert.equal(parseOpencodeVerboseModels("opencode/x\n{not json}"), null);
+});
+
+const PI_THINKING_TABLE = [
+  "provider     model              context  max-out  thinking  images",
+  "opencode-go  deepseek-v4-flash  1M       384K     yes       no",
+  "llamacpp     plain-model        128K     16K      no        yes",
+].join("\n");
+
+test("parsePiModels adds PI_THINKING_LEVELS when thinking is yes", () => {
+  assert.deepEqual(PI_THINKING_LEVELS, ["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+  const models = parsePiModels(PI_THINKING_TABLE);
+  assert.deepEqual(models[0].efforts, PI_THINKING_LEVELS);
+  assert.equal(models[1].efforts, undefined);
+});
+
+test("opencode probe prefers models --verbose and falls back to plain models", async () => {
+  clearModelsCache();
+  const verboseRun = fakeRun({
+    "models --verbose": { code: 0, stdout: OPENCODE_VERBOSE },
+  });
+  const verbose = await listModels("opencode", verboseRun, { version: "1.18.33", now: 1 });
+  assert.equal(verbose.available, true);
+  assert.equal(verbose.command, "opencode models --verbose");
+  assert.deepEqual(verbose.models[0].efforts, []);
+  assert.deepEqual(verbose.models[1].efforts, ["low", "medium", "high"]);
+  assert.deepEqual(verboseRun.calls, [["opencode", "models", "--verbose"]]);
+
+  clearModelsCache();
+  const fallbackRun = fakeRun({
+    "models --verbose": { code: 0, stdout: "garbage" },
+    models: { code: 0, stdout: OPENCODE_LINES },
+  });
+  const fallback = await listModels("opencode", fallbackRun, { version: "1.18.33", now: 1 });
+  assert.equal(fallback.available, true);
+  assert.equal(fallback.command, "opencode models");
+  assert.equal(fallback.models.length, 4);
+  assert.deepEqual(
+    fallbackRun.calls.map((c) => c.slice(1).join(" ")),
+    ["models --verbose", "models"],
+  );
 });

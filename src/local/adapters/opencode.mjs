@@ -15,7 +15,7 @@ export const opencode = {
       !/0 credentials/i.test(result.stdout);
     return { signedIn, ...(signedIn ? { account: "Configured in OpenCode" } : {}) };
   },
-  command({ projectPath, prompt, session, continuing, model }) {
+  command({ projectPath, prompt, session, continuing, model, effort, permission }) {
     return [
       "opencode",
       [
@@ -26,6 +26,9 @@ export const opencode = {
         projectPath,
         // `-m provider/model` also works with `--session` continuation.
         ...(model ? ["-m", model] : []),
+        ...(effort ? ["--variant", effort] : []),
+        // Build is OpenCode's default primary agent; only pass --agent for plan.
+        ...(permission === "plan" ? ["--agent", "plan"] : []),
         ...(continuing && session.agentSessionId ? ["--session", session.agentSessionId] : []),
         prompt,
       ],

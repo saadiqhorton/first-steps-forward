@@ -14,22 +14,40 @@ export const codex = {
       result.code === 0 && /logged in|signed in/i.test(result.stdout + result.stderr);
     return { signedIn, ...(signedIn ? { account: "Codex account" } : {}) };
   },
-  command({ projectPath, prompt, session, continuing, model }) {
+  command({ projectPath, prompt, session, continuing, model, effort, speed, permission }) {
     // `-m` is valid for both `codex exec` and `codex exec resume`; omit it when
     // no model was chosen so the CLI keeps its own configured default.
     const modelArgs = model ? ["-m", model] : [];
+    const optionArgs = [
+      ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),
+      ...(speed ? ["-c", `service_tier="${speed}"`] : []),
+    ];
+    const plan = permission === "plan";
     return continuing && session.agentSessionId
-      ? ["codex", ["exec", "resume", "--json", ...modelArgs, session.agentSessionId, prompt]]
+      ? [
+          "codex",
+          [
+            "exec",
+            "resume",
+            "--json",
+            ...modelArgs,
+            ...optionArgs,
+            ...(plan ? ["-c", 'sandbox_mode="read-only"'] : []),
+            session.agentSessionId,
+            prompt,
+          ],
+        ]
       : [
           "codex",
           [
             "exec",
             "--json",
             ...modelArgs,
+            ...optionArgs,
             "--cd",
             projectPath,
             "--sandbox",
-            "workspace-write",
+            plan ? "read-only" : "workspace-write",
             prompt,
           ],
         ];
