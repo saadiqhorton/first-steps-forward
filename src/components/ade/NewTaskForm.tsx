@@ -5,7 +5,7 @@ import { Composer } from "@/components/ade/Composer";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import { WorkflowCards } from "@/components/ade/workflows/WorkflowCards";
 import type { Agent, Workflow } from "@/lib/ade/types";
-import { listWorkflows, useAde } from "@/lib/ade/store";
+import { agentModels, listWorkflows, useAde } from "@/lib/ade/store";
 
 export function NewTaskForm({
   projectId,
@@ -68,6 +68,28 @@ export function NewTaskForm({
       cancelled = true;
     };
   }, []);
+
+  // Pin the first catalog model when none is chosen (no "Model default").
+  useEffect(() => {
+    let cancelled = false;
+    const agentId = selection.agentId;
+    void agentModels(agentId)
+      .then((result) => {
+        if (cancelled || !result.available || !result.models?.length) return;
+        const first = result.models[0]?.id;
+        if (!first) return;
+        setSelection((prev) => {
+          if (prev.agentId !== agentId || prev.model.trim()) return prev;
+          return { ...prev, model: first, effort: "", speed: "" };
+        });
+      })
+      .catch(() => {
+        /* listing unavailable — user can still type Other model id */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selection.agentId]);
 
   useEffect(() => {
     if (!prefillWorkflowId || workflows.length === 0) return;

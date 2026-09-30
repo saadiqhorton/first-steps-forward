@@ -81,8 +81,8 @@ export function agentChipLabel(
 ): { title: string; subtitle: string } {
   const agent = agents.find((a) => a.id === sel.agentId);
   const title = agent?.name ?? sel.agentId;
-  const modelPart = sel.model || "Model default";
-  const effortPart = sel.effort || "Model default";
+  const modelPart = sel.model.trim() || "Pick a model";
+  const effortPart = sel.effort.trim() || "Default";
   return { title, subtitle: `${modelPart} · ${effortPart}` };
 }
 
@@ -198,6 +198,21 @@ export function AgentPicker({
     }
   }, [models, value.model]);
 
+  // No "Model default" row — once the catalog loads, pin the first listed model
+  // when the selection is still empty (e.g. after switching agents).
+  useEffect(() => {
+    if (modelsLoading || !models?.available) return;
+    const first = models.models?.[0]?.id;
+    if (!first || value.model.trim()) return;
+    onChange({
+      agentId: value.agentId,
+      model: first,
+      effort: "",
+      speed: "",
+      permission: value.permission,
+    });
+  }, [models, modelsLoading, onChange, value.agentId, value.model, value.permission]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -210,7 +225,7 @@ export function AgentPicker({
 
   const listedModels = useMemo(() => models?.models ?? [], [models]);
   const modelRows = useMemo(() => {
-    const rows: { id: string; label: string }[] = [{ id: "", label: "Model default" }];
+    const rows: { id: string; label: string }[] = [];
     for (const m of listedModels) {
       rows.push({
         id: m.id,
@@ -226,7 +241,7 @@ export function AgentPicker({
     return [
       {
         id: "",
-        label: "Model default",
+        label: "Default",
         disabled: efforts.length === 0,
         note: caps?.effortNote ?? "",
       },

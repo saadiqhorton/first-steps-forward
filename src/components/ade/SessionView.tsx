@@ -6,7 +6,7 @@ import { Composer } from "@/components/ade/Composer";
 import { RightPanePortal } from "@/components/ade/RightPanePortal";
 import { SessionMessage } from "@/components/ade/SessionMessage";
 import { StatusPill } from "@/components/ade/StatusPill";
-import { timeAgo, useAde } from "@/lib/ade/store";
+import { agentModels, timeAgo, useAde } from "@/lib/ade/store";
 
 function selectionFromSession(session: {
   agentId: AgentSelection["agentId"];
@@ -64,6 +64,31 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     session?.speed,
     session?.permission,
   ]);
+
+  // Sessions with no pinned model get the first catalog entry (no "Model default").
+  useEffect(() => {
+    if (!session) return;
+    const agentId = session.agentId;
+    if (session.model?.trim()) return;
+    let cancelled = false;
+    void agentModels(agentId)
+      .then((result) => {
+        if (cancelled || !result.available || !result.models?.length) return;
+        const first = result.models[0]?.id;
+        if (!first) return;
+        setSelection((prev) => {
+          const base = prev ?? selectionFromSession(session);
+          if (base.agentId !== agentId || base.model.trim()) return prev;
+          return { ...base, model: first, effort: "", speed: "" };
+        });
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, session?.id, session?.agentId, session?.model]);
 
   const project = state.projects.find((p) => p.id === session?.projectId);
   const agent = state.agents.find((a) => a.id === session?.agentId);
