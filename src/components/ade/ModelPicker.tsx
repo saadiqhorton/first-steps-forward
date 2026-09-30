@@ -3,7 +3,7 @@ import { agentModels } from "@/lib/ade/store";
 import type { AgentId, AgentModelsResult } from "@/lib/ade/types";
 
 const OTHER = "__other__";
-const REASON_TEXT: Record<string, string> = {
+export const REASON_TEXT: Record<string, string> = {
   "not-installed": "This CLI is not installed, so ADE cannot list its models.",
   "cli-failed": "The CLI's model listing command failed or printed something unexpected.",
   "no-providers-configured": "This CLI returned no models in its catalog.",
