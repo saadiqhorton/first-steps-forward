@@ -5,7 +5,7 @@ import { SignInDialog } from "@/components/ade/SignInDialog";
 import type { Agent, AgentId } from "@/lib/ade/types";
 import { useAde } from "@/lib/ade/store";
 
-export function NewTaskForm({ projectId }: { projectId: string }) {
+export function NewTaskForm({ projectId, onCancel }: { projectId: string; onCancel?: () => void }) {
   const { state, startTask } = useAde();
   const navigate = useNavigate();
   const project = state.projects.find((p) => p.id === projectId);
@@ -201,6 +201,15 @@ export function NewTaskForm({ projectId }: { projectId: string }) {
             >
               {busy ? "Starting…" : "Start task"}
             </button>
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="btn-quiet px-4 py-2.5 text-[14px]"
+              >
+                Cancel
+              </button>
+            )}
           </div>
         </div>
       </div>

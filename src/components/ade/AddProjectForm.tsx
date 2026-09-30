@@ -3,7 +3,13 @@ import { useNavigate } from "@tanstack/react-router";
 import { FolderBrowser } from "@/components/ade/FolderBrowser";
 import { useAde } from "@/lib/ade/store";
 
-export function AddProjectForm({ onDone }: { onDone: (projectId: string) => void }) {
+export function AddProjectForm({
+  onDone,
+  onCancel,
+}: {
+  onDone: (projectId: string) => void;
+  onCancel?: () => void;
+}) {
   const { addProject } = useAde();
   const navigate = useNavigate();
   const [path, setPath] = useState("");
@@ -13,6 +19,7 @@ export function AddProjectForm({ onDone }: { onDone: (projectId: string) => void
   const [browsing, setBrowsing] = useState(false);
   const name = path.split(/[\\/]/).filter(Boolean).pop() ?? "";
   const finalName = custom || name;
+  const embedded = typeof onCancel === "function";
   // Prefer the OS's own dialog when a picker tool is installed; otherwise
   // fall back to ADE's built-in browser so the button always works.
   const browse = async () => {
@@ -42,11 +49,27 @@ export function AddProjectForm({ onDone }: { onDone: (projectId: string) => void
       setBusy(false);
     }
   };
+  const cancel = () => {
+    if (onCancel) onCancel();
+    else void navigate({ to: "/" });
+  };
   return (
     <>
-      <div className="mx-auto w-full max-w-xl px-7 pt-8">
+      <div
+        className={
+          embedded ? "w-full px-6 pb-6 pt-6 pr-12" : "mx-auto w-full max-w-xl px-7 pb-8 pt-8"
+        }
+      >
         <div className="label-mono">Add project</div>
-        <h1 className="mt-1 font-display text-[44px] leading-[0.9]">Point ADE at a folder</h1>
+        <h1
+          className={
+            embedded
+              ? "mt-1 font-display text-3xl leading-tight tracking-wide"
+              : "mt-1 font-display text-[44px] leading-[0.9]"
+          }
+        >
+          Point ADE at a folder
+        </h1>
         <p className="mt-2 text-[13px] text-dim">
           A local directory on this machine. Project files stay in place; ADE stores only workspace
           metadata under ~/.ade.
@@ -87,10 +110,7 @@ export function AddProjectForm({ onDone }: { onDone: (projectId: string) => void
           >
             {busy ? "Adding…" : `Add ${finalName || "project"}`}
           </button>
-          <button
-            onClick={() => void navigate({ to: "/" })}
-            className="btn-quiet px-4 py-2 text-[13px]"
-          >
+          <button onClick={cancel} className="btn-quiet px-4 py-2 text-[13px]">
             Cancel
           </button>
         </div>

@@ -1,7 +1,7 @@
-import { Link } from "@tanstack/react-router";
 import type { Project, Session } from "@/lib/ade/types";
 import { useAde } from "@/lib/ade/store";
 import { summarizeChecks } from "./ChecksList";
+import { useShell } from "./shellContext";
 
 export function PreviewPane({
   project,
@@ -11,6 +11,7 @@ export function PreviewPane({
   session?: Session | undefined;
 }) {
   const { state, process } = useAde();
+  const { setRightTab } = useShell();
   const dev = state.processes.find((p) => p.projectId === project.id);
   const running = dev?.status === "running" && dev.port > 0;
   const starting = dev?.status === "starting";
@@ -93,9 +94,13 @@ export function PreviewPane({
             >
               Open in browser
             </a>
-            <Link to="/processes" className="btn-quiet px-3 py-1.5 text-[12px]">
+            <button
+              type="button"
+              onClick={() => setRightTab("preview")}
+              className="btn-quiet px-3 py-1.5 text-[12px]"
+            >
               Output
-            </Link>
+            </button>
           </div>
         )}
       </div>
