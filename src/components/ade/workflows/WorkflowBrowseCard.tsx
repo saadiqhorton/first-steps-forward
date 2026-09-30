@@ -25,10 +25,7 @@ export function WorkflowBrowseCard({
         selected ? "border-amber ring-1 ring-amber/40" : "hover:border-ink/25"
       }`}
     >
-      <div
-        className={`grid size-8 shrink-0 place-items-center rounded-md ${accent}`}
-        aria-hidden
-      >
+      <div className={`grid size-8 shrink-0 place-items-center rounded-md ${accent}`} aria-hidden>
         <WorkflowIcon className="size-4 text-ink/70" />
       </div>
       <div className="min-w-0 w-full pr-8">

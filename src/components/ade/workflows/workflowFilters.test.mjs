@@ -1,10 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  filterWorkflows,
-  groupWorkflows,
-  workflowAccent,
-} from "./workflowFilters.mjs";
+import { filterWorkflows, groupWorkflows, workflowAccent } from "./workflowFilters.mjs";
 
 const sample = [
   { id: "builtin-a", name: "Design workshop", description: "workshop", builtIn: true, prompt: "x" },

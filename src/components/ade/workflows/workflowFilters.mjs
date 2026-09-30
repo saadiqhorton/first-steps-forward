@@ -24,10 +24,7 @@ export function filterWorkflows(workflows, filter, query) {
     if (filter === "builtin" && !w.builtIn) return false;
     if (filter === "yours" && w.builtIn) return false;
     if (!q) return true;
-    return (
-      w.name.toLowerCase().includes(q) ||
-      (w.description ?? "").toLowerCase().includes(q)
-    );
+    return w.name.toLowerCase().includes(q) || (w.description ?? "").toLowerCase().includes(q);
   });
 }
 
