@@ -43,8 +43,7 @@ function ProjectHome() {
   if (!state.projects.length)
     return (
       <main className="flex min-w-0 flex-1 flex-col items-center justify-center px-8 text-center">
-        <div className="label-mono">Your machine · your projects</div>
-        <h1 className="mt-2 font-display text-5xl tracking-wide">A quieter place to build</h1>
+        <h1 className="heading-display text-4xl">A quieter place to build</h1>
         <p className="mt-3 max-w-md text-[14px] leading-relaxed text-dim">
           Add a local folder to see its Git status, start a real coding-agent CLI, review the
           working-tree diff, and run its development server.

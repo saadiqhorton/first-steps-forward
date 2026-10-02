@@ -18,7 +18,7 @@ export function writeLastProject(projectId: string): void {
   }
 }
 
-export type RightTab = "activity" | "preview" | "editor" | "terminal";
+export type RightTab = "activity" | "diff" | "computer" | "editor" | "terminal";
 
 export function projectConversationsPath(projectId: string): string {
   return `/p/${projectId}/conversations`;

@@ -116,6 +116,11 @@ test("MODEL_ID refuses flag-looking values and accepts real ids", () => {
   assert.ok(MODEL_ID.test("opencode-go/gpt-5.6-luna"));
   assert.ok(MODEL_ID.test("provider/a/b"), "model part may contain slashes");
   assert.ok(MODEL_ID.test("provider/model:thinking"));
+  assert.ok(
+    MODEL_ID.test("openrouter/~anthropic/claude-sonnet-latest"),
+    "OpenRouter aliases use ~",
+  );
+  assert.equal(MODEL_ID.test("--flag"), false);
   assert.ok(MODEL_ID.test("openai/gpt-5[1m]"));
   assert.ok(!MODEL_ID.test("--model"), "must never read as a CLI flag");
   assert.ok(!MODEL_ID.test("-x"));
@@ -320,13 +325,18 @@ test("opencode probe prefers models --verbose and falls back to plain models", a
   clearModelsCache();
   const verboseRun = fakeRun({
     "models --verbose": { code: 0, stdout: OPENCODE_VERBOSE },
+    // Cross-check against plain; same ids so verbose wins.
+    models: { code: 0, stdout: "opencode/big-pickle\nopencode/ling-3.0-flash\n" },
   });
   const verbose = await listModels("opencode", verboseRun, { version: "1.18.33", now: 1 });
   assert.equal(verbose.available, true);
   assert.equal(verbose.command, "opencode models --verbose");
   assert.deepEqual(verbose.models[0].efforts, []);
   assert.deepEqual(verbose.models[1].efforts, ["low", "medium", "high"]);
-  assert.deepEqual(verboseRun.calls, [["opencode", "models", "--verbose"]]);
+  assert.deepEqual(
+    verboseRun.calls.map((c) => c.slice(1).join(" ")),
+    ["models --verbose", "models"],
+  );
 
   clearModelsCache();
   const fallbackRun = fakeRun({
@@ -341,4 +351,25 @@ test("opencode probe prefers models --verbose and falls back to plain models", a
     fallbackRun.calls.map((c) => c.slice(1).join(" ")),
     ["models --verbose", "models"],
   );
+});
+
+test("opencode probe keeps plain ids when verbose returns a shorter list", async () => {
+  clearModelsCache();
+  const run = fakeRun({
+    "models --verbose": { code: 0, stdout: OPENCODE_VERBOSE },
+    models: {
+      code: 0,
+      stdout: "opencode/big-pickle\nopencode/ling-3.0-flash\nopenrouter/openai/gpt-4o\n",
+    },
+  });
+  const result = await listModels("opencode", run, { version: "1.18.33", now: 1 });
+  assert.equal(result.available, true);
+  assert.equal(result.command, "opencode models");
+  assert.deepEqual(
+    result.models.map((m) => m.id),
+    ["opencode/big-pickle", "opencode/ling-3.0-flash", "openrouter/openai/gpt-4o"],
+  );
+  assert.deepEqual(result.models[0].efforts, []);
+  assert.deepEqual(result.models[1].efforts, ["low", "medium", "high"]);
+  assert.equal(result.models[2].efforts, undefined);
 });

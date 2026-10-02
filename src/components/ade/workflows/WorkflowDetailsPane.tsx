@@ -51,10 +51,8 @@ export function WorkflowDetailsPane({
         <div className={`grid size-12 place-items-center rounded-lg ${accent}`} aria-hidden>
           <Sparkles className="size-5 text-ink/70" />
         </div>
-        <p className="label-mono mt-4">{builtIn ? "Built-in" : "Yours"}</p>
-        <h3 className="mt-1 font-display text-[28px] leading-[0.95] tracking-wide">
-          {workflow.name}
-        </h3>
+        <h3 className="mt-4 text-xl font-medium leading-snug">{workflow.name}</h3>
+        <p className="label-mono mt-1">{builtIn ? "Built-in" : "Yours"}</p>
 
         <div className="mt-3 flex flex-wrap gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 py-1 text-[11px] text-dim">

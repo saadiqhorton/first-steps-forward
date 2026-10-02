@@ -9,9 +9,11 @@ import {
 } from "react";
 import type {
   AdeState,
+  AgentComputer,
   AgentId,
   AgentModelsResult,
   HarnessJob,
+  MessageAttachment,
   OptionCapabilities,
   Permission,
   Project,
@@ -32,7 +34,7 @@ const empty: AdeState = {
   agents: [],
   authRequired: false,
 };
-type ProcessOp = "start" | "stop";
+
 type Api = {
   state: AdeState;
   selectProject: (id: string) => void;
@@ -47,8 +49,14 @@ type Api = {
     effort?: string;
     speed?: string;
     permission?: Permission;
+    attachmentIds?: string[];
   }) => Promise<Session>;
-  steer: (sessionId: string, text: string) => Promise<void>;
+  steer: (
+    sessionId: string,
+    text: string,
+    attachmentIds?: string[],
+    when?: "now" | "later" | "drop" | "release",
+  ) => Promise<void>;
   complete: (sessionId: string) => Promise<void>;
   reopen: (sessionId: string) => void;
   stop: (sessionId: string) => void;
@@ -60,7 +68,7 @@ type Api = {
   ) => Promise<void>;
   harnessCommand: (agentId: AgentId, kind: "install" | "update") => string;
   startHarness: (agentId: AgentId, kind: "install" | "update") => Promise<HarnessJob>;
-  process: (id: string, op: ProcessOp) => void;
+
   signIn: (agentId: AgentId) => Promise<{ output?: string; running?: boolean }>;
   agentModels: (agentId: AgentId) => Promise<AgentModelsResult>;
   setDefaultAgent: (projectId: string, agentId: AgentId) => void;
@@ -89,6 +97,10 @@ async function request<T>(url: string, method = "GET", data?: unknown): Promise<
 // 2-second polling refresh) so dependent effects do not refetch constantly.
 export const agentModels = (agentId: AgentId) =>
   request<AgentModelsResult>(`/api/agents/${agentId}/models`);
+export const computerStatus = (projectId: string) =>
+  request<AgentComputer>(`/api/projects/${projectId}/computer`);
+export const computerControl = (projectId: string, op: "start" | "stop") =>
+  request<AgentComputer>(`/api/projects/${projectId}/computer/${op}`, "POST");
 export const harnessJob = (agentId: AgentId) =>
   request<HarnessJob>(`/api/agents/${agentId}/harness`);
 export const optionCapabilities = (agentId: AgentId, model?: string) => {
@@ -110,6 +122,32 @@ export const saveWorkflow = async (
 export const deleteWorkflow = async (id: string) => {
   await request(`/api/workflows/${id}/delete`, "POST");
 };
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("Could not read the file."));
+        return;
+      }
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read the file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function uploadAttachment(file: File): Promise<MessageAttachment> {
+  const contentBase64 = await fileToBase64(file);
+  return request<MessageAttachment>("/api/attachments", "POST", {
+    name: file.name,
+    mime: file.type || "application/octet-stream",
+    contentBase64,
+  });
+}
 export const listDocuments = async (projectId: string) => {
   const data = await request<{ documents: ProjectDocument[] }>(
     `/api/editor/${projectId}/documents`,
@@ -179,8 +217,12 @@ export function AdeProvider({ children }: { children: ReactNode }) {
       },
       // Resolves only after the POST and the refresh; rejects on 4xx/5xx or
       // network failure so the caller can keep the draft and show the error.
-      steer: async (sessionId, text) => {
-        await request(`/api/sessions/${sessionId}/messages`, "POST", { text });
+      steer: async (sessionId, text, attachmentIds, when) => {
+        await request(`/api/sessions/${sessionId}/messages`, "POST", {
+          ...(text ? { text } : {}),
+          ...(when ? { when } : {}),
+          ...(attachmentIds?.length ? { attachmentIds } : {}),
+        });
         await refresh();
       },
       complete: (id) => {
@@ -224,11 +266,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         await refresh();
         return job;
       },
-      process: (id, op) => {
-        void request(`/api/processes/${id}/${op}`, "POST")
-          .then(refresh)
-          .catch((e) => window.alert(e.message));
-      },
+
       signIn: (id) => request(`/api/agents/${id}/login`, "POST"),
       agentModels,
       setDefaultAgent: (projectId, agentId) => {

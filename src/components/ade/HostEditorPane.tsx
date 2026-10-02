@@ -2,87 +2,40 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  FileCode2,
-  FileJson2,
-  FileText,
   Folder,
   FolderOpen,
   RotateCcw,
   Search,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { HighlightedCodeEditor } from "./HighlightedCodeEditor";
+import { useCallback, useEffect, useMemo, useState, lazy, Suspense, type ReactNode } from "react";
+import {
+  editorFileIcon,
+  listEditorEntries,
+  loadEditorFile,
+  saveEditorFile,
+  searchEditorFiles,
+  type EditorDocument,
+  type EditorEntry,
+} from "./editorApi";
 import "./host-editor.css";
 
+export type { EditorDocument, EditorEntry, EditorApiError } from "./editorApi";
+export {
+  editorApi,
+  editorFileIcon,
+  isMarkdownPath,
+  listEditorEntries,
+  loadEditorFile,
+  saveEditorFile,
+  searchEditorFiles,
+} from "./editorApi";
+
+const HighlightedCodeEditor = lazy(() =>
+  import("./HighlightedCodeEditor").then((module) => ({ default: module.HighlightedCodeEditor })),
+);
+
 type Props = { projectId: string; projectName: string; projectPath: string };
-
-/** Entry from `/api/editor/:id/entries` or search. */
-export type EditorEntry = { name: string; path: string; kind: "folder" | "file" };
-
-/** In-memory open document with draft + optimistic concurrency version. */
-export type EditorDocument = { saved: string; draft: string; version: string };
-
-export type EditorApiError = Error & { status?: number };
-
-export async function editorApi<T>(url: string, data?: object): Promise<T> {
-  const response = await fetch(
-    url,
-    data === undefined
-      ? undefined
-      : {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(data),
-        },
-  );
-  const value = await response.json();
-  if (!response.ok) {
-    const error = new Error(value.error || "File request failed.") as EditorApiError;
-    error.status = response.status;
-    throw error;
-  }
-  return value as T;
-}
-
-export function editorFileIcon(file: string) {
-  if (file.endsWith(".json")) return <FileJson2 size={13} aria-hidden />;
-  if (file.endsWith(".md") || file.endsWith(".txt") || file.endsWith(".mdx"))
-    return <FileText size={13} aria-hidden />;
-  return <FileCode2 size={13} aria-hidden />;
-}
-
-export function isMarkdownPath(file: string) {
-  return /\.(md|mdx)$/i.test(file);
-}
-
-export async function loadEditorFile(projectId: string, file: string) {
-  const params = new URLSearchParams({ path: file });
-  return editorApi<{ content: string; version: string }>(`/api/editor/${projectId}/file?${params}`);
-}
-
-export async function saveEditorFile(
-  projectId: string,
-  file: string,
-  content: string,
-  version: string,
-) {
-  return editorApi<{ version: string }>(`/api/editor/${projectId}/file`, {
-    path: file,
-    content,
-    version,
-  });
-}
-
-export async function listEditorEntries(projectId: string, directory = "") {
-  const params = new URLSearchParams({ path: directory });
-  return editorApi<{ entries: EditorEntry[] }>(`/api/editor/${projectId}/entries?${params}`);
-}
-
-export async function searchEditorFiles(projectId: string, query: string) {
-  const params = new URLSearchParams({ q: query });
-  return editorApi<{ entries: EditorEntry[] }>(`/api/editor/${projectId}/search?${params}`);
-}
 
 export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
   const [directories, setDirectories] = useState<Record<string, EditorEntry[]>>({});
@@ -309,10 +262,6 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
 
   return (
     <section className="ed-surface ed-workbench host-editor" aria-label="Project editor">
-      <div className="ed-workbench-top">
-        <span>FILES / WORKSPACE</span>
-        <span className="ed-top-mark">LOCAL</span>
-      </div>
       <div className="ed-workbench-project">
         <strong title={projectName}>{projectName}</strong>
         <span>{dirtyCount ? `${dirtyCount} unsaved` : "On this machine"}</span>
@@ -444,21 +393,23 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
       </div>
       {active && current ? (
         <div className="ed-code-area ed-code-workbench host-editor-code">
-          <HighlightedCodeEditor
-            key={active}
-            path={active}
-            value={current.draft}
-            onChange={(value) => {
-              setDocs((previous) => {
-                const existing = previous[active];
-                return existing
-                  ? { ...previous, [active]: { ...existing, draft: value } }
-                  : previous;
-              });
-              setNotice("");
-            }}
-            onSave={() => void saveFile()}
-          />
+          <Suspense fallback={<div className="host-editor-empty">Loading editor…</div>}>
+            <HighlightedCodeEditor
+              key={active}
+              path={active}
+              value={current.draft}
+              onChange={(value) => {
+                setDocs((previous) => {
+                  const existing = previous[active];
+                  return existing
+                    ? { ...previous, [active]: { ...existing, draft: value } }
+                    : previous;
+                });
+                setNotice("");
+              }}
+              onSave={() => void saveFile()}
+            />
+          </Suspense>
         </div>
       ) : (
         <div className="host-editor-empty">

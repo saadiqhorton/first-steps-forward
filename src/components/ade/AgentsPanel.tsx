@@ -10,8 +10,7 @@ export function AgentsPanel() {
   return (
     <>
       <div className="px-7 pt-6 pb-4">
-        <div className="label-mono">Local CLI detection</div>
-        <h1 className="mt-1 font-display text-[44px] leading-[0.9]">Agents & accounts</h1>
+        <h1 className="heading-display text-3xl">Agents & accounts</h1>
         <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-dim">
           ADE starts the installed agent CLIs in the selected project. Sign-in belongs to each agent
           and stays in its user-level credential store. ADE never stores provider tokens. Model
@@ -26,7 +25,7 @@ export function AgentsPanel() {
             style={{ animationDelay: `${i * 60}ms` }}
           >
             <div className="flex items-start gap-4">
-              <div className="grid size-10 shrink-0 place-items-center rounded-md bg-ink font-display text-lg text-paper">
+              <div className="grid size-10 shrink-0 place-items-center rounded-md bg-ink text-sm font-medium text-paper">
                 {a.short.slice(0, 2)}
               </div>
               <div className="min-w-0 flex-1">
@@ -34,7 +33,7 @@ export function AgentsPanel() {
                   <strong className="text-[14px]">{a.name}</strong>
                   {a.version && <span className="font-mono text-[10px] text-dim">{a.version}</span>}
                   <span
-                    className={`rounded px-1.5 py-0.5 font-mono text-[9px] uppercase ${!a.installed ? "bg-ink/5 text-dim" : a.signedIn ? "bg-teal/15 text-teal-deep" : "bg-amber/15 text-amber-deep"}`}
+                    className={`rounded-sm px-1.5 py-0.5 font-mono text-[10px] ${!a.installed ? "bg-ink/5 text-dim" : a.signedIn ? "bg-teal/15 text-teal-deep" : "bg-amber/15 text-amber-deep"}`}
                   >
                     {!a.installed ? "Not installed" : a.signedIn ? "Ready" : "Sign-in needed"}
                   </span>
@@ -42,9 +41,7 @@ export function AgentsPanel() {
                 <p className="mt-1 text-[12px] text-dim">{a.authMethod}</p>
                 {a.providers && a.providers.length > 0 && (
                   <p className="mt-1 text-[12px]">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
-                      Connected providers:{" "}
-                    </span>
+                    <span className="text-dim">Connected providers: </span>
                     {a.providers.join(", ")}
                   </p>
                 )}
@@ -73,7 +70,7 @@ export function AgentsPanel() {
                   <button
                     onClick={() => setDefaultAgent(project.id, a.id)}
                     disabled={project.defaultAgent === a.id}
-                    className="btn-quiet px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide"
+                    className="btn-quiet px-3 py-1.5 text-xs font-medium"
                   >
                     {project.defaultAgent === a.id ? `Default · ${project.name}` : `Make default`}
                   </button>

@@ -17,7 +17,8 @@ import path from "node:path";
 // so a value can never read as a CLI option (e.g. "--something"). The rest
 // allows the shapes the CLIs actually use (provider/model, [brackets],
 // colons, dots, hyphens, plus). ADE spawns argv arrays and runs no shell.
-export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/[\]\-+]{0,255}$/;
+// `~` appears in OpenCode OpenRouter alias ids (e.g. openrouter/~anthropic/…).
+export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/[\]\-+~]{0,255}$/;
 
 const CACHE_TTL_MS = 60_000;
 // Persistent catalog cache (per agent, under ~/.ade, private 0600). TTL 300s
@@ -209,34 +210,38 @@ async function probe(agentId, run) {
   if (agentId === "opencode") {
     // Never pass --refresh here: that is an opt-in network refresh elsewhere.
     // Prefer --verbose so variant keys become efforts; fall back to plain lines.
-    let result = await run("opencode", ["models", "--verbose"], { timeout: 20000 });
+    // Large OpenRouter catalogs can take well over 20s; keep the budget generous
+    // so a mid-list kill cannot stick a truncated catalog in the file cache.
+    let result = await run("opencode", ["models", "--verbose"], { timeout: 60000 });
     if (result.code === 127)
       return { available: false, reason: "not-installed", hint: MANUAL_HINT };
+    let verboseModels = null;
     if (result.code === 0) {
-      const verboseModels = parseOpencodeVerboseModels(result.stdout);
-      if (verboseModels !== null) {
-        if (!verboseModels.length)
-          return {
-            available: false,
-            reason: "no-providers-configured",
-            hint:
-              "OpenCode lists only models from providers configured in its own auth store. Run `opencode auth login` in a terminal, or " +
-              MANUAL_HINT.toLowerCase(),
-          };
+      verboseModels = parseOpencodeVerboseModels(result.stdout);
+      if (verboseModels !== null && !verboseModels.length)
+        return {
+          available: false,
+          reason: "no-providers-configured",
+          hint:
+            "OpenCode lists only models from providers configured in its own auth store. Run `opencode auth login` in a terminal, or " +
+            MANUAL_HINT.toLowerCase(),
+        };
+    }
+    result = await run("opencode", ["models"], { timeout: 60000 });
+    if (result.code === 127)
+      return { available: false, reason: "not-installed", hint: MANUAL_HINT };
+    if (result.code !== 0) {
+      if (verboseModels?.length)
         return {
           available: true,
           models: verboseModels,
           source: "live",
           command: "opencode models --verbose",
         };
-      }
+      return { available: false, reason: "cli-failed", hint: MANUAL_HINT };
     }
-    result = await run("opencode", ["models"], { timeout: 20000 });
-    if (result.code === 127)
-      return { available: false, reason: "not-installed", hint: MANUAL_HINT };
-    if (result.code !== 0) return { available: false, reason: "cli-failed", hint: MANUAL_HINT };
-    const models = parseOpencodeModels(result.stdout);
-    if (!models.length)
+    const plainModels = parseOpencodeModels(result.stdout);
+    if (!plainModels.length && !verboseModels?.length)
       return {
         available: false,
         reason: "no-providers-configured",
@@ -244,7 +249,28 @@ async function probe(agentId, run) {
           "OpenCode lists only models from providers configured in its own auth store. Run `opencode auth login` in a terminal, or " +
           MANUAL_HINT.toLowerCase(),
       };
-    return { available: true, models, source: "live", command: "opencode models" };
+    // Cross-check: an incomplete verbose stream can still parse (exit 0 with a
+    // short list). Prefer the complete plain id set and keep efforts from verbose.
+    if (verboseModels?.length && verboseModels.length >= plainModels.length)
+      return {
+        available: true,
+        models: verboseModels,
+        source: "live",
+        command: "opencode models --verbose",
+      };
+    if (verboseModels?.length) {
+      const effortsById = new Map(verboseModels.map((m) => [m.id, m.efforts]));
+      return {
+        available: true,
+        models: plainModels.map((m) => {
+          const efforts = effortsById.get(m.id);
+          return efforts ? { id: m.id, efforts } : m;
+        }),
+        source: "live",
+        command: "opencode models",
+      };
+    }
+    return { available: true, models: plainModels, source: "live", command: "opencode models" };
   }
   if (agentId === "pi") {
     // Extensions stay enabled: providers can be registered by packages
@@ -311,6 +337,12 @@ export async function listModels(agentId, run, opts = {}) {
   return result;
 }
 
-export function clearModelsCache() {
+export function clearModelsCache(cacheDir) {
   modelsCache.clear();
+  if (!cacheDir) return;
+  // Best-effort: drop on-disk catalogs so a truncated probe cannot linger for
+  // the file TTL after an intentional clear (e.g. harness install/update).
+  for (const agentId of ["codex", "opencode", "pi"]) {
+    fsp.unlink(path.join(cacheDir, `models-cache-${agentId}.json`)).catch(() => {});
+  }
 }

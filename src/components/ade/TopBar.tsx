@@ -1,13 +1,17 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Plus, Settings } from "lucide-react";
+import { GlideIndicator } from "@/components/ade/motion";
 import { projectColor } from "@/components/ade/projectColor";
 import { ProjectsMenu } from "@/components/ade/ProjectsMenu";
 import { useShell } from "@/components/ade/shellContext";
+import { ThemeSwitch } from "@/components/arc/theme-switch/theme-switch";
 import { useAde } from "@/lib/ade/store";
+import { useTheme } from "@/lib/theme";
 
 export function TopBar({ isDesktop }: { isDesktop: boolean }) {
   const { state } = useAde();
   const { openDialog } = useShell();
+  const { theme, setTheme } = useTheme();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   const activeFromRoute = pathname.match(/^\/p\/([^/]+)/)?.[1] ?? null;
@@ -17,7 +21,7 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
     <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-3 sm:px-4">
       <Link
         to="/"
-        className="shrink-0 font-display text-xl tracking-wide text-ink hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+        className="heading-display shrink-0 text-xl text-ink hover:text-ink"
         aria-label="ADE home"
       >
         ADE
@@ -38,14 +42,18 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
                 to="/p/$projectId/conversations"
                 params={{ projectId: p.id }}
                 aria-current={active ? "page" : undefined}
-                className={`flex max-w-[calc(18ch+2.5rem)] shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors ${
-                  active
-                    ? "bg-ink/[0.06] font-medium text-ink"
-                    : "text-dim hover:bg-ink/[0.04] hover:text-ink"
+                className={`relative isolate flex max-w-[calc(18ch+2.5rem)] shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors ${
+                  active ? "font-medium text-ink" : "text-dim hover:bg-ink/[0.04] hover:text-ink"
                 }`}
               >
+                {active && (
+                  <GlideIndicator
+                    id="top-bar-project"
+                    className="absolute inset-0 -z-10 rounded-md bg-ink/[0.06]"
+                  />
+                )}
                 <span
-                  className={`grid size-5 shrink-0 place-items-center rounded font-mono text-[10px] font-semibold ${colors.bg} ${colors.fg}`}
+                  className={`grid size-5 shrink-0 place-items-center rounded-xs font-mono text-[10px] font-medium ${colors.bg} ${colors.fg}`}
                   aria-hidden
                 >
                   {initial}
@@ -54,7 +62,10 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
                   {p.name}
                 </span>
                 {busy && (
-                  <span className="size-1.5 shrink-0 rounded-full bg-teal" aria-label="Working" />
+                  <span
+                    className="size-1.5 shrink-0 animate-pulse-soft rounded-full bg-teal"
+                    aria-label="Working"
+                  />
                 )}
               </Link>
             );
@@ -92,6 +103,12 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
         >
           <Settings className="size-3.5" aria-hidden />
         </button>
+        <ThemeSwitch
+          theme={theme}
+          variant="rise"
+          iconOnly
+          onThemeChange={(next) => setTheme(next)}
+        />
         {state.hydrated && !state.serviceAvailable && (
           <span className="hidden font-mono text-[10px] text-amber sm:inline">
             Local service disconnected

@@ -15,7 +15,8 @@ import type { RightTab } from "@/lib/ade/navigation";
 
 const rightTabs = [
   "activity",
-  "preview",
+  "diff",
+  "computer",
   "editor",
   "terminal",
 ] as const satisfies readonly RightTab[];
@@ -29,6 +30,7 @@ const conversationsSearchSchema = z.object({
 export type ConversationsSearch = z.infer<typeof conversationsSearchSchema>;
 
 export const Route = createFileRoute("/p/$projectId/conversations")({
+  ssr: false,
   validateSearch: (search: Record<string, unknown>): ConversationsSearch => {
     const completedRaw = search["completed"];
     const completed =
@@ -39,7 +41,8 @@ export const Route = createFileRoute("/p/$projectId/conversations")({
           : undefined;
     const parsed = conversationsSearchSchema.safeParse({
       completed,
-      pane: search["pane"],
+      // The agent computer replaced the Preview tab; keep old links working.
+      pane: search["pane"] === "preview" ? "computer" : search["pane"],
       dialog: search["dialog"],
     });
     return parsed.success ? parsed.data : {};
@@ -105,6 +108,7 @@ function ConversationsLayout() {
     >
       <Panel
         id={LIST_PANEL}
+        className="min-w-0 overflow-hidden"
         collapsible
         collapsedSize={0}
         minSize={`${LIST_MIN_PX}px`}
@@ -126,8 +130,13 @@ function ConversationsLayout() {
           data-always-visible={collapsedList ? "true" : undefined}
         />
       </Separator>
-      <Panel id={MAIN_PANEL} style={{ minWidth: 0, overflow: "hidden" }} minSize="30%">
-        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      <Panel
+        id={MAIN_PANEL}
+        className="min-w-0 overflow-hidden"
+        style={{ minWidth: 0, overflow: "hidden" }}
+        minSize="30%"
+      >
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <Outlet />
         </div>
       </Panel>

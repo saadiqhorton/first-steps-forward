@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type AgentSelection } from "@/components/ade/AgentPicker";
 import { Composer } from "@/components/ade/Composer";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import { WorkflowCards } from "@/components/ade/workflows/WorkflowCards";
 import type { Agent, Workflow } from "@/lib/ade/types";
-import { agentModels, listWorkflows, useAde } from "@/lib/ade/store";
+import { workflowsQuery } from "@/lib/ade/queries";
+import { agentModels, uploadAttachment, useAde } from "@/lib/ade/store";
 import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
+
+const NO_WORKFLOWS: Workflow[] = [];
 
 export function NewTaskForm({
   projectId,
@@ -36,7 +40,7 @@ export function NewTaskForm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ackDirty, setAckDirty] = useState(false);
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const workflows = useQuery(workflowsQuery()).data ?? NO_WORKFLOWS;
   const appliedPrefill = useRef<string | null>(null);
   const agent = state.agents.find((a) => a.id === selection.agentId);
   const usable = !!agent?.installed && agent.signedIn;
@@ -54,20 +58,6 @@ export function NewTaskForm({
       ...(workflow.agentId ? { agentId: workflow.agentId } : {}),
       ...(workflow.permission ? { permission: workflow.permission } : {}),
     }));
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void listWorkflows()
-      .then((list) => {
-        if (!cancelled) setWorkflows(list);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkflows([]);
-      });
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   // Last model for this agent/provider, else first catalog entry.
@@ -123,7 +113,7 @@ export function NewTaskForm({
     });
   }, [prefillWorkflowId, workflows, projectId, applyWorkflow, navigate]);
 
-  const onSend = async (text: string) => {
+  const onSend = async (text: string, files: File[]) => {
     if (!project || busy) return false;
     if (!usable) {
       setError(
@@ -150,6 +140,15 @@ export function NewTaskForm({
     setBusy(true);
     setError(null);
     try {
+      let attachmentIds: string[] = [];
+      if (files.length) {
+        try {
+          attachmentIds = (await Promise.all(files.map(uploadAttachment))).map((a) => a.id);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+          return false;
+        }
+      }
       const s = await startTask({
         projectId: project.id,
         agentId: selection.agentId,
@@ -159,6 +158,7 @@ export function NewTaskForm({
         ...(selection.effort.trim() ? { effort: selection.effort.trim() } : {}),
         ...(selection.speed.trim() ? { speed: selection.speed.trim() } : {}),
         permission: selection.permission,
+        ...(attachmentIds.length ? { attachmentIds } : {}),
       });
       void navigate({
         to: "/p/$projectId/conversations/$sessionId",
@@ -176,8 +176,7 @@ export function NewTaskForm({
   if (!state.projects.length || !project)
     return (
       <main className="min-w-0 flex-1 px-7 py-8">
-        <div className="label-mono">No project selected</div>
-        <h1 className="mt-1 font-display text-4xl">Add a project first</h1>
+        <h1 className="heading-display text-3xl">Add a project first</h1>
         <Link to="/projects/add" className="btn-amber mt-5 inline-block px-4 py-2 text-sm">
           + Add project
         </Link>
@@ -208,7 +207,7 @@ export function NewTaskForm({
       </div>
       {!!project.uncommittedFiles.length && (
         <div className="rounded-lg border border-amber/40 bg-amber/10 p-4">
-          <div className="text-[13px] font-semibold">
+          <div className="text-[13px] font-medium">
             Uncommitted work detected — it will be protected, not blocked
           </div>
           <p className="mt-1 text-[12px] leading-relaxed">
@@ -217,9 +216,11 @@ export function NewTaskForm({
             and marks them "yours" in the diff so you can tell your edits from the agent's. ADE
             never auto-stashes, resets, or restores files.
           </p>
-          <ul className="mt-2 font-mono text-[11px] text-dim">
+          <ul className="mt-2 max-h-40 overflow-y-auto font-mono text-[11px] text-dim">
             {project.uncommittedFiles.map((f) => (
-              <li key={f}>{f}</li>
+              <li key={f} className="truncate" title={f}>
+                {f}
+              </li>
             ))}
           </ul>
           <label className="mt-3 flex items-start gap-2 text-[12px] leading-snug">
@@ -265,11 +266,9 @@ export function NewTaskForm({
   const preview = workflows.slice(0, 3);
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-7 py-10">
-        <h1 className="font-display text-[44px] leading-[0.9] tracking-wide">
-          What are you working on?
-        </h1>
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+      <div className="flex w-full max-w-3xl flex-col px-7 py-10">
+        <h1 className="heading-display text-3xl">What are you working on?</h1>
         <p className="mt-3 text-[13px] text-dim">Describe a change and an agent gets started.</p>
         {preview.length > 0 && (
           <div className="mt-8">

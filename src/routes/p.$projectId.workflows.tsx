@@ -1,16 +1,29 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Play, Search } from "lucide-react";
+import { Search } from "lucide-react";
+import { AnimatePresence } from "motion/react";
+import { MotionItem, MotionPane } from "@/components/ade/motion";
+import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
+import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { WorkflowBrowseCard } from "@/components/ade/workflows/WorkflowBrowseCard";
 import { WorkflowDetailsPane } from "@/components/ade/workflows/WorkflowDetailsPane";
-import { WorkflowEditor } from "@/components/ade/workflows/WorkflowEditor";
 import {
   filterWorkflows,
   groupWorkflows,
   type WorkflowFilter,
 } from "@/components/ade/workflows/workflowFilters.mjs";
-import { deleteWorkflow, listWorkflows } from "@/lib/ade/store";
+import { workflowsQuery } from "@/lib/ade/queries";
+import { deleteWorkflow } from "@/lib/ade/store";
 import type { Workflow } from "@/lib/ade/types";
+
+const NO_WORKFLOWS: Workflow[] = [];
+
+const WorkflowEditor = lazy(() =>
+  import("@/components/ade/workflows/WorkflowEditor").then((module) => ({
+    default: module.WorkflowEditor,
+  })),
+);
 
 type WorkflowsSearch = {
   new?: boolean;
@@ -24,6 +37,7 @@ const FILTERS: { id: WorkflowFilter; label: string }[] = [
 
 export const Route = createFileRoute("/p/$projectId/workflows")({
   head: () => ({ meta: [{ title: "Workflows — ADE" }] }),
+  ssr: false,
   validateSearch: (search: Record<string, unknown>): WorkflowsSearch => {
     const raw = search["new"];
     const isNew = raw === true || raw === "true" || raw === "1" || raw === 1 ? true : undefined;
@@ -36,29 +50,27 @@ function WorkflowsPage() {
   const { projectId } = Route.useParams();
   const search = Route.useSearch();
   const navigate = useNavigate();
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const workflowsResult = useQuery(workflowsQuery());
+  const workflows = workflowsResult.data ?? NO_WORKFLOWS;
+  const loading = workflowsResult.isPending;
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error =
+    actionError ??
+    (workflowsResult.error
+      ? workflowsResult.error instanceof Error
+        ? workflowsResult.error.message
+        : String(workflowsResult.error)
+      : null);
   const [editor, setEditor] = useState<Workflow | "new" | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<WorkflowFilter>("all");
   const [query, setQuery] = useState("");
 
   const refresh = useCallback(async () => {
-    setError(null);
-    try {
-      const list = await listWorkflows();
-      setWorkflows(list);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    setActionError(null);
+    await queryClient.invalidateQueries({ queryKey: workflowsQuery().queryKey });
+  }, [queryClient]);
 
   useEffect(() => {
     if (search.new) {
@@ -102,7 +114,7 @@ function WorkflowsPage() {
       if (selectedId === workflow.id) setSelectedId(null);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setActionError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -113,17 +125,7 @@ function WorkflowsPage() {
     <main className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-7 py-8">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="grid size-10 place-items-center rounded-lg bg-amber/20" aria-hidden>
-              <Play className="size-4 text-amber-deep" />
-            </div>
-            <div>
-              <div className="label-mono">Project</div>
-              <h1 className="mt-1 font-display text-[44px] leading-[0.9] tracking-wide">
-                Workflows
-              </h1>
-            </div>
-          </div>
+          <h1 className="heading-display text-3xl">Workflows</h1>
           <p className="mt-3 text-[13px] text-dim">
             Reusable prompts that prefill the start screen. They never auto-send.
           </p>
@@ -132,26 +134,13 @@ function WorkflowsPage() {
             <p className="mt-6 rounded bg-danger/10 p-3 text-[12px] text-danger">{error}</p>
           ) : null}
 
-          <div className="mt-6 flex flex-wrap gap-1" role="tablist" aria-label="Workflow filters">
-            {FILTERS.map((f) => {
-              const active = filter === f.id;
-              return (
-                <button
-                  key={f.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setFilter(f.id)}
-                  className={`inline-flex items-center rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
-                    active
-                      ? "bg-ink/[0.08] font-medium text-ink"
-                      : "text-dim hover:bg-ink/[0.04] hover:text-ink"
-                  }`}
-                >
-                  {f.label}
-                </button>
-              );
-            })}
+          <div className="mt-6 flex">
+            <SegmentedControl
+              label="Workflow filters"
+              value={filter}
+              onValueChange={(next) => setFilter(next as WorkflowFilter)}
+              options={FILTERS.map((f) => ({ value: f.id, label: f.label }))}
+            />
           </div>
 
           <div className="relative mt-4">
@@ -170,7 +159,11 @@ function WorkflowsPage() {
           </div>
 
           <div className="mt-8 space-y-8">
-            {loading ? <p className="text-[13px] text-dim">Loading workflows…</p> : null}
+            {loading ? (
+              <TextShimmer as="p" className="text-[13px] text-dim">
+                Loading workflows…
+              </TextShimmer>
+            ) : null}
 
             {emptyResults ? (
               <p className="text-[13px] text-dim">
@@ -182,18 +175,21 @@ function WorkflowsPage() {
               <section>
                 <h2 className="label-mono">Built-in</h2>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  {grouped.builtIn.map((workflow) => (
-                    <WorkflowBrowseCard
-                      key={workflow.id}
-                      workflow={workflow}
-                      selected={selectedId === workflow.id && editor === null}
-                      projectId={projectId}
-                      onSelect={(w) => {
-                        setEditor(null);
-                        setSelectedId(w.id);
-                      }}
-                    />
-                  ))}
+                  <AnimatePresence initial={false} mode="popLayout">
+                    {grouped.builtIn.map((workflow) => (
+                      <MotionItem key={workflow.id} className="grid">
+                        <WorkflowBrowseCard
+                          workflow={workflow}
+                          selected={selectedId === workflow.id && editor === null}
+                          projectId={projectId}
+                          onSelect={(w) => {
+                            setEditor(null);
+                            setSelectedId(w.id);
+                          }}
+                        />
+                      </MotionItem>
+                    ))}
+                  </AnimatePresence>
                 </div>
               </section>
             ) : null}
@@ -202,18 +198,21 @@ function WorkflowsPage() {
               <section>
                 <h2 className="label-mono">Yours</h2>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  {grouped.yours.map((workflow) => (
-                    <WorkflowBrowseCard
-                      key={workflow.id}
-                      workflow={workflow}
-                      selected={selectedId === workflow.id && editor === null}
-                      projectId={projectId}
-                      onSelect={(w) => {
-                        setEditor(null);
-                        setSelectedId(w.id);
-                      }}
-                    />
-                  ))}
+                  <AnimatePresence initial={false} mode="popLayout">
+                    {grouped.yours.map((workflow) => (
+                      <MotionItem key={workflow.id} className="grid">
+                        <WorkflowBrowseCard
+                          workflow={workflow}
+                          selected={selectedId === workflow.id && editor === null}
+                          projectId={projectId}
+                          onSelect={(w) => {
+                            setEditor(null);
+                            setSelectedId(w.id);
+                          }}
+                        />
+                      </MotionItem>
+                    ))}
+                  </AnimatePresence>
                 </div>
               </section>
             ) : null}
@@ -234,38 +233,51 @@ function WorkflowsPage() {
         </div>
       </div>
 
-      {showPane ? (
-        <div className="flex h-full min-h-0 w-full min-w-[20rem] max-w-md shrink-0 flex-col border-l border-line bg-panel">
-          {editor !== null ? (
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <WorkflowEditor
-                key={
-                  editor === "new"
-                    ? "new"
-                    : editor.id
-                      ? `edit-${editor.id}`
-                      : `draft-${editor.name}`
-                }
-                initial={editor === "new" ? null : editor}
-                onSaved={async (saved) => {
-                  closeEditor();
-                  setSelectedId(saved.id);
-                  await refresh();
-                }}
-                onCancel={closeEditor}
+      <AnimatePresence initial={false}>
+        {showPane ? (
+          <MotionPane
+            key="workflow-pane"
+            className="flex h-full min-h-0 w-full min-w-[20rem] max-w-md shrink-0 flex-col border-l border-line bg-panel"
+          >
+            {editor !== null ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                <Suspense
+                  fallback={
+                    <div className="grid place-items-center py-10 font-mono text-[12px] text-dim">
+                      Loading editor…
+                    </div>
+                  }
+                >
+                  <WorkflowEditor
+                    key={
+                      editor === "new"
+                        ? "new"
+                        : editor.id
+                          ? `edit-${editor.id}`
+                          : `draft-${editor.name}`
+                    }
+                    initial={editor === "new" ? null : editor}
+                    onSaved={async (saved) => {
+                      closeEditor();
+                      setSelectedId(saved.id);
+                      await refresh();
+                    }}
+                    onCancel={closeEditor}
+                  />
+                </Suspense>
+              </div>
+            ) : selected ? (
+              <WorkflowDetailsPane
+                workflow={selected}
+                projectId={projectId}
+                onClose={() => setSelectedId(null)}
+                onEdit={(w) => setEditor(w)}
+                onDelete={(w) => void onDelete(w)}
               />
-            </div>
-          ) : selected ? (
-            <WorkflowDetailsPane
-              workflow={selected}
-              projectId={projectId}
-              onClose={() => setSelectedId(null)}
-              onEdit={(w) => setEditor(w)}
-              onDelete={(w) => void onDelete(w)}
-            />
-          ) : null}
-        </div>
-      ) : null}
+            ) : null}
+          </MotionPane>
+        ) : null}
+      </AnimatePresence>
     </main>
   );
 }

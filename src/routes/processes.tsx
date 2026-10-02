@@ -9,7 +9,7 @@ export const Route = createFileRoute("/processes")({
       { title: "Processes — ADE" },
       {
         name: "description",
-        content: "Start, stop, and inspect the local dev servers and watchers for each project.",
+        content: "Watch the agent run and test each project on its own computer.",
       },
       { property: "og:title", content: "Processes — ADE" },
       { property: "og:description", content: "Every local process, named by project and purpose." },
@@ -34,7 +34,7 @@ function ProcessesRedirect() {
     void navigate({
       to: "/p/$projectId/conversations",
       params: { projectId },
-      search: { pane: "preview" },
+      search: { pane: "computer" },
       replace: true,
     });
   }, [state.hydrated, state.projects, navigate]);

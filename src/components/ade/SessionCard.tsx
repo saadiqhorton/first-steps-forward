@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { Session } from "@/lib/ade/types";
+import { sessionTitle } from "@/lib/ade/sessionTitle";
 import { timeAgo, useAde } from "@/lib/ade/store";
 import { StatusPill } from "./StatusPill";
 
@@ -17,12 +18,14 @@ export function SessionCard({ session, delay = 0 }: { session: Session; delay?: 
         <Link
           to="/sessions/$sessionId"
           params={{ sessionId: session.id }}
-          className="ml-auto font-mono text-[10px] uppercase tracking-[0.16em] text-dim hover:text-ink"
+          className="ml-auto font-mono text-[11px] text-dim hover:text-ink"
         >
           Open →
         </Link>
       </div>
-      <p className="text-[14px] leading-snug">{session.request}</p>
+      <p className="line-clamp-2 text-[14px] leading-snug" title={session.request}>
+        {sessionTitle(session.request, 140)}
+      </p>
       {session.status === "ready" && session.summary && (
         <p className="mt-2 text-[12px] leading-snug text-dim">{session.summary}</p>
       )}

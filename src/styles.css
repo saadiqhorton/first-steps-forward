@@ -1,11 +1,12 @@
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
+@import "./components/arc/foundation.css";
 
 @font-face {
-  font-family: "Bebas Neue";
-  src: url("/fonts/bebas-neue-latin.woff2") format("woff2");
-  font-weight: 400;
+  font-family: "Geist";
+  src: url("/fonts/geist-latin.woff2") format("woff2");
+  font-weight: 100 900;
   font-display: swap;
 }
 @font-face {
@@ -21,32 +22,46 @@
   font-display: swap;
 }
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(:root[data-theme="dark"], :root[data-theme="dark"] *));
 
+/* Arc's foundation redefines --text-xs through --text-5xl and --ease-in-out outside any layer,
+ * so Tailwind's text-* and ease-in-out utilities follow Arc's scale. */
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: var(--radius-control);
+  --radius-xl: var(--radius-panel);
+  --radius-2xl: var(--radius-surface);
+
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: var(--shadow-floating);
+  --shadow-lg: var(--shadow-floating);
+  --shadow-xl: var(--shadow-floating);
+  --shadow-2xl: var(--shadow-floating);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--surface-raised);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-foreground);
+  --color-secondary: var(--surface-muted);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--surface-muted);
+  --color-muted-foreground: var(--text-muted);
+  /* shadcn's "accent" is the hover and highlighted fill, not Arc's --accent. */
+  --color-accent: var(--surface-muted);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--danger-foreground);
   --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-input: var(--border-strong);
+  --color-ring: var(--focus-ring);
 
   /* Workbench palette */
   --color-ink: var(--ink);
@@ -59,19 +74,23 @@
   --color-line: var(--line);
   --color-dim: var(--dim);
   --color-danger: var(--danger);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-raised: var(--surface-raised);
+  --color-deck: var(--deck);
+  --color-deck-foreground: var(--deck-foreground);
+  --color-scrim: var(--scrim);
 
-  --font-display: "Bebas Neue", "Impact", sans-serif;
-  --font-sans: "Inter", system-ui, sans-serif;
+  --font-display: var(--font-geist), system-ui, sans-serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --ease-work: cubic-bezier(0.32, 0.72, 0, 1);
-  --animate-rise: rise 500ms var(--ease-work) both;
+  --animate-rise: rise var(--duration-considered) var(--ease-enter) both;
   --animate-pulse-soft: pulse-soft 1.6s ease-in-out infinite;
 
   @keyframes rise {
     from {
       opacity: 0;
-      transform: translateY(9px);
+      transform: translateY(8px);
     }
     to {
       opacity: 1;
@@ -87,25 +106,11 @@
       opacity: 1;
     }
   }
-  @keyframes grain {
-    0%,
-    100% {
-      transform: translate(0, 0);
-    }
-    25% {
-      transform: translate(-4%, 3%);
-    }
-    50% {
-      transform: translate(3%, -2%);
-    }
-    75% {
-      transform: translate(-2%, -4%);
-    }
-  }
 }
 
 :root {
-  --radius: 0.5rem;
+  --font-geist: "Geist";
+  --font-inter: "Inter";
 
   --ink: oklch(0.18 0.006 70);
   --paper: oklch(0.945 0.02 90);
@@ -117,118 +122,257 @@
   --line: oklch(0.86 0.03 85);
   --dim: oklch(0.59 0.03 85);
   --danger: oklch(0.55 0.18 28);
+  --danger-foreground: oklch(0.985 0.008 90);
+  /* Code, logs, and command output stay dark in both themes. */
+  --deck: oklch(0.18 0.006 70);
+  --deck-foreground: oklch(0.945 0.02 90);
+  --scrim: oklch(0.18 0.006 70 / 0.45);
 
   --background: var(--paper);
+  --surface: var(--panel);
+  --surface-raised: var(--panel);
+  --surface-muted: oklch(0.92 0.02 88);
   --foreground: var(--ink);
-  --card: var(--panel);
-  --card-foreground: var(--ink);
-  --popover: var(--panel);
-  --popover-foreground: var(--ink);
-  --primary: var(--amber);
-  --primary-foreground: var(--ink);
-  --secondary: oklch(0.92 0.02 88);
-  --secondary-foreground: var(--ink);
-  --muted: oklch(0.92 0.02 88);
-  --muted-foreground: var(--dim);
-  --accent: var(--teal);
-  --accent-foreground: var(--paper);
-  --destructive: var(--danger);
-  --destructive-foreground: var(--paper);
+  --text-secondary: oklch(0.43 0.025 80);
+  --text-muted: var(--dim);
   --border: var(--line);
-  --input: var(--line);
-  --ring: var(--amber);
+  --border-subtle: oklch(0.9 0.025 87);
+  --border-strong: oklch(0.78 0.035 82);
+
+  --accent: var(--amber);
+  --accent-strong: var(--amber-deep);
+  --accent-subtle: color-mix(in oklab, var(--amber) 14%, transparent);
+  /* Amber needs dark ink on top of it in both themes. */
+  --accent-foreground: oklch(0.18 0.006 70);
+  --control-on: var(--amber);
+  --control-glyph: var(--accent-foreground);
+  --control-fill: var(--amber);
+  --success: var(--teal);
+  --warning: var(--amber-deep);
+
+  --code-background: oklch(0.994 0.007 89);
+  --code-foreground: oklch(0.323 0.01 107);
+  --code-gutter: oklch(0.963 0.016 83);
+  --code-gutter-foreground: oklch(0.713 0.031 83);
+  --syntax-comment: oklch(0.614 0.02 89);
+  --syntax-keyword: oklch(0.549 0.129 53);
+  --syntax-string: oklch(0.518 0.083 180);
+  --syntax-number: oklch(0.534 0.117 309);
+  --syntax-type: oklch(0.484 0.091 246);
+  --syntax-function: oklch(0.49 0.09 60);
+  --syntax-property: oklch(0.477 0.084 114);
+  --syntax-heading: oklch(0.505 0.115 55);
+  --syntax-invalid: oklch(0.497 0.138 29);
 }
 
-@utility grain {
-  position: relative;
-  &::after {
-    content: "";
-    position: absolute;
-    inset: -50%;
-    pointer-events: none;
-    opacity: 0.1;
-    mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-    animation: grain 7s steps(4) infinite;
-  }
+:root[data-theme="dark"] {
+  --ink: oklch(0.95 0.012 90);
+  --paper: oklch(0.19 0.006 75);
+  --panel: oklch(0.215 0.007 75);
+  --amber: oklch(0.77 0.15 70);
+  --amber-deep: oklch(0.85 0.11 78);
+  --teal: oklch(0.75 0.09 185);
+  --teal-deep: oklch(0.84 0.07 185);
+  --line: oklch(0.3 0.012 80);
+  --dim: oklch(0.65 0.022 85);
+  --danger: oklch(0.72 0.17 28);
+  --danger-foreground: oklch(0.18 0.006 70);
+  --deck: oklch(0.155 0.005 75);
+  --deck-foreground: oklch(0.93 0.014 90);
+  --scrim: oklch(0.1 0.004 75 / 0.6);
+
+  --background: var(--paper);
+  --surface: var(--panel);
+  --surface-raised: oklch(0.24 0.008 75);
+  --surface-muted: oklch(0.26 0.009 75);
+  --foreground: var(--ink);
+  --text-secondary: oklch(0.78 0.016 85);
+  --text-muted: var(--dim);
+  --border: var(--line);
+  --border-subtle: oklch(0.255 0.01 80);
+  --border-strong: oklch(0.4 0.015 80);
+
+  --accent: var(--amber);
+  --accent-strong: var(--amber-deep);
+  --accent-subtle: color-mix(in oklab, var(--amber) 18%, transparent);
+  --control-on: oklch(0.72 0.15 68);
+  --control-glyph: var(--accent-foreground);
+  --control-thumb-on: oklch(1 0 0);
+  --control-fill: oklch(0.72 0.15 68);
+  --success: var(--teal);
+  --warning: var(--amber-deep);
+
+  --code-background: oklch(0.205 0.006 75);
+  --code-foreground: oklch(0.9 0.012 90);
+  --code-gutter: oklch(0.23 0.008 75);
+  --code-gutter-foreground: oklch(0.55 0.02 85);
+  --syntax-comment: oklch(0.63 0.02 89);
+  --syntax-keyword: oklch(0.77 0.12 55);
+  --syntax-string: oklch(0.77 0.08 180);
+  --syntax-number: oklch(0.77 0.1 309);
+  --syntax-type: oklch(0.77 0.09 246);
+  --syntax-function: oklch(0.81 0.09 70);
+  --syntax-property: oklch(0.79 0.08 114);
+  --syntax-heading: oklch(0.81 0.11 60);
+  --syntax-invalid: oklch(0.73 0.15 29);
 }
 
 @utility label-mono {
   font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  color: var(--dim);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+  color: var(--text-muted);
 }
 
+@utility heading-display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: var(--tracking-display);
+  line-height: var(--leading-display);
+}
+
+/* Presses scale on Arc's spring; anchors of menus and popovers answer with color only,
+ * because the popup positions itself against the pressed size. */
 @utility btn-amber {
-  border-radius: var(--radius-md);
-  background: var(--amber);
-  color: var(--ink);
-  font-weight: 600;
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--amber-deep) 40%, transparent);
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-weight: 500;
   transition:
-    background-color 200ms,
-    color 200ms;
-  &:hover {
-    background: var(--amber-deep);
-    color: var(--paper);
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-spring) var(--ease-spring);
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      opacity: 0.91;
+    }
+  }
+  &:active {
+    opacity: 0.84;
+    transform: scale(0.97);
+  }
+  &:is([aria-haspopup], [aria-expanded], [data-state]):active {
+    transform: none;
   }
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.52;
     pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+    &:active {
+      transform: none;
+    }
   }
 }
 
 @utility btn-quiet {
-  border-radius: var(--radius-md);
-  background: color-mix(in oklab, var(--ink) 6%, transparent);
-  color: var(--ink);
-  transition: background-color 200ms;
-  &:hover {
-    background: color-mix(in oklab, var(--ink) 11%, transparent);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-spring) var(--ease-spring);
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      background: var(--surface-muted);
+    }
+  }
+  &:active {
+    background: var(--surface-muted);
+    transform: scale(0.97);
+  }
+  &:is([aria-haspopup], [aria-expanded], [data-state]):active {
+    transform: none;
   }
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.52;
     pointer-events: none;
   }
-}
-
-@utility btn-ink-ghost {
-  border-radius: var(--radius-md);
-  background: color-mix(in oklab, var(--paper) 10%, transparent);
-  color: var(--paper);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--paper) 15%, transparent);
-  transition: background-color 200ms;
-  &:hover {
-    background: color-mix(in oklab, var(--paper) 20%, transparent);
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+    &:active {
+      transform: none;
+    }
   }
 }
 
 @utility card-panel {
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 
 @layer base {
   * {
-    border-color: var(--color-border);
+    border-color: var(--border);
   }
   html,
   body {
     height: 100%;
   }
   body {
-    background-color: var(--color-background);
-    color: var(--color-foreground);
-    font-family: var(--font-sans);
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    letter-spacing: var(--tracking-body);
     -webkit-font-smoothing: antialiased;
   }
-  :focus-visible {
-    outline: 2px solid var(--amber);
-    outline-offset: 2px;
+  ::selection {
+    background: color-mix(in oklab, var(--amber) 32%, transparent);
   }
+  :root {
+    interpolate-size: allow-keywords;
+  }
+  /* Native disclosures open and close on height where the browser supports ::details-content. */
+  details::details-content {
+    block-size: 0;
+    overflow: clip;
+    opacity: 0;
+    transition:
+      block-size var(--duration-standard) var(--ease-standard),
+      opacity var(--duration-fast) var(--ease-standard),
+      content-visibility var(--duration-standard) allow-discrete;
+  }
+  details[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    details::details-content {
+      transition: none;
+    }
+    .animate-rise,
+    .animate-pulse-soft {
+      animation: none;
+    }
+  }
+}
+
+/* The theme switch runs a view transition; the new appearance rises over the old one. */
+:root[data-theme-transition]::view-transition-old(root) {
+  animation: none;
+}
+:root[data-theme-transition]::view-transition-new(root) {
+  animation: theme-rise var(--duration-considered) var(--ease-enter);
+}
+@keyframes theme-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme-transition]::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+/* react-resizable-panels forces overflow:visible on panel roots, which lets
+ * column content paint over neighbors. Clip each panel so columns stay separate. */
+[data-panel] {
+  overflow: hidden !important;
+  min-width: 0;
 }
 
 /* Resizable panel seams.
@@ -239,10 +383,8 @@
   .panel-seam {
     position: relative;
     flex: 0 0 auto;
-    background: var(--line);
-    transition:
-      background-color 120ms ease,
-      box-shadow 120ms ease;
+    background: var(--border);
+    transition: background-color var(--duration-fast) var(--ease-standard);
   }
   .panel-seam[data-orientation="vertical"] {
     width: 4px;
@@ -276,11 +418,7 @@
   .panel-seam[data-separator="active"],
   .panel-seam[data-separator="hover"],
   .panel-seam[data-separator="focus"] {
-    background: var(--amber);
-    box-shadow: 0 0 0 1px color-mix(in oklab, var(--amber-deep) 35%, transparent);
-  }
-  .panel-seam:focus-visible {
-    outline: none;
+    background: var(--accent);
   }
 
   /* Collapse handle — a small chevron anchored to the seam so users can
@@ -294,26 +432,26 @@
     z-index: 1;
     width: 20px;
     height: 20px;
-    border-radius: 4px;
-    background: var(--panel);
-    color: var(--dim);
-    border: 1px solid var(--line);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-resting);
     display: grid;
     place-items: center;
     cursor: pointer;
     opacity: 0;
     transition:
-      opacity 120ms ease,
-      background-color 120ms ease,
-      color 120ms ease;
+      opacity var(--duration-fast) var(--ease-standard),
+      background-color var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard);
   }
   .panel-collapse-handle:hover,
   .panel-collapse-handle:focus-visible {
     opacity: 1;
-    background: var(--amber);
-    color: var(--ink);
-    border-color: var(--amber-deep);
+    background: var(--accent);
+    color: var(--accent-foreground);
+    border-color: var(--accent-strong);
   }
   /* Reveal on seam hover/focus, and keep it visible when the panel is
      collapsed so the expand affordance stays discoverable. */
@@ -350,7 +488,7 @@
 .ade-markdown h2,
 .ade-markdown h3 {
   margin-block: 0.9em 0.4em;
-  font-weight: 650;
+  font-weight: 500;
 }
 .ade-markdown h1 {
   font-size: 1.25em;
@@ -366,21 +504,21 @@
 .ade-markdown pre {
   max-width: 100%;
   overflow-x: auto;
-  border-radius: 5px;
-  background: var(--ink);
-  color: var(--paper);
+  border-radius: 12px;
+  background: var(--deck);
+  color: var(--deck-foreground);
   padding: 0.8em;
   white-space: pre;
 }
 .ade-markdown :not(pre) > code {
-  border-radius: 3px;
+  border-radius: 6px;
   background: color-mix(in oklab, var(--ink) 8%, transparent);
   padding: 0.1em 0.25em;
 }
 .ade-markdown blockquote {
-  border-left: 2px solid var(--line);
+  border-left: 2px solid var(--border);
   padding-left: 0.9em;
-  color: var(--dim);
+  color: var(--text-muted);
 }
 .ade-markdown table {
   display: block;
@@ -390,7 +528,7 @@
 }
 .ade-markdown th,
 .ade-markdown td {
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   padding: 0.3em 0.5em;
 }
 
@@ -416,4 +554,11 @@
 
 .host-terminal .xterm-viewport::-webkit-scrollbar-thumb:hover {
   background: #8dc4b7;
+}
+.agent-computer-screen:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: auto;
+  border: 0;
+  background: #000;
 }

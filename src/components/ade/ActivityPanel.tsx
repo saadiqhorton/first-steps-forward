@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { ActivityLogs } from "@/components/ade/ActivityLogs";
 import { ChecksList } from "@/components/ade/ChecksList";
-import { DiffView } from "@/components/ade/DiffView";
 import type { Session } from "@/lib/ade/types";
 import { useAde } from "@/lib/ade/store";
 
@@ -26,13 +25,9 @@ export function ActivityPanel({ session }: { session: Session }) {
     }
   };
 
-  const filesLabel = session.changeCountUnavailable
-    ? "Files changed"
-    : `Files changed (${session.changes.length})`;
-
   return (
     <aside
-      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto bg-panel"
+      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-panel"
       aria-label="Activity"
     >
       <div className="space-y-6 px-4 py-4">
@@ -82,32 +77,37 @@ export function ActivityPanel({ session }: { session: Session }) {
         </section>
 
         <section>
-          <h2 className="label-mono">{filesLabel}</h2>
-          <div className="mt-2">
-            <DiffView changes={session.changes} unavailable={!!session.changeCountUnavailable} />
-          </div>
-        </section>
-
-        <section>
-          <h2 className="label-mono">Checks ({session.checks.length})</h2>
-          <div className="mt-2">
-            <ChecksList checks={session.checks} />
-            {session.status === "ready" && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="label-mono">Checks ({session.checks.length})</h2>
+            {session.status === "ready" ? (
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void checksClick()}
-                className="btn-quiet mt-3 px-3 py-1.5 text-[12px]"
+                className="btn-amber px-3 py-1.5 text-[12px]"
               >
                 {busy ? "Running…" : "Run project checks"}
               </button>
-            )}
-            {session.status === "blocked" && (
+            ) : null}
+          </div>
+          <div className="mt-2">
+            <ChecksList checks={session.checks} />
+            {session.status === "blocked" ? (
               <p className="mt-3 text-[12px] text-dim">
                 Checks run once the session is ready to review. Clear the blocker above —
                 re-authenticate, switch agents, or send a follow-up — then run them here.
               </p>
-            )}
+            ) : null}
+            {session.status === "working" || session.status === "verifying" ? (
+              <p className="mt-3 text-[12px] text-dim">
+                Checks are available after this turn finishes and the session is ready to review.
+              </p>
+            ) : null}
+            {session.status === "complete" || session.status === "stopped" ? (
+              <p className="mt-3 text-[12px] text-dim">
+                Reopen or keep the session in “ready to review” to run project checks again.
+              </p>
+            ) : null}
           </div>
         </section>
 

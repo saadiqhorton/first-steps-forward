@@ -73,8 +73,11 @@ test("Pi adapter restricts shell tools and parses actual JSON events", () => {
 test("Pi reports only auth-check READY providers, not credential or catalog counts", async () => {
   const home = mkdtempSync(path.join(os.tmpdir(), "ade-pi-auth-"));
   const previousHome = process.env.HOME;
+  // os.homedir() reads USERPROFILE on Windows, not HOME.
+  const previousProfile = process.env.USERPROFILE;
   try {
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
     writeFileSync(
       path.join(home, ".pi", "agent", "auth.json"),
@@ -123,6 +126,8 @@ test("Pi reports only auth-check READY providers, not credential or catalog coun
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
+    if (previousProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousProfile;
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -130,8 +135,11 @@ test("Pi reports only auth-check READY providers, not credential or catalog coun
 test("Pi does not label a configured but non-READY provider as signed in", async () => {
   const home = mkdtempSync(path.join(os.tmpdir(), "ade-pi-auth-"));
   const previousHome = process.env.HOME;
+  // os.homedir() reads USERPROFILE on Windows, not HOME.
+  const previousProfile = process.env.USERPROFILE;
   try {
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
     writeFileSync(path.join(home, ".pi", "agent", "auth.json"), '{"ollama-cloud":{}}');
     const auth = await pi.detectAuth(async () => ({
@@ -142,6 +150,8 @@ test("Pi does not label a configured but non-READY provider as signed in", async
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
+    if (previousProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousProfile;
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -354,6 +364,89 @@ test("OpenCode maps effort to --variant and plan to --agent plan", () => {
   assert.ok(!build.includes("--agent"));
 });
 
+const imageAttachment = {
+  path: "/tmp/shot.png",
+  mime: "image/png",
+  kind: "image",
+  name: "shot.png",
+};
+const fileAttachment = {
+  path: "/tmp/notes.txt",
+  mime: "text/plain",
+  kind: "file",
+  name: "notes.txt",
+};
+
+test("Codex ends image flags with -- so the prompt is not swallowed", () => {
+  const args = codex.command({
+    projectPath: "/tmp/project",
+    prompt: "Look at this",
+    session: { id: "s" },
+    continuing: false,
+    attachments: [imageAttachment],
+  })[1];
+  const imageAt = args.indexOf("--image");
+  const sepAt = args.lastIndexOf("--");
+  assert.ok(imageAt >= 0);
+  assert.equal(args[imageAt + 1], "/tmp/shot.png");
+  assert.equal(args[sepAt], "--");
+  assert.equal(args[sepAt + 1], "Look at this");
+  assert.equal(args.at(-1), "Look at this");
+
+  const resumed = codex.command({
+    projectPath: "/tmp/project",
+    prompt: "Look at this",
+    session: { id: "s", agentSessionId: "thread-1" },
+    continuing: true,
+    attachments: [imageAttachment],
+  })[1];
+  assert.equal(resumed.at(-2), "--");
+  assert.equal(resumed.at(-1), "Look at this");
+});
+
+test("adapters pass native attachment flags when provided", () => {
+  const codexArgs = codex.command({
+    projectPath: "/tmp/project",
+    prompt: "Look",
+    session: { id: "s" },
+    continuing: false,
+    attachments: [imageAttachment, fileAttachment],
+  })[1];
+  assert.ok(codexArgs.includes("--image"));
+  assert.ok(codexArgs.includes("/tmp/shot.png"));
+  assert.ok(
+    !codexArgs.some((arg, i) => arg === "--image" && codexArgs[i + 1] === "/tmp/notes.txt"),
+  );
+
+  const openCodeArgs = opencode.command({
+    projectPath: "/tmp/project",
+    prompt: "Look",
+    session: { id: "s" },
+    continuing: false,
+    attachments: [imageAttachment, fileAttachment],
+  })[1];
+  assert.deepEqual(
+    openCodeArgs.filter((a) => a === "--file"),
+    ["--file", "--file"],
+  );
+  assert.ok(openCodeArgs.includes("/tmp/shot.png"));
+  assert.ok(openCodeArgs.includes("/tmp/notes.txt"));
+
+  const piArgs = pi.command({
+    prompt: "Look",
+    session: { id: "s" },
+    continuing: false,
+    dataDir: "/tmp/ade",
+    providers: ["opencode-go"],
+    attachments: [imageAttachment, fileAttachment],
+  })[1];
+  const promptIndex = piArgs.indexOf("Look");
+  assert.ok(piArgs.includes("@/tmp/shot.png"));
+  assert.ok(piArgs.includes("@/tmp/notes.txt"));
+  assert.ok(piArgs.indexOf("@/tmp/shot.png") < promptIndex);
+  assert.ok(piArgs.indexOf("@/tmp/notes.txt") < promptIndex);
+});
+
 test("Pi maps effort to --thinking and plan to a read-only tools allowlist", () => {
   const planArgs = pi.command({
     prompt: "Review",
@@ -378,4 +471,73 @@ test("Pi maps effort to --thinking and plan to a read-only tools allowlist", () 
     permission: "build",
   })[1];
   assert.equal(buildArgs[buildArgs.indexOf("--tools") + 1], "read,edit,write,grep,find,ls");
+});
+
+const computer = {
+  node: "/usr/bin/node",
+  mcpScript: "/ade/src/local/computer-mcp.mjs",
+  piExtension: "/ade/src/local/computer-pi-extension.mjs",
+  env: { ADE_API: "http://127.0.0.1:3000", ADE_PROJECT_ID: "p1" },
+};
+
+test("every agent gets the computer: Codex MCP overrides, OpenCode inline config, Pi extension", () => {
+  const base = { projectPath: "/tmp/project", prompt: "Test it", session, continuing: false };
+  const [, codexArgs, codexEnv] = codex.command({ ...base, computer });
+  assert.ok(codexArgs.includes('mcp_servers.ade_computer.command="/usr/bin/node"'));
+  assert.ok(
+    codexArgs.includes('mcp_servers.ade_computer.args=["/ade/src/local/computer-mcp.mjs"]'),
+  );
+  assert.ok(
+    codexArgs.includes(
+      'mcp_servers.ade_computer.env={ADE_API="http://127.0.0.1:3000",ADE_PROJECT_ID="p1"}',
+    ),
+  );
+  // `codex exec` runs with approval policy "never", which denies MCP tools
+  // unless their server pre-approves them; only ADE's own server is approved.
+  assert.ok(codexArgs.includes('mcp_servers.ade_computer.default_tools_approval_mode="approve"'));
+  assert.ok(!codexArgs.some((a) => a.startsWith("approval_policy")));
+  assert.equal(codexArgs.at(-1), "Test it");
+  assert.equal(codexEnv, undefined);
+  const resumed = codex.command({
+    ...base,
+    continuing: true,
+    session: { ...session, agentSessionId: "t1" },
+    computer,
+  })[1];
+  assert.ok(resumed.some((a) => a.startsWith("mcp_servers.ade_computer.command=")));
+  assert.equal(resumed.at(-2), "t1");
+  // Overrides must precede Codex's greedy --image list and the prompt.
+  const withImage = codex.command({
+    ...base,
+    computer,
+    attachments: [{ kind: "image", path: "/tmp/a.png" }],
+  })[1];
+  assert.ok(
+    withImage.lastIndexOf("-c") < withImage.indexOf("--image"),
+    "computer -c overrides come before --image",
+  );
+
+  const [, , openCodeEnv] = opencode.command({ ...base, computer });
+  const config = JSON.parse(openCodeEnv.OPENCODE_CONFIG_CONTENT);
+  assert.deepEqual(config.mcp.ade_computer.command, [computer.node, computer.mcpScript]);
+  assert.deepEqual(config.mcp.ade_computer.environment, computer.env);
+
+  const [, piArgs, piEnv] = pi.command({ ...base, dataDir: "/data", computer });
+  assert.equal(piArgs[piArgs.indexOf("-e") + 1], computer.piExtension);
+  const allowed = piArgs[piArgs.indexOf("--tools") + 1].split(",");
+  assert.ok(allowed.includes("read") && allowed.includes("computer_screenshot"));
+  assert.ok(!allowed.includes("bash"));
+  assert.deepEqual(piEnv, computer.env);
+  const planned = pi.command({ ...base, dataDir: "/data", computer, permission: "plan" })[1];
+  const planTools = planned[planned.indexOf("--tools") + 1].split(",");
+  assert.ok(!planTools.includes("edit") && planTools.includes("computer_click"));
+});
+
+test("without a computer context nothing extra is passed", () => {
+  const base = { projectPath: "/tmp/project", prompt: "x", session, continuing: false };
+  assert.ok(!codex.command(base)[1].some((a) => a.includes("ade_computer")));
+  assert.deepEqual(opencode.command(base)[2], {});
+  const piArgs = pi.command({ ...base, dataDir: "/data" })[1];
+  assert.ok(!piArgs.includes("-e"));
+  assert.equal(piArgs[piArgs.indexOf("--tools") + 1], "read,edit,write,grep,find,ls");
 });

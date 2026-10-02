@@ -71,9 +71,9 @@ export function WorkflowEditor({
         void submit();
       }}
     >
-      <div className="label-mono">
+      <h2 className="text-base font-medium">
         {editing ? "Edit workflow" : fromBuiltIn ? "Customize workflow" : "New workflow"}
-      </div>
+      </h2>
       {fromBuiltIn && !editing ? (
         <p className="text-[12px] text-dim">
           Saving creates your own copy under Yours. The built-in stays unchanged.

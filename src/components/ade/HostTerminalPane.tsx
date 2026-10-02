@@ -268,13 +268,7 @@ export function HostTerminalPane({
       aria-label="Host terminal"
     >
       <div className="shrink-0 border-b border-white/10 px-3 py-3">
-        <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#8dc4b7]">
-          Active environment / local host
-        </div>
-        <div
-          className="mt-1 truncate font-display text-[22px] leading-none tracking-wide"
-          title={projectName}
-        >
+        <div className="truncate text-base font-medium leading-tight" title={projectName}>
           {projectName}
         </div>
       </div>
@@ -282,7 +276,7 @@ export function HostTerminalPane({
         <span className="truncate text-[#e1ad61]">›_ {shell || "Console"}</span>
         <div className="flex shrink-0 items-center gap-2">
           <span className={status === "connected" ? "text-[#8dc4b7]" : "text-white/50"}>
-            {status === "connected" ? "● LIVE" : status.toUpperCase()}
+            {status === "connected" ? "● Live" : status.charAt(0).toUpperCase() + status.slice(1)}
           </span>
         </div>
       </div>

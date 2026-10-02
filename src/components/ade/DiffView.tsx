@@ -38,10 +38,10 @@ export function DiffView({
                   {c.path}
                   {c.preExisting && (
                     <span
-                      className="ml-2 rounded bg-amber/15 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-amber-deep"
+                      className="ml-2 rounded bg-amber/15 px-1.5 py-0.5 font-mono text-[10px] text-amber-deep"
                       title="Already dirty before the agent ran — your uncommitted work"
                     >
-                      yours
+                      Yours
                     </span>
                   )}
                 </span>
@@ -51,7 +51,7 @@ export function DiffView({
                 </span>
               </button>
               {isOpen && (
-                <pre className="overflow-x-auto bg-ink px-4 py-3 font-mono text-[11.5px] leading-relaxed text-paper">
+                <pre className="overflow-x-auto bg-deck px-4 py-3 font-mono text-[11.5px] leading-relaxed text-deck-foreground">
                   {c.hunk.map((l, i) => (
                     <div
                       key={i}
@@ -62,7 +62,7 @@ export function DiffView({
                             ? "bg-danger/30"
                             : l.startsWith("@@")
                               ? "text-amber"
-                              : "text-paper/70"
+                              : "text-deck-foreground/70"
                       }
                     >
                       {l}

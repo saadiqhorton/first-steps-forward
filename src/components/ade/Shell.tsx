@@ -19,11 +19,13 @@ import type { RightTab } from "@/lib/ade/navigation";
 import { useAde } from "@/lib/ade/store";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { AgentsDialog } from "./AgentsDialog";
-import { PreviewPane } from "./PreviewPane";
-import { ProcessPanel } from "./ProcessPanel";
+import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
+import { GlideIndicator, SectionFade } from "./motion";
+import { AgentComputerPane } from "./AgentComputerPane";
 import { RightPaneHostContext } from "./rightPaneContext";
 import { SectionTabs } from "./SectionTabs";
 import { ShellContext, type ShellDialog } from "./shellContext";
+import { migrateDefaultLayout } from "./migrateDefaultLayout.mjs";
 import { TopBar } from "./TopBar";
 import { usePersistedLayout } from "./persistLayout";
 
@@ -31,12 +33,16 @@ const SHELL_LAYOUT_ID = "ade-shell-layout-v2";
 const SHELL_PANEL_IDS = ["shell-main", "shell-right"] as const;
 type ShellPanelId = (typeof SHELL_PANEL_IDS)[number];
 
-const DEFAULT_LAYOUT: Layout = { "shell-main": 74, "shell-right": 26 };
+// Split desk: give the live computer a useful starting size beside the task.
+// Persisted user layouts still take precedence when the group hydrates.
+const DEFAULT_LAYOUT: Layout = { "shell-main": 56, "shell-right": 44 };
+const PREVIOUS_DEFAULT_LAYOUT: Layout = { "shell-main": 74, "shell-right": 26 };
 const RIGHT_MIN_PX = 240;
-const RIGHT_MAX_PX = 540;
-const RIGHT_REST_PCT = 26;
+/** Allow Diff/Activity to grow until main hits its 40% floor. */
+const RIGHT_MAX_PCT = 60;
+const RIGHT_REST_PCT = 44;
 
-const RIGHT_TABS: RightTab[] = ["activity", "preview", "terminal"];
+const RIGHT_TABS: RightTab[] = ["activity", "diff", "computer", "terminal"];
 
 /**
  * Tracks whether we're on the `lg` breakpoint or wider. Renders `true` on the
@@ -125,14 +131,28 @@ function ShellInner({
   const router = useRouter();
   const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // Animate the section that is actually rendered. Requested location changes
+  // before pending route code loads, while matches still show the outgoing page.
+  const sectionKey = useRouterState({
+    select: (s) =>
+      (s.matches.at(-1)?.pathname ?? s.resolvedLocation?.pathname ?? "/")
+        .split("/")
+        .slice(0, 4)
+        .join("/"),
+  });
+  const activeSessionId = useRouterState({
+    select: (s) => (s.matches.at(-1)?.params as { sessionId?: string } | undefined)?.sessionId,
+  });
   const searchStr = useRouterState({ select: (s) => s.location.searchStr });
-  const [rightTab, setRightTab] = useState<RightTab>("activity");
+  const [rightTab, setRightTab] = useState<RightTab>("computer");
   const [dialog, setDialog] = useState<ShellDialog | null>(null);
   const [terminalOpened, setTerminalOpened] = useState(false);
   const [terminalClosing, setTerminalClosing] = useState(false);
   const [terminalCloseError, setTerminalCloseError] = useState("");
   const activityTabRef = useRef<HTMLButtonElement | null>(null);
-  const previewTabRef = useRef<HTMLButtonElement | null>(null);
+  const diffTabRef = useRef<HTMLButtonElement | null>(null);
+  const computerTabRef = useRef<HTMLButtonElement | null>(null);
+  const sessionPaneActive = rightTab === "activity" || rightTab === "diff";
   const terminalCloseRef = useRef<(() => Promise<void>) | null>(null);
   const listToggleRef = useRef<(() => void) | null>(null);
 
@@ -181,6 +201,9 @@ function ShellInner({
 
   const activeProject =
     state.projects.find((project) => project.id === state.activeProjectId) ?? state.projects[0];
+  const activeSession = state.sessions.find(
+    (session) => session.id === activeSessionId && session.projectId === activeProject?.id,
+  );
 
   useEffect(() => {
     if (!terminalOpened) return;
@@ -195,7 +218,8 @@ function ShellInner({
 
   // Consume `pane` / `dialog` search params once, then strip them from the URL.
   useEffect(() => {
-    const paneRaw = search["pane"];
+    // The agent computer replaced the Preview tab; keep old links working.
+    const paneRaw = search["pane"] === "preview" ? "computer" : search["pane"];
     const dialogRaw = search["dialog"];
     const obsoleteEditor = paneRaw === "editor";
     const pane =
@@ -225,6 +249,15 @@ function ShellInner({
   const { onLayoutChanged: onShellLayoutChanged, hydrateGroup } =
     usePersistedLayout(SHELL_LAYOUT_ID);
   useEffect(() => {
+    // Move only the exact prior default. Resized and collapsed user layouts are
+    // preserved, while returning users get the approved split desk once.
+    try {
+      const stored = window.localStorage.getItem(SHELL_LAYOUT_ID);
+      const migrated = migrateDefaultLayout(stored, PREVIOUS_DEFAULT_LAYOUT, DEFAULT_LAYOUT);
+      if (migrated !== stored && migrated) window.localStorage.setItem(SHELL_LAYOUT_ID, migrated);
+    } catch {
+      // The layout hook falls back to DEFAULT_LAYOUT when storage is unavailable.
+    }
     hydrateGroup(groupRef, DEFAULT_LAYOUT);
   }, [hydrateGroup]);
 
@@ -288,9 +321,13 @@ function ShellInner({
   };
 
   const tabClass = (active: boolean) =>
-    `border-b-2 px-3 font-mono text-[10px] uppercase tracking-[0.12em] ${
-      active ? "border-amber text-ink" : "border-transparent text-dim hover:text-ink"
-    }`;
+    `relative px-3 text-sm transition-colors ${active ? "text-ink" : "text-dim hover:text-ink"}`;
+  const tabIndicator = (
+    <GlideIndicator
+      id="right-pane-tab"
+      className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-amber"
+    />
+  );
 
   const rightPane = (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
@@ -305,28 +342,44 @@ function ShellInner({
           id="right-activity-tab"
           ref={activityTabRef}
           aria-selected={rightTab === "activity"}
-          aria-controls="right-activity-panel"
+          aria-controls="right-session-panel"
           onClick={() => setRightTab("activity")}
           className={tabClass(rightTab === "activity")}
         >
           Activity
+          {rightTab === "activity" && tabIndicator}
         </button>
         <button
           type="button"
           role="tab"
-          id="right-preview-tab"
-          ref={previewTabRef}
-          aria-selected={rightTab === "preview"}
-          aria-controls="right-preview-panel"
-          onClick={() => setRightTab("preview")}
-          className={tabClass(rightTab === "preview")}
+          id="right-diff-tab"
+          ref={diffTabRef}
+          aria-selected={rightTab === "diff"}
+          aria-controls="right-session-panel"
+          onClick={() => setRightTab("diff")}
+          className={tabClass(rightTab === "diff")}
         >
-          Preview
+          Diff
+          {rightTab === "diff" && tabIndicator}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="right-computer-tab"
+          ref={computerTabRef}
+          aria-selected={rightTab === "computer"}
+          aria-controls="right-computer-panel"
+          onClick={() => setRightTab("computer")}
+          className={tabClass(rightTab === "computer")}
+        >
+          Computer
+          {rightTab === "computer" && tabIndicator}
         </button>
         {terminalOpened ? (
           <div
-            className={`flex items-center border-b-2 ${rightTab === "terminal" ? "border-amber text-ink" : "border-transparent text-dim"}`}
+            className={`relative flex items-center transition-colors ${rightTab === "terminal" ? "text-ink" : "text-dim"}`}
           >
+            {rightTab === "terminal" && tabIndicator}
             <button
               type="button"
               role="tab"
@@ -334,7 +387,7 @@ function ShellInner({
               aria-selected={rightTab === "terminal"}
               aria-controls="right-terminal-panel"
               onClick={() => setRightTab("terminal")}
-              className="h-full pl-3 pr-1 font-mono text-[10px] uppercase tracking-[0.12em] hover:text-ink"
+              className="h-full pl-3 pr-1 text-sm hover:text-ink"
             >
               Terminal
             </button>
@@ -354,7 +407,7 @@ function ShellInner({
             type="button"
             onClick={openTerminal}
             aria-label="Open terminal"
-            className="ml-auto flex items-center gap-1.5 px-2 font-mono text-[10px] uppercase tracking-[0.12em] text-dim hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+            className="ml-auto flex items-center gap-1.5 px-2 text-sm text-dim hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
           >
             <span aria-hidden>›_</span> Terminal
           </button>
@@ -362,36 +415,29 @@ function ShellInner({
       </div>
 
       <div
-        id="right-activity-panel"
+        id="right-session-panel"
         role="tabpanel"
-        aria-labelledby="right-activity-tab"
-        className={`min-h-0 flex-1 ${rightTab === "activity" ? "flex" : "hidden"}`}
+        aria-labelledby={rightTab === "diff" ? "right-diff-tab" : "right-activity-tab"}
+        className={`min-h-0 flex-1 ${sessionPaneActive ? "flex" : "hidden"}`}
       >
         <div
           ref={onRightHostChange}
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-          aria-label="Activity"
+          aria-label={rightTab === "diff" ? "Diff" : "Activity"}
         />
       </div>
 
       <div
-        id="right-preview-panel"
+        id="right-computer-panel"
         role="tabpanel"
-        aria-labelledby="right-preview-tab"
-        className={`min-h-0 flex-1 flex-col overflow-y-auto ${rightTab === "preview" ? "flex" : "hidden"}`}
+        aria-labelledby="right-computer-tab"
+        className={`min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto ${rightTab === "computer" ? "flex" : "hidden"}`}
       >
         {activeProject ? (
-          <>
-            <div className="min-h-0 shrink-0">
-              <PreviewPane project={activeProject} />
-            </div>
-            <div className="border-t border-line">
-              <ProcessPanel projectId={activeProject.id} />
-            </div>
-          </>
+          <AgentComputerPane project={activeProject} session={activeSession} />
         ) : (
           <div className="grid flex-1 place-items-center px-5 text-center font-mono text-[11px] text-dim">
-            Add a project to see its preview.
+            Add a project to give agents a computer.
           </div>
         )}
       </div>
@@ -422,7 +468,9 @@ function ShellInner({
             />
           ) : (
             <div className="grid flex-1 place-items-center bg-[#1d2928] px-5 text-center font-mono text-[11px] text-white/60">
-              {activeProject ? "Opening terminal…" : "Add a project to open a terminal."}
+              <TextShimmer active={!!activeProject}>
+                {activeProject ? "Opening terminal…" : "Add a project to open a terminal."}
+              </TextShimmer>
             </div>
           )}
         </div>
@@ -447,8 +495,18 @@ function ShellInner({
               style={{ flex: 1, minHeight: 0 }}
               className="min-h-0 min-w-0 flex-1"
             >
-              <Panel id="shell-main" style={{ minWidth: 0, overflow: "hidden" }} minSize="40%">
-                <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+              <Panel
+                id="shell-main"
+                className="min-w-0 overflow-hidden"
+                style={{ minWidth: 0, overflow: "hidden" }}
+                minSize="40%"
+              >
+                <SectionFade
+                  sectionKey={sectionKey}
+                  className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                >
+                  {children}
+                </SectionFade>
               </Panel>
               <PanelSash
                 orientation="vertical"
@@ -461,10 +519,11 @@ function ShellInner({
               />
               <Panel
                 id="shell-right"
+                className="min-w-0 overflow-hidden"
                 collapsible
                 collapsedSize={0}
                 minSize={`${RIGHT_MIN_PX}px`}
-                maxSize={`${RIGHT_MAX_PX}px`}
+                maxSize={`${RIGHT_MAX_PCT}%`}
                 style={{ minWidth: 0, overflow: "hidden" }}
                 onResize={onRightResize}
               >
@@ -472,7 +531,12 @@ function ShellInner({
               </Panel>
             </Group>
           ) : (
-            <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+            <SectionFade
+              sectionKey={sectionKey}
+              className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+            >
+              {children}
+            </SectionFade>
           )}
         </div>
 

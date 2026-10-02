@@ -1,13 +1,29 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, notFound } from "@tanstack/react-router";
 import { ActivityPanel } from "@/components/ade/ActivityPanel";
 import { type AgentSelection } from "@/components/ade/AgentPicker";
 import { Composer } from "@/components/ade/Composer";
+import { DiffPanel } from "@/components/ade/DiffPanel";
 import { RightPanePortal } from "@/components/ade/RightPanePortal";
 import { SessionMessage } from "@/components/ade/SessionMessage";
+import { MotionItem } from "@/components/ade/motion";
+import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
+import { AnimatePresence } from "motion/react";
 import { StatusPill } from "@/components/ade/StatusPill";
-import { agentModels, timeAgo, useAde } from "@/lib/ade/store";
+import { useShell } from "@/components/ade/shellContext";
 import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
+import { currentActivity } from "@/lib/ade/formatLogs.mjs";
+import { sessionTitle } from "@/lib/ade/sessionTitle";
+import { agentModels, timeAgo, uploadAttachment, useAde } from "@/lib/ade/store";
+
+function waitingPreview(prompt: string) {
+  const visible = prompt.split("\n\nThe user attached these files")[0]?.trim() ?? "";
+  if (visible.length <= 140) return visible;
+  return `${visible.slice(0, 139)}…`;
+}
+
+const stopButtonClass =
+  "shrink-0 rounded-md border border-line bg-paper px-3 py-1.5 text-[13px] font-medium text-ink";
 
 function selectionFromSession(session: {
   agentId: AgentSelection["agentId"];
@@ -26,11 +42,14 @@ function selectionFromSession(session: {
 }
 
 export function SessionView({ sessionId }: { sessionId: string }) {
-  const { state, steer, complete, reopen, stop, switchAgent, setSessionOptions } = useAde();
+  const { state, steer, complete, reopen, stop, switchAgent, setSessionOptions, runChecks } =
+    useAde();
+  const { rightTab } = useShell();
   const session = state.sessions.find((s) => s.id === sessionId);
   const [selection, setSelection] = useState<AgentSelection | null>(null);
   const [sending, setSending] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [checksBusy, setChecksBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -105,6 +124,18 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   const project = state.projects.find((p) => p.id === session?.projectId);
   const agent = state.agents.find((a) => a.id === session?.agentId);
 
+  // Opening user turn duplicates session.request in the header — skip it so the
+  // thread starts on agent work instead of a second wall of the same brief.
+  const threadMessages = useMemo(() => {
+    if (!session) return [];
+    const msgs = session.messages;
+    const first = msgs[0];
+    if (first?.role === "user" && first.text.trim() === session.request.trim()) {
+      return msgs.slice(1);
+    }
+    return msgs;
+  }, [session]);
+
   if (!session) {
     if (!state.hydrated) return <main className="flex-1" />;
     throw notFound();
@@ -119,13 +150,22 @@ export function SessionView({ sessionId }: { sessionId: string }) {
       : undefined;
   const activeSelection = selection ?? selectionFromSession(session);
 
-  const send = async (outgoing: string) => {
+  const send = async (outgoing: string, files: File[], delivery?: "now" | "later") => {
     if (sending) return false;
     setSending(true);
     setSendError(null);
     stickToBottomRef.current = true;
     try {
-      await steer(session.id, outgoing);
+      let attachmentIds: string[] = [];
+      if (files.length) {
+        attachmentIds = (await Promise.all(files.map(uploadAttachment))).map((a) => a.id);
+      }
+      await steer(
+        session.id,
+        outgoing,
+        attachmentIds.length ? attachmentIds : undefined,
+        running ? (delivery ?? "later") : undefined,
+      );
       return true;
     } catch (e) {
       setSendError(
@@ -144,6 +184,24 @@ export function SessionView({ sessionId }: { sessionId: string }) {
       await complete(session.id);
     } finally {
       setCompleting(false);
+    }
+  };
+
+  const runProjectChecks = async () => {
+    if (checksBusy) return;
+    if (
+      !window.confirm(
+        "Run this project's detected check scripts now? Project scripts can execute code and may access the network.",
+      )
+    )
+      return;
+    setChecksBusy(true);
+    try {
+      await runChecks(session.id);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChecksBusy(false);
     }
   };
 
@@ -203,9 +261,14 @@ export function SessionView({ sessionId }: { sessionId: string }) {
               started {timeAgo(state.now, session.createdAt)} · {agent?.short ?? session.agentId}
             </span>
           </div>
-          <h1 className="mt-2 text-[20px] font-semibold leading-snug">{session.request}</h1>
+          <h1
+            className="mt-2 line-clamp-1 text-[18px] font-medium leading-snug"
+            title={session.request}
+          >
+            {sessionTitle(session.request)}
+          </h1>
           {session.criteria && (
-            <p className="mt-1 text-[12px] text-dim">
+            <p className="mt-1 line-clamp-2 text-[12px] text-dim" title={session.criteria}>
               <strong className="text-ink/70">Done when:</strong> {session.criteria}
             </p>
           )}
@@ -216,11 +279,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             </span>
             <div className="ml-auto flex gap-2">
               {running && (
-                <button
-                  type="button"
-                  onClick={() => stop(session.id)}
-                  className="btn-quiet px-3 py-1.5 text-[12px]"
-                >
+                <button type="button" onClick={() => stop(session.id)} className={stopButtonClass}>
                   Stop
                 </button>
               )}
@@ -252,16 +311,22 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           onScroll={onMessagesScroll}
           className="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-7 py-5"
         >
-          {session.messages.map((m) => (
-            <SessionMessage key={m.id} message={m} agentName={agent?.short} />
-          ))}
+          <AnimatePresence initial={false}>
+            {threadMessages.map((m) => (
+              <MotionItem key={m.id} layout={false}>
+                <SessionMessage message={m} agentName={agent?.short} />
+              </MotionItem>
+            ))}
+          </AnimatePresence>
           {running && (
-            <div className="flex items-center gap-2 text-[12px] text-dim">
-              <span className="size-1.5 animate-pulse-soft rounded-full bg-teal" />
-              {session.status === "verifying"
-                ? "Running checks…"
-                : `${agent?.short ?? "Agent"} is running locally…`}
-              {session.queuedMessages?.length ? " · follow-up queued" : ""}
+            <div className="flex flex-wrap items-center gap-3 text-[13px] text-dim">
+              <span className="size-1.5 animate-pulse-soft rounded-full bg-teal" aria-hidden />
+              <TextShimmer>
+                {session.status === "verifying" ? "Running checks" : currentActivity(session.logs)}
+              </TextShimmer>
+              <button type="button" onClick={() => stop(session.id)} className={stopButtonClass}>
+                Stop
+              </button>
             </div>
           )}
           {session.status === "blocked" && (
@@ -314,30 +379,85 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             <div className="card-panel p-4 ring-1 ring-teal/40">
               <div className="label-mono text-teal">Ready to review</div>
               <p className="mt-1 text-[13px]">
-                The CLI has exited. Inspect the actual project diff and run checks explicitly; ADE
-                did not run checks automatically.
+                The CLI has exited. Inspect the project diff, then run checks explicitly — ADE does
+                not run them automatically.
               </p>
-              <p className="mt-2 font-mono text-[10px] text-dim">
-                Use “Mark complete” in the header when the result looks right.
-              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={checksBusy}
+                  onClick={() => void runProjectChecks()}
+                  className="btn-amber px-3 py-1.5 text-[12px] disabled:opacity-60"
+                >
+                  {checksBusy ? "Running…" : "Run project checks"}
+                </button>
+                <span className="font-mono text-[10px] text-dim">
+                  Or use Mark complete in the header when the result looks right.
+                </span>
+              </div>
             </div>
           )}
           <div ref={endRef} />
         </div>
 
         <div className="shrink-0 border-t border-line px-7 py-4">
+          {(session.queuedMessages?.length ?? 0) > 0 && (
+            <div className="mb-3 rounded-md border border-line bg-paper px-3 py-2.5">
+              <p className="text-[12px] font-medium text-ink">Waiting to send</p>
+              <ul className="mt-1 space-y-1">
+                {session.queuedMessages?.map((prompt, index) => (
+                  <li key={`${index}-${waitingPreview(prompt)}`} className="text-[13px] text-dim">
+                    {waitingPreview(prompt)}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {!running && (
+                  <button
+                    type="button"
+                    className="btn-amber px-3 py-1.5 text-[12px] disabled:opacity-60"
+                    disabled={sending}
+                    onClick={() => {
+                      setSendError(null);
+                      void steer(session.id, "", undefined, "release").catch((e) =>
+                        setSendError(
+                          `Couldn't send: ${e instanceof Error ? e.message : String(e)}`,
+                        ),
+                      );
+                    }}
+                  >
+                    Send these
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn-quiet px-3 py-1.5 text-[12px]"
+                  disabled={sending}
+                  onClick={() => {
+                    setSendError(null);
+                    void steer(session.id, "", undefined, "drop").catch((e) =>
+                      setSendError(
+                        `Couldn't update the waiting message: ${e instanceof Error ? e.message : String(e)}`,
+                      ),
+                    );
+                  }}
+                >
+                  Don't send
+                </button>
+              </div>
+            </div>
+          )}
           <Composer
             mode="follow-up"
             selection={activeSelection}
             onSelectionChange={onSelectionChange}
             branch={project.branch}
+            running={running}
             {...(session.status === "complete"
               ? { disabledReason: "Reopen the session to continue." }
               : {})}
             placeholder={
-              running
-                ? "Queue a follow-up for after this turn…"
-                : "Send a follow-up to the same agent session…"
+              running ? "Write a message" : "Send a follow-up to the same agent session…"
             }
             sending={sending}
             error={sendError}
@@ -347,7 +467,16 @@ export function SessionView({ sessionId }: { sessionId: string }) {
         </div>
       </main>
       <RightPanePortal>
-        <ActivityPanel session={session} />
+        <div
+          className={`min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${rightTab === "activity" ? "flex" : "hidden"}`}
+        >
+          <ActivityPanel session={session} />
+        </div>
+        <div
+          className={`min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${rightTab === "diff" ? "flex" : "hidden"}`}
+        >
+          <DiffPanel session={session} />
+        </div>
       </RightPanePortal>
     </>
   );

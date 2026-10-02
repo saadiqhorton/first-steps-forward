@@ -1,3 +1,4 @@
+import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import type { SessionStatus } from "@/lib/ade/types";
 
 const MAP: Record<
@@ -16,7 +17,7 @@ export function StatusPill({ status, size = "sm" }: { status: SessionStatus; siz
   const m = MAP[status];
   return (
     <span
-      className={`inline-flex items-center gap-1.5 font-semibold ${m.cls} ${size === "md" ? "text-[13px]" : "text-[11px]"}`}
+      className={`inline-flex items-center gap-1.5 font-medium ${m.cls} ${size === "md" ? "text-[13px]" : "text-[11px]"}`}
       role="status"
     >
       <span
@@ -26,7 +27,7 @@ export function StatusPill({ status, size = "sm" }: { status: SessionStatus; siz
       <span className="font-mono text-[10px] opacity-70" aria-hidden>
         {m.glyph}
       </span>
-      {m.label}
+      <TextShimmer active={!!m.pulse}>{m.label}</TextShimmer>
     </span>
   );
 }

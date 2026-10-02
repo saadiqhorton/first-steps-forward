@@ -41,8 +41,7 @@ Deliver a linked guide under 1,000 words with a recommended reading order. Use d
     id: "builtin-plan-feature",
     builtIn: true,
     name: "Plan the next feature",
-    description:
-      "Turn my feature request into an implementation plan grounded in this repository.",
+    description: "Turn my feature request into an implementation plan grounded in this repository.",
     permission: "plan",
     prompt: `Turn my feature request into an implementation plan grounded in this repository.
 
@@ -53,6 +52,55 @@ Deliver a linked guide under 1,000 words with a recommended reading order. Use d
 5. Propose focused tests for the risky behavior and a validation path through the affected packages. Explain any rollout or rollback requirement using the project's actual deployment model.
 
 Deliver a concise plan with acceptance criteria, ordered tasks, open decisions, and the smallest useful first slice. This workflow plans the change; it does not implement it or create tracker issues unless I ask.`,
+  },
+  {
+    id: "builtin-accessibility-pass",
+    builtIn: true,
+    name: "Accessibility pass",
+    description:
+      "Checks a real user journey for keyboard, labeling, and contrast problems, then fixes confirmed issues.",
+    permission: "build",
+    prompt: `Make one important user journey easier to use with a keyboard and assistive technology.
+
+1. Use the journey I named, or choose the main task from the app's routes and documentation. State its start, end, and screens. Read the project's design and accessibility guidance first.
+2. Run the interface if the environment supports it. Check tab order, visible focus, accessible names, form labels and errors, dialog focus and dismissal, and focus after navigation. Measure text contrast in supported themes instead of guessing from screenshots.
+3. Use existing accessibility tooling when available. Inspect the markup as well: automated checks alone do not establish accessibility. If you cannot run the interface or a screen reader, distinguish source findings from unverified behavior.
+4. Fix confirmed issues within this journey using existing components and patterns. Preserve intended behavior and appearance. Add regression coverage for changed keyboard or naming behavior where the project has suitable tests.
+5. Repeat the affected checks after fixing them.
+
+Return the changes, validation performed, and remaining findings with location, impact, and reproduction steps. Do not claim full accessibility compliance from this limited pass.`,
+  },
+  {
+    id: "builtin-second-opinion-review",
+    builtIn: true,
+    name: "Second-opinion review",
+    description:
+      "Reviews a branch for concrete regressions and reports only findings it can explain with evidence.",
+    permission: "plan",
+    prompt: `Review my current branch as a careful teammate before it merges.
+
+1. Read the repository guidance and identify the intended behavior from the pull request, task, or commits. Use the PR's target branch, or determine the default branch and its merge base. State the comparison and whether you included uncommitted changes. If the base is ambiguous, resolve it before reviewing the wrong diff.
+2. Read the changed code and enough callers, data models, and tests to understand its effects. Focus on correctness, data loss, authorization, compatibility, and missing failure handling introduced by this change.
+3. Verify candidate findings with a focused test or a concrete execution path. Distinguish confirmed bugs from questions that require more context. Do not pad the review with naming preferences, unrelated cleanup, or speculative risks.
+4. Run relevant existing checks when feasible. State checks you could not run and why; passing checks do not prove the absence of bugs.
+
+Return findings ordered by severity, each with file and line, trigger, user impact, and a minimal suggested fix. Keep findings independent so I can act on them separately. If there are none, say so and describe the remaining test gaps. Do not change the branch as part of the review unless I asked for fixes too.`,
+  },
+  {
+    id: "builtin-tidy-the-repo",
+    builtIn: true,
+    name: "Tidy the repo",
+    description:
+      "Checks suspected dead code and stale tasks, then proposes a small cleanup backed by usage evidence.",
+    permission: "plan",
+    prompt: `Find a small, credible cleanup opportunity in this repository.
+
+1. Read package boundaries, public exports, build configuration, generated-file rules, and existing lint or unused-code tooling. Use that tooling when available before relying on text search.
+2. Look for unused files, exports, dependencies, and obsolete TODOs. For each candidate, check tests, scripts, dynamic imports, plugin registration, code generation, and documented external consumers. Absence from a simple search is not proof of dead code.
+3. Use Git history to understand age and intent where helpful. Treat old TODOs and branches as leads, not automatic deletion candidates. If reviewing branches, check merge status and open pull requests; do not delete local or remote branches.
+4. Select up to five candidates with the strongest evidence. For each, list its location, why it appears obsolete, possible consumers, expected benefit, and the checks needed to remove it safely. Separate confirmed dead code from unresolved questions.
+
+Return a ranked cleanup proposal and one recommended first batch. This run is an audit: leave files intact unless I explicitly requested applying a cleanup. When applying an authorized batch, preserve unrelated changes and run the affected tests and build checks.`,
   },
 ];
 

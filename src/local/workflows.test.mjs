@@ -11,10 +11,17 @@ import {
 const AGENTS = ["codex", "claude"];
 
 test("built-in workflows use the Enjoy-style starter prompts", () => {
-  assert.equal(BUILT_IN_WORKFLOWS.length, 3);
+  assert.equal(BUILT_IN_WORKFLOWS.length, 6);
   assert.deepEqual(
     BUILT_IN_WORKFLOWS.map((w) => w.id),
-    ["builtin-design-workshop", "builtin-explain-codebase", "builtin-plan-feature"],
+    [
+      "builtin-design-workshop",
+      "builtin-explain-codebase",
+      "builtin-plan-feature",
+      "builtin-accessibility-pass",
+      "builtin-second-opinion-review",
+      "builtin-tidy-the-repo",
+    ],
   );
   assert.equal(BUILT_IN_WORKFLOWS[0].name, "Design Workshop");
   assert.equal(
@@ -40,6 +47,30 @@ test("built-in workflows use the Enjoy-style starter prompts", () => {
   assert.equal(BUILT_IN_WORKFLOWS[2].permission, "plan");
   assert.match(BUILT_IN_WORKFLOWS[2].prompt, /smallest useful first slice/);
   assert.match(BUILT_IN_WORKFLOWS[2].prompt, /does not implement it/);
+  assert.equal(BUILT_IN_WORKFLOWS[3].name, "Accessibility pass");
+  assert.equal(
+    BUILT_IN_WORKFLOWS[3].description,
+    "Checks a real user journey for keyboard, labeling, and contrast problems, then fixes confirmed issues.",
+  );
+  assert.equal(BUILT_IN_WORKFLOWS[3].permission, "build");
+  assert.match(BUILT_IN_WORKFLOWS[3].prompt, /tab order, visible focus, accessible names/);
+  assert.match(BUILT_IN_WORKFLOWS[3].prompt, /Do not claim full accessibility compliance/);
+  assert.equal(BUILT_IN_WORKFLOWS[4].name, "Second-opinion review");
+  assert.equal(
+    BUILT_IN_WORKFLOWS[4].description,
+    "Reviews a branch for concrete regressions and reports only findings it can explain with evidence.",
+  );
+  assert.equal(BUILT_IN_WORKFLOWS[4].permission, "plan");
+  assert.match(BUILT_IN_WORKFLOWS[4].prompt, /correctness, data loss, authorization/);
+  assert.match(BUILT_IN_WORKFLOWS[4].prompt, /Do not change the branch as part of the review/);
+  assert.equal(BUILT_IN_WORKFLOWS[5].name, "Tidy the repo");
+  assert.equal(
+    BUILT_IN_WORKFLOWS[5].description,
+    "Checks suspected dead code and stale tasks, then proposes a small cleanup backed by usage evidence.",
+  );
+  assert.equal(BUILT_IN_WORKFLOWS[5].permission, "plan");
+  assert.match(BUILT_IN_WORKFLOWS[5].prompt, /Select up to five candidates/);
+  assert.match(BUILT_IN_WORKFLOWS[5].prompt, /This run is an audit/);
   for (const workflow of BUILT_IN_WORKFLOWS) {
     assert.equal(workflow.builtIn, true);
     assert.ok(workflow.prompt.length <= 8000);
@@ -55,11 +86,27 @@ test("listWorkflows puts built-ins first, then stored workflows sorted by name",
   const listed = listWorkflows(stored);
   assert.deepEqual(
     listed.map((w) => w.id),
-    ["builtin-design-workshop", "builtin-explain-codebase", "builtin-plan-feature", "wf-a", "wf-z"],
+    [
+      "builtin-design-workshop",
+      "builtin-explain-codebase",
+      "builtin-plan-feature",
+      "builtin-accessibility-pass",
+      "builtin-second-opinion-review",
+      "builtin-tidy-the-repo",
+      "wf-a",
+      "wf-z",
+    ],
   );
   assert.deepEqual(
     listWorkflows(undefined).map((w) => w.id),
-    ["builtin-design-workshop", "builtin-explain-codebase", "builtin-plan-feature"],
+    [
+      "builtin-design-workshop",
+      "builtin-explain-codebase",
+      "builtin-plan-feature",
+      "builtin-accessibility-pass",
+      "builtin-second-opinion-review",
+      "builtin-tidy-the-repo",
+    ],
   );
 });
 

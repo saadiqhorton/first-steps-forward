@@ -1,11 +1,12 @@
-import { spawn } from "node:child_process";
 import { connect, createServer } from "node:net";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { killTree, spawnCommand as spawn } from "./spawn.mjs";
 import { adapters } from "./adapters/index.mjs";
 import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
+import { adeRoot, createComputerManager, SCREEN } from "./computer.mjs";
 import { listModels, MODEL_ID, clearModelsCache } from "./models.mjs";
 import { optionCapabilities, validateOptions } from "./capabilities.mjs";
 import {
@@ -18,6 +19,13 @@ import {
 } from "./harness.mjs";
 import { listWorkflows, upsertWorkflow, deleteWorkflow as removeWorkflow } from "./workflows.mjs";
 import { reconcileWorkspaceMessages, saveWorkspace } from "./workspace-persistence.mjs";
+import {
+  decodeBase64,
+  formatAttachmentPrompt,
+  readAttachment,
+  resolveAttachments,
+  saveAttachment,
+} from "./attachments.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
@@ -30,10 +38,9 @@ const listenedProcs = new Set();
 // Real base URL of the serving ADE instance, taken from the latest loopback
 // request's Host header; null until the first request after boot.
 let lastApiBaseUrl = null;
-let devControlSkillError = null;
 const devStartClaims = new Set();
-// Generated agent-facing skill file (private, like every other ~/.ade file).
-const DEV_CONTROL_SKILL_PATH = path.join(DATA_DIR, "skills", "ade-dev-control", "SKILL.md");
+// One agent computer (Docker desktop) per project; see computer.mjs.
+const computers = createComputerManager();
 const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
 let probingAgents = false;
 let refreshingBootstrap = false;
@@ -97,6 +104,10 @@ async function load() {
       }
       if (s.pid) {
         delete s.pid;
+        changed = true;
+      }
+      if (s.steerNow) {
+        delete s.steerNow;
         changed = true;
       }
     }
@@ -199,7 +210,7 @@ const harnessDetectDeps = {
 const harnessJobs = createHarnessJobs({
   spawn,
   onFinished: () => {
-    clearModelsCache();
+    clearModelsCache(DATA_DIR);
     agentStatus().catch(() => {});
   },
 });
@@ -336,10 +347,7 @@ function refreshBootstrapInBackground() {
         console.warn(`ADE background project refresh failed for ${p.path}:`, error);
       }
     }
-    if (devStateChanged) {
-      save().catch(() => {});
-      writeDevControlSkill().catch(() => {});
-    }
+    if (devStateChanged) save().catch(() => {});
   })()
     .catch((error) => console.warn("ADE background bootstrap refresh failed:", error))
     .finally(() => {
@@ -476,14 +484,28 @@ async function getDiff(project) {
   return { diff: diffs.join("\n"), files, changes };
 }
 async function allocatePort() {
-  return await new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const port = server.address().port;
-      server.close(() => resolve(port));
+  // Ask the OS for an ephemeral port, but do not return it until nothing
+  // answers there: WSL's mirrored networking (verified) keeps a just-closed
+  // loopback socket connectable for up to ~500 ms, and a false connect would
+  // make waitForListening report "running" before the dev server binds.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const port = await new Promise((resolve, reject) => {
+      const server = createServer();
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        const allocated = server.address().port;
+        server.close(() => resolve(allocated));
+      });
     });
-  });
+    const deadline = Date.now() + 1500;
+    while (await probeConnection(port)) {
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (!(await probeConnection(port))) return port;
+    // Still connectable after 1.5 s: something really owns it — fresh port.
+  }
+  throw new Error("Could not allocate a free loopback port for the dev server.");
 }
 function probeConnection(port) {
   return new Promise((resolve) => {
@@ -575,14 +597,37 @@ function addLog(session, text) {
   session.logs = [...(session.logs ?? []), text].slice(-500);
   session.updatedAt = now();
 }
-function addMessage(session, role, text) {
+function addMessage(session, role, text, extra = {}) {
   if (!text.trim()) return;
   const last = session.messages.at(-1);
   if (role === "agent" && last?.role === "agent" && now() - last.at < 1200) {
     last.text += text;
     last.at = now();
-  } else session.messages.push({ id: id(), role, text, at: now() });
+  } else session.messages.push({ id: id(), role, text, at: now(), ...extra });
   session.updatedAt = now();
+}
+
+function attachmentMeta(files) {
+  return files.length
+    ? {
+        attachments: files.map(({ id, name, mime, size, kind }) => ({
+          id,
+          name,
+          mime,
+          size,
+          kind,
+        })),
+      }
+    : {};
+}
+
+function adapterAttachments(files) {
+  return files.map(({ absPath, mime, kind, name }) => ({
+    path: absPath,
+    mime,
+    kind,
+    name,
+  }));
 }
 function parseAgentOutput(session, line) {
   addLog(session, line);
@@ -633,7 +678,7 @@ function syncOptionFields(session, value, cleared) {
   }
 }
 
-export function agentCommand(session, project, prompt, continuing) {
+export function agentCommand(session, project, prompt, continuing, attachments = []) {
   const adapter = adapters[session.agentId];
   return adapter.command({
     projectPath: project.path,
@@ -646,6 +691,8 @@ export function agentCommand(session, project, prompt, continuing) {
     effort: session.effort,
     speed: session.speed,
     permission: session.permission,
+    attachments,
+    computer: computerContext(project),
   });
 }
 /**
@@ -663,121 +710,43 @@ function devServerStatus(project) {
   if (proc.status === "starting") return "starting";
   return proc.startedAt ? "stopped" : "stopped (never started this session)";
 }
-/**
- * Agent-facing dev-control block for the manifest: the real base URL of the
- * serving ADE instance (latest loopback request Host header, then the
- * configured listen port), ready-to-run curl commands, and the skill file.
- * When the URL is genuinely unknown the commands are omitted rather than
- * guessed, and the skill file is referenced instead of printing a wrong URL.
- */
-function devControlFor(project) {
-  const skill = DEV_CONTROL_SKILL_PATH;
-  const baseUrl = lastApiBaseUrl ?? knownListenBaseUrl();
-  const skillNote = devControlSkillError
-    ? `The ADE dev-control skill could not be written (${devControlSkillError}); the skill file may be unavailable.`
-    : null;
-  if (!baseUrl)
-    return {
-      baseUrl: null,
-      projectId: project.id,
-      skill,
-      note: [
-        "The ADE API base URL is unknown right now: read the skill file for how to reach the control endpoints, and ask the user for the ADE URL instead of guessing one.",
-        skillNote,
-      ]
-        .filter(Boolean)
-        .join(" "),
-    };
-  const base = `${baseUrl}/api/projects/${project.id}/dev`;
-  return {
-    baseUrl,
-    projectId: project.id,
-    skill,
-    ...(skillNote ? { note: skillNote } : {}),
-    status: `curl -fsS ${base}`,
-    start: `curl -fsS -X POST ${base}/start`,
-    stop: `curl -fsS -X POST ${base}/stop`,
-  };
-}
 // Only NITRO_PORT is ADE's own configured listen port (set by
 // scripts/start-local.mjs); a generic shell PORT could belong to anything.
 function knownListenBaseUrl() {
   const port = process.env.NITRO_PORT;
   return port && /^\d+$/.test(String(port)) ? `http://127.0.0.1:${port}` : null;
 }
-function devControlLine(dc) {
-  return dc.baseUrl
-    ? `start: ${dc.start}; stop: ${dc.stop}; status: ${dc.status}; skill: ${dc.skill}`
-    : `base URL unknown — follow the skill file ${dc.skill}`;
-}
 /**
- * The agent-facing skill: plain markdown written to ~/.ade at service
- * startup and after dev-record refreshes, documenting the bridge endpoints,
- * status semantics, error meanings, and the no-detached-servers rule.
+ * What a CLI needs to drive this project's agent computer: the MCP server
+ * (Codex/OpenCode) or Pi extension path, plus the real loopback base URL of
+ * the serving ADE instance. Null when that URL is not known yet — the tools
+ * are then omitted rather than pointed at a guessed address.
  */
-export function renderDevControlSkill() {
-  return `# ADE dev-server control
-
-ADE owns this project's dev server. Start, stop, and inspect it ONLY through
-these loopback endpoints — never start a detached background server yourself
-(no nohup, no "&" backgrounding, no disown, no screen/tmux/pm2), and never
-leave one running.
-
-## Base URL and project id
-Take both from your task manifest's \`devControl\` section:
-- \`devControl.baseUrl\` — the ADE API serving this session (e.g. http://127.0.0.1:3000)
-- \`devControl.projectId\` — the project id used in the URLs
-If the manifest says the base URL is unknown, use the curl commands it
-provides as-is; if those are missing too, ask the user for the ADE URL
-instead of guessing one.
-
-In the examples:  ADE="<devControl.baseUrl>"   PID="<devControl.projectId>"
-
-## Endpoints (loopback only, no auth)
-    # status
-    curl -fsS "$ADE/api/projects/$PID/dev"
-    # start (re-scans package.json first, then starts)
-    curl -fsS -X POST "$ADE/api/projects/$PID/dev/start"
-    # stop
-    curl -fsS -X POST "$ADE/api/projects/$PID/dev/stop"
-
-## Status semantics
-- \`status\` is one of "starting", "running", "stopped".
-- \`port\` is non-zero only after the server really accepted a connection on
-  it; a failed or never-started server reports port 0.
-- Start re-scans package.json inline, so a \`scripts.dev\` you scaffolded
-  earlier in this same turn is detected immediately. Call start; do not
-  spawn anything yourself.
-- 409 on start just means it is already running or starting — read the
-  returned record (or call status) instead of retrying.
-
-## Errors
-- 404 on start: no dev script even after the re-scan. Add a proper \`dev\`
-  script to package.json and call start again, or tell the user. Never
-  work around it with a detached process of your own.
-- 404 on stop/status: this project has no dev-server record (it was never
-  started through ADE).
-- 409 on start: already running/starting; the current record is in the body.
-
-## Sandbox caveat
-Codex runs in a \`workspace-write\` sandbox that may be BLOCKED from reaching
-the loopback ADE API. If curl to the ADE API fails from your sandbox, do not
-fall back to starting a server yourself: say so in your response and ask the
-user to press Start in ADE.
-`;
+export function computerContext(project) {
+  const api = lastApiBaseUrl ?? knownListenBaseUrl();
+  if (!api) return null;
+  const local = path.join(adeRoot(), "src", "local");
+  return {
+    node: process.execPath,
+    mcpScript: path.join(local, "computer-mcp.mjs"),
+    piExtension: path.join(local, "computer-pi-extension.mjs"),
+    env: { ADE_API: api, ADE_PROJECT_ID: project.id },
+  };
 }
-export async function writeDevControlSkill(writer = fs.writeFile) {
-  try {
-    await fs.mkdir(path.dirname(DEV_CONTROL_SKILL_PATH), { recursive: true, mode: 0o700 });
-    await fs.chmod(path.dirname(DEV_CONTROL_SKILL_PATH), 0o700);
-    await writer(DEV_CONTROL_SKILL_PATH, renderDevControlSkill(), { mode: 0o600 });
-    await fs.chmod(DEV_CONTROL_SKILL_PATH, 0o600);
-    devControlSkillError = null;
-    return true;
-  } catch (error) {
-    devControlSkillError = error.message;
-    return false;
-  }
+/** Manifest section telling the agent it has (or lacks) its own computer. */
+function agentComputerFor(project) {
+  if (!computerContext(project))
+    return {
+      available: false,
+      note: "ADE's agent computer could not be connected this turn (the ADE URL is not known yet). Tell the user you could not test visually; ask them to reopen ADE and send a follow-up.",
+    };
+  return {
+    available: true,
+    screen: `${SCREEN.width}x${SCREEN.height}`,
+    tools:
+      "computer_screenshot, computer_open_url, computer_click, computer_double_click, computer_move, computer_drag, computer_type, computer_key, computer_scroll, computer_wait, dev_server_status, dev_server_start, dev_server_stop",
+    note: "You have your own isolated computer (Linux desktop + Chromium) that the user watches live in ADE. To view or test the project: dev_server_start, then computer_open_url with the localhost URL it reports, then use screenshots, clicks, and typing to verify behavior like a human QA tester.",
+  };
 }
 async function otherServiceStatus(project) {
   try {
@@ -822,16 +791,15 @@ export async function buildManifest(session, project) {
       model: session.model ?? "agent default",
     },
     devServer: devServerStatus(project),
-    devControl: devControlFor(project),
+    agentComputer: agentComputerFor(project),
     otherServices: await otherServiceStatus(project),
     constraints: [
       "Work only within the project directory",
       "No deployments, publishing, or external/shared-system changes without the user",
       "Do not revert or overwrite user changes",
-      "The devServer status is ADE's observed snapshot at turn start. If it includes a running URL, use that URL instead of asking the user which frontend port to open. Do not infer that other services are running from the preview.",
-      session.agentId === "pi"
-        ? "Pi has no shell or HTTP tool in ADE and cannot call the devControl curl commands. Use the devServer status supplied at the start of this turn; for a later status change or to start/stop the server, direct the user to ADE's Preview/Processes controls. Never start a detached background server or claim you verified other services."
-        : "Use ADE's dev-server control for this project (the devControl section of this manifest; its endpoints are documented in the skill file): start, stop, and inspect the dev server only through those endpoints; never start a detached background server (no nohup, &, or disown) and never leave one running; if your sandbox cannot reach the ADE API, say so in your response and ask the user to start it in ADE",
+      "The devServer status is ADE's observed snapshot at turn start. If it includes a running URL, use that URL instead of asking the user which frontend port to open. Do not infer that other services are running from the frontend alone.",
+      "Start, stop, and inspect the dev server only with the dev_server_start/dev_server_stop/dev_server_status tools; never start a server yourself (no nohup, &, disown, or a foreground dev command) and never leave one running that ADE does not manage",
+      "After changing anything visible, verify it on your agent computer (computer_open_url, screenshots, clicks, typing) before reporting done, and say what you checked; if the computer tools fail, report the exact error instead of claiming it works",
     ],
     relevantFiles: candidates.slice(0, 60),
     tools: agent?.tools ?? "agent's default CLI tools",
@@ -841,7 +809,7 @@ export async function buildManifest(session, project) {
       : {}),
   };
 }
-async function runAgent(session, prompt, continuing = false) {
+async function runAgent(session, prompt, continuing = false, attachments = []) {
   const project = state.projects.find((p) => p.id === session.projectId);
   if (!project) {
     releaseTurn(session);
@@ -865,6 +833,7 @@ async function runAgent(session, prompt, continuing = false) {
   const turnMessageStart = session.messages.length;
   let bin = "";
   let args = [];
+  let extraEnv = {};
   try {
     session.status = "working";
     await save();
@@ -889,9 +858,7 @@ async function runAgent(session, prompt, continuing = false) {
       `; model: ${session.model ?? "agent default"}` +
       `; dev server at turn start: ${session.manifest.devServer}` +
       `; other services: ${session.manifest.otherServices}` +
-      (session.agentId === "pi"
-        ? "; dev control: unavailable to Pi (no shell or HTTP tool); ask the user to use ADE's controls"
-        : `; dev control: ${devControlLine(session.manifest.devControl)}`) +
+      `; agent computer: ${session.manifest.agentComputer.available ? `available (${session.manifest.agentComputer.screen}; tools: ${session.manifest.agentComputer.tools}). ` : "unavailable. "}${session.manifest.agentComputer.note}` +
       `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}` +
       (session.manifest.uncommittedFiles
         ? `; the user has uncommitted changes in these files: ${session.manifest.uncommittedFiles.join(", ")} — never revert, stash, commit, or overwrite them; work around them`
@@ -903,9 +870,12 @@ async function runAgent(session, prompt, continuing = false) {
       project,
       `${safetyPreamble}${manifestLine}\n\nTask: ${prompt}`,
       continuing,
+      attachments,
     );
     bin = command[0];
     args = command[1];
+    // Optional third element: per-turn environment (agent-computer wiring).
+    extraEnv = command[2] ?? {};
     if (session.agentId === "pi")
       await fs.mkdir(path.join(DATA_DIR, "sessions"), { recursive: true, mode: 0o700 });
     // The user may have stopped the session while the manifest was being
@@ -927,7 +897,7 @@ async function runAgent(session, prompt, continuing = false) {
   }
   const child = spawn(bin, args, {
     cwd: project.path,
-    env: process.env,
+    env: { ...process.env, ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"],
     shell: false,
     detached: process.platform !== "win32",
@@ -982,6 +952,19 @@ async function runAgent(session, prompt, continuing = false) {
       const baseline = new Set(session.baselineFiles ?? []);
       return changes.map((c) => (baseline.has(c.path) ? { ...c, preExisting: true } : c));
     };
+    if (session.steerNow && !["stopped", "complete"].includes(session.status)) {
+      const prompt = session.steerNow;
+      delete session.steerNow;
+      session.changes = flagBaseline((await getDiff(project)).changes);
+      if (!claimTurn(session)) {
+        (session.queuedMessages ??= []).push(prompt);
+        await save();
+        return;
+      }
+      session.status = "working";
+      await save();
+      return runAgent(session, prompt, true, []);
+    }
     if (session.status === "stopped") {
       session.changes = flagBaseline((await getDiff(project)).changes);
       await save();
@@ -995,7 +978,9 @@ async function runAgent(session, prompt, continuing = false) {
       // racing this drain with a second spawn.
       claimTurn(session);
       await save();
-      return runAgent(session, queue.join("\n\n"), true);
+      // Queued turns only carry the path appendix in text; native CLI flags apply
+      // to the immediately spawned turn, not to drained queue entries.
+      return runAgent(session, queue.join("\n\n"), true, []);
     }
     session.status = code === 0 ? "ready" : "blocked";
     // Classify from this turn's own output slice only; a successful turn
@@ -1050,6 +1035,7 @@ function stopChild(child) {
   if (!pid) return;
   try {
     if (process.platform !== "win32") process.kill(-pid, "SIGTERM");
+    else if (killTree(pid)) return;
     else if (typeof child === "number") process.kill(pid, "SIGTERM");
     else child.kill("SIGTERM");
   } catch {
@@ -1260,7 +1246,28 @@ export function devServerArgs(framework, port) {
         : ["--port"];
   return ["--", ...flags, String(port)];
 }
-async function checksFor(project) {
+async function detectNonNodeHint(projectPath) {
+  try {
+    const names = await fs.readdir(projectPath);
+    const set = new Set(names);
+    if (
+      set.has("pyproject.toml") ||
+      set.has("requirements.txt") ||
+      set.has("Pipfile") ||
+      set.has("setup.py") ||
+      names.some((n) => n.endsWith(".py"))
+    )
+      return " This looks like a Python project.";
+    if (set.has("Cargo.toml")) return " This looks like a Rust project.";
+    if (set.has("go.mod")) return " This looks like a Go project.";
+    if (set.has("Gemfile")) return " This looks like a Ruby project.";
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+export async function checksFor(project) {
   const categories = [
     { name: "Typecheck", scripts: ["typecheck", "type-check", "check"] },
     { name: "Lint", scripts: ["lint"] },
@@ -1289,11 +1296,28 @@ async function checksFor(project) {
           };
     });
   } catch (error) {
-    return categories.map(({ name }) => ({
-      name,
-      status: "skipped",
-      detail: `package.json could not be read or parsed (${error.message}); no scripts detected.`,
-    }));
+    const missing =
+      error?.code === "ENOENT" || /ENOENT|no such file or directory/i.test(String(error?.message));
+    if (missing) {
+      const hint = await detectNonNodeHint(project.path);
+      return [
+        {
+          name: "Project checks",
+          status: "skipped",
+          detail:
+            "No package.json here. ADE’s check runner only detects npm scripts (typecheck, lint, test, e2e, build)." +
+            hint +
+            " Run language-specific checks yourself for now, or add a package.json with those scripts.",
+        },
+      ];
+    }
+    return [
+      {
+        name: "Project checks",
+        status: "skipped",
+        detail: `package.json could not be read or parsed (${error.message}); no scripts detected.`,
+      },
+    ];
   }
 }
 export async function executeChecks(session) {
@@ -1313,6 +1337,19 @@ export async function executeChecks(session) {
   // while checksFor was reading, abandon before touching any check state.
   if (session.status !== "verifying" || session.checksCancelled) {
     session.updatedAt = now();
+    if (session.steerNow && !["stopped", "complete"].includes(session.status)) {
+      const prompt = session.steerNow;
+      delete session.steerNow;
+      if (!claimTurn(session)) {
+        (session.queuedMessages ??= []).push(prompt);
+        await save();
+        return;
+      }
+      session.status = "working";
+      await save();
+      runAgent(session, prompt, true, []);
+      return;
+    }
     await save();
     return;
   }
@@ -1339,7 +1376,33 @@ export async function executeChecks(session) {
   session.updatedAt = now();
   // Never write over a stopped or completed session, whatever the loop did.
   if (session.checksCancelled || ["stopped", "complete"].includes(session.status)) {
+    if (session.steerNow && !["stopped", "complete"].includes(session.status)) {
+      const prompt = session.steerNow;
+      delete session.steerNow;
+      if (!claimTurn(session)) {
+        (session.queuedMessages ??= []).push(prompt);
+        await save();
+        return;
+      }
+      session.status = "working";
+      await save();
+      runAgent(session, prompt, true, []);
+      return;
+    }
     await save();
+    return;
+  }
+  if (session.steerNow) {
+    const prompt = session.steerNow;
+    delete session.steerNow;
+    if (!claimTurn(session)) {
+      (session.queuedMessages ??= []).push(prompt);
+      await save();
+      return;
+    }
+    session.status = "working";
+    await save();
+    runAgent(session, prompt, true, []);
     return;
   }
   const queue = session.queuedMessages ?? [];
@@ -1358,7 +1421,7 @@ export async function executeChecks(session) {
     session.queuedMessages = [];
     session.status = "working";
     await save();
-    runAgent(session, queue.join("\n\n"), true);
+    runAgent(session, queue.join("\n\n"), true, []);
     return;
   }
   // verifying -> ready only when no child is running.
@@ -1371,11 +1434,19 @@ function json(res, status, body) {
   res.setHeader("cache-control", "no-store");
   res.end(JSON.stringify(body));
 }
+function isAttachmentUploadPath(pathname) {
+  const cleaned = String(pathname ?? "").replace(/\/$/, "");
+  return cleaned === "/api/attachments" || cleaned === "/attachments";
+}
+
 async function body(req) {
+  const url = new URL(req.url, "http://127.0.0.1");
+  const attachmentUpload = req.method === "POST" && isAttachmentUploadPath(url.pathname);
+  const limit = attachmentUpload ? 14 * 1024 * 1024 : 1_000_000;
   let raw = "";
   for await (const chunk of req) {
     raw += chunk;
-    if (raw.length > 1_000_000) throw new Error("Request too large");
+    if (raw.length > limit) throw new Error("Request too large");
   }
   return raw ? JSON.parse(raw) : {};
 }
@@ -1714,9 +1785,8 @@ async function handle(req, res) {
       // Same detection path as the bootstrap re-scan: an unreadable or
       // malformed package.json records a distinct note instead of silently
       // reporting no dev script.
-      const { proc, changed } = await refreshDevProcess(project);
+      const { proc } = await refreshDevProcess(project);
       await save();
-      if (changed) writeDevControlSkill().catch(() => {});
       return json(res, 201, { project, process: proc });
     }
     if (req.method === "POST" && parts[0] === "projects" && parts[2] === "default-agent") {
@@ -1758,6 +1828,34 @@ async function handle(req, res) {
       const project = state.projects.find((p) => p.id === parts[1]);
       if (!project) return json(res, 404, { error: "Project not found." });
       return json(res, 200, { checks: await checksFor(project) });
+    }
+    if (req.method === "POST" && parts[0] === "attachments" && parts.length === 1) {
+      try {
+        const data = await body(req);
+        const bytes = decodeBase64(data.contentBase64);
+        const meta = await saveAttachment(DATA_DIR, {
+          name: data.name,
+          mime: data.mime,
+          bytes,
+        });
+        return json(res, 201, meta);
+      } catch (error) {
+        if (error?.status) return json(res, error.status, { error: error.message });
+        throw error;
+      }
+    }
+    if (req.method === "GET" && parts[0] === "attachments" && parts.length === 2) {
+      try {
+        const meta = await readAttachment(DATA_DIR, parts[1]);
+        res.statusCode = 200;
+        res.setHeader("content-type", meta.mime || "application/octet-stream");
+        res.setHeader("cache-control", "private, max-age=3600");
+        res.setHeader("content-disposition", `inline; filename="${encodeURIComponent(meta.name)}"`);
+        return res.end(meta.bytes);
+      } catch (error) {
+        if (error?.status) return json(res, error.status, { error: error.message });
+        throw error;
+      }
     }
     if (req.method === "POST" && parts[0] === "sessions" && parts.length === 1) {
       const data = await body(req);
@@ -1809,6 +1907,17 @@ async function handle(req, res) {
           error:
             "Another agent task is still running in this project. Wait until it stops before starting another.",
         });
+      const attachmentIds = Array.isArray(data.attachmentIds) ? data.attachmentIds : [];
+      let files = [];
+      try {
+        files = attachmentIds.length ? await resolveAttachments(DATA_DIR, attachmentIds) : [];
+      } catch (error) {
+        if (error?.status) return json(res, error.status, { error: error.message });
+        throw error;
+      }
+      const userVisibleText =
+        request + (data.criteria ? `\n\nAcceptance criteria: ${data.criteria}` : "");
+      const prompt = `${userVisibleText}${formatAttachmentPrompt(files)}`;
       const s = {
         id: id(),
         projectId: project.id,
@@ -1821,8 +1930,9 @@ async function handle(req, res) {
           {
             id: id(),
             role: "user",
-            text: request + (data.criteria ? `\n\nAcceptance criteria: ${data.criteria}` : ""),
+            text: userVisibleText,
             at: now(),
+            ...attachmentMeta(files),
           },
         ],
         changes: baseline ? baseline.changes.map((c) => ({ ...c, preExisting: true })) : [],
@@ -1840,13 +1950,47 @@ async function handle(req, res) {
       // immediate follow-up queues instead of spawning a second CLI.
       claimTurn(s);
       await save();
-      runAgent(s, request + (data.criteria ? `\n\nAcceptance criteria: ${data.criteria}` : ""));
+      runAgent(s, prompt, false, adapterAttachments(files));
       return json(res, 201, s);
     }
     if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "messages") {
       const s = state.sessions.find((x) => x.id === parts[1]);
       if (!s) return json(res, 404, { error: "Session not found." });
-      const text = String((await body(req)).text ?? "").trim();
+      const data = await body(req);
+      const when = ["now", "later", "drop", "release"].includes(data.when) ? data.when : undefined;
+      if (when === "drop" || when === "release") {
+        if (s.status === "complete")
+          return json(res, 409, { error: "Reopen this session before sending a message." });
+        if (when === "drop") {
+          const waiting = (s.queuedMessages ?? []).length;
+          s.queuedMessages = [];
+          if (waiting) addMessage(s, "system", "The waiting message will not be sent.");
+          await save();
+          return json(res, 200, s);
+        }
+        const waiting = [...(s.queuedMessages ?? [])];
+        if (!waiting.length)
+          return json(res, 400, { error: "There is no waiting message to send." });
+        s.queuedMessages = [];
+        const queuedPrompt = waiting.join("\n\n");
+        if (children.has(s.id) || s.status === "verifying") {
+          s.steerNow = queuedPrompt;
+          s.status = "working";
+          s.checksCancelled = true;
+          const child = children.get(s.id);
+          if (child) stopChild(child);
+          addLog(s, "Switching to your message.");
+          await save();
+          return json(res, 200, s);
+        }
+        addLog(s, "Sending the waiting message.");
+        s.status = "working";
+        const claimed = claimTurn(s);
+        await save();
+        if (claimed) runAgent(s, queuedPrompt, true, []);
+        return json(res, 200, s);
+      }
+      const text = String(data.text ?? "").trim();
       if (!text) return json(res, 400, { error: "Message cannot be empty." });
       if (UNSUPPORTED_RISK.test(text))
         return json(res, 403, {
@@ -1855,21 +1999,45 @@ async function handle(req, res) {
         });
       if (s.status === "complete")
         return json(res, 409, { error: "Reopen this session before sending a message." });
-      const project = state.projects.find((p) => p.id === s.projectId);
+      const attachmentIds = Array.isArray(data.attachmentIds) ? data.attachmentIds : [];
+      let files = [];
+      try {
+        files = attachmentIds.length ? await resolveAttachments(DATA_DIR, attachmentIds) : [];
+      } catch (error) {
+        if (error?.status) return json(res, error.status, { error: error.message });
+        throw error;
+      }
+      const userVisibleText = text;
+      const prompt = `${userVisibleText}${formatAttachmentPrompt(files)}`;
+      const msgExtra = attachmentMeta(files);
       // Follow-ups stay non-blocking: the user may keep editing between
       // turns. runAgent re-reads the working tree at the start of each turn
       // and refreshes the preserved-changes baseline, so the agent always
       // sees current reality. Checks spawn no tracked child, so "verifying"
       // must queue here too instead of racing the checks run while the
-      // header still says verifying.
+      // header still says verifying. "now" stops the current step and runs
+      // this message as soon as that process exits.
+      if ((children.has(s.id) || s.status === "verifying") && when === "now") {
+        addMessage(s, "user", userVisibleText, msgExtra);
+        s.steerNow = prompt;
+        s.status = "working";
+        s.checksCancelled = true;
+        const child = children.get(s.id);
+        if (child) stopChild(child);
+        addLog(s, "Switching to your message.");
+        await save();
+        return json(res, 200, s);
+      }
       if (children.has(s.id) || s.status === "verifying") {
-        (s.queuedMessages ??= []).push(text);
-        addMessage(s, "user", text);
+        // v1: native CLI flags apply only to the immediately spawned turn; queued
+        // follow-ups rely on the path appendix baked into the queued text.
+        (s.queuedMessages ??= []).push(prompt);
+        addMessage(s, "user", userVisibleText, msgExtra);
         addLog(s, "Follow-up queued until the current CLI turn exits.");
         await save();
         return json(res, 200, s);
       }
-      addMessage(s, "user", text);
+      addMessage(s, "user", userVisibleText, msgExtra);
       s.status = "working";
       // Claim the turn slot synchronously: nothing awaits between the
       // children.has() check above and this registration, so a close handler
@@ -1877,7 +2045,7 @@ async function handle(req, res) {
       const claimed = claimTurn(s);
       if (claimed) s.queuedMessages = [];
       await save();
-      if (claimed) runAgent(s, text, true);
+      if (claimed) runAgent(s, prompt, true, adapterAttachments(files));
       return json(res, 200, s);
     }
     if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "switch-agent") {
@@ -1930,7 +2098,10 @@ async function handle(req, res) {
     if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "stop") {
       const s = state.sessions.find((x) => x.id === parts[1]);
       if (!s) return json(res, 404, { error: "Session not found." });
+      const alreadyStopped = s.status === "stopped";
       s.status = "stopped";
+      // A stop cancels an in-flight "send now" so the exit does not restart work.
+      delete s.steerNow;
       // Checks have no child to kill: flag cancellation so executeChecks
       // stops at the next step boundary instead of overwriting this state
       // with "ready" when the loop ends.
@@ -1938,6 +2109,12 @@ async function handle(req, res) {
       const child = children.get(s.id);
       stopChild(child ?? s.pid);
       addLog(s, "Stopped by user. Existing worktree changes are kept.");
+      if (!alreadyStopped)
+        addMessage(
+          s,
+          "system",
+          "Stopped. Files are kept. Send a message when you want it to continue.",
+        );
       await save();
       return json(res, 200, s);
     }
@@ -1985,7 +2162,34 @@ async function handle(req, res) {
       if (!p) return json(res, 404, { error: "Session not found." });
       return json(res, 200, await getDiff(p));
     }
-    // ---- Project-scoped dev-server control (the agent-facing bridge) ----
+    // ---- Agent computer: one Docker desktop per project (see computer.mjs) ----
+    if (parts[0] === "projects" && parts[2] === "computer") {
+      const project = state.projects.find((x) => x.id === parts[1]);
+      if (!project) return json(res, 404, { error: "Project not found." });
+      if (req.method === "GET" && parts.length === 3)
+        return json(res, 200, await computers.status(project.id));
+      if (req.method === "POST" && parts[3] === "start") {
+        // Returns at once; the UI polls status through building/starting.
+        computers.start(project.id).catch(() => {});
+        return json(res, 202, await computers.status(project.id));
+      }
+      if (req.method === "POST" && parts[3] === "stop") {
+        await computers.stop(project.id);
+        return json(res, 200, await computers.status(project.id));
+      }
+      if (req.method === "POST" && parts[3] === "action") {
+        // Agent tools (MCP server / Pi extension): starts the computer on
+        // first use, then forwards one screenshot/mouse/keyboard action.
+        try {
+          const { status, payload } = await computers.action(project.id, await body(req));
+          return json(res, status, payload);
+        } catch (error) {
+          return json(res, 503, { error: error.message });
+        }
+      }
+      return json(res, 404, { error: "Not found." });
+    }
+    // ---- Project-scoped dev-server control (driven by the agent tools) ----
     if (req.method === "GET" && parts[0] === "projects" && parts[2] === "dev") {
       const project = state.projects.find((x) => x.id === parts[1]);
       if (!project) return json(res, 404, { error: "Project not found." });
@@ -2396,7 +2600,6 @@ export function _setSessionStatusForTest(sessionId, status) {
   if (session) session.status = status;
 }
 await load();
-await writeDevControlSkill();
 // API request bodies are tiny JSON; anything larger is refused before it is
 // read (an exposed instance must not let an unauthenticated peer stream an
 // unbounded body into memory — content-length lies are caught by the reader).
@@ -2425,9 +2628,11 @@ export async function handleLocalApi(request) {
   if (!url.pathname.startsWith("/api/")) return undefined;
   const headers = Object.fromEntries(request.headers.entries());
   let payload = "";
+  const attachmentUpload = request.method === "POST" && isAttachmentUploadPath(url.pathname);
+  const bodyLimit = attachmentUpload ? 14 * 1024 * 1024 : MAX_PAYLOAD_BYTES;
   if (request.method !== "GET" && request.method !== "HEAD") {
     try {
-      payload = await boundedText(request);
+      payload = await boundedText(request, bodyLimit);
     } catch {
       return Response.json({ error: "Request body too large." }, { status: 413 });
     }
@@ -2460,7 +2665,11 @@ export async function handleLocalApi(request) {
     },
   };
   await handle(req, response);
-  return new Response(response.body, { status: response.statusCode, headers: response.headers });
+  const outBody = response.body;
+  return new Response(outBody instanceof Buffer ? outBody : (outBody ?? ""), {
+    status: response.statusCode,
+    headers: response.headers,
+  });
 }
 export function adeLocalApi() {
   return {

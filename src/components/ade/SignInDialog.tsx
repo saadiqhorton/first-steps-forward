@@ -44,15 +44,14 @@ export function SignInDialog({ agent, onClose }: { agent: Agent; onClose: () => 
   };
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4"
+      className="fixed inset-0 z-50 grid place-items-center bg-scrim p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="signin-title"
     >
-      <div className="w-full max-w-lg rounded-lg bg-panel p-6 ring-1 ring-ink/10 animate-rise">
-        <div className="label-mono">Agent-owned authentication</div>
-        <h2 id="signin-title" className="mt-1 font-display text-3xl tracking-wide">
-          {agent.name}
+      <div className="w-full max-w-lg rounded-2xl border bg-surface-raised p-6 shadow-lg animate-rise">
+        <h2 id="signin-title" className="text-xl font-medium">
+          Sign in to {agent.name}
         </h2>
         <p className="mt-3 text-[13px] leading-relaxed">{agent.authNote}</p>
         <p className="mt-2 text-[12px] leading-relaxed text-dim">
@@ -62,7 +61,7 @@ export function SignInDialog({ agent, onClose }: { agent: Agent; onClose: () => 
         {agent.id === "codex" ? (
           <>
             {output && (
-              <pre className="mt-4 max-h-40 overflow-auto rounded bg-ink p-3 font-mono text-[11px] text-paper">
+              <pre className="mt-4 max-h-40 overflow-auto rounded-md bg-deck p-3 font-mono text-[11px] text-deck-foreground">
                 {output}
               </pre>
             )}

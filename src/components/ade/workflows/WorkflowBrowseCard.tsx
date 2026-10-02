@@ -29,7 +29,7 @@ export function WorkflowBrowseCard({
         <WorkflowIcon className="size-4 text-ink/70" />
       </div>
       <div className="min-w-0 w-full pr-8">
-        <h3 className="text-[14px] font-semibold leading-snug">{workflow.name}</h3>
+        <h3 className="text-[14px] font-medium leading-snug">{workflow.name}</h3>
         {workflow.description ? (
           <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-dim">
             {workflow.description}

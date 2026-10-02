@@ -37,6 +37,9 @@ writeFileSync(
   }),
 );
 process.env.HOME = home;
+// os.homedir() reads USERPROFILE on Windows, not HOME; without this the
+// tests would write into the real ~/.ade workspace.
+process.env.USERPROFILE = home;
 const {
   handleLocalApi,
   devServerArgs,
@@ -44,8 +47,9 @@ const {
   refreshDevProcess,
   classifyTurnFailure,
   executeChecks,
+  checksFor,
   buildManifest,
-  writeDevControlSkill,
+  computerContext,
 } = await import("./ade-local.mjs");
 
 const apiRequest = (urlPath, body) => ({
@@ -203,7 +207,8 @@ test("non-loopback peers cannot submit requests or poison the captured manifest 
   assert.equal(denied.status, 403);
   const project = { id: "peer-check", name: "peer", path: home };
   const manifest = await buildManifest({ agentId: "codex" }, project);
-  assert.equal(manifest.devControl.baseUrl, "http://127.0.0.1:3000");
+  assert.equal(manifest.agentComputer.available, true);
+  assert.equal(computerContext(project).env.ADE_API, "http://127.0.0.1:3000");
   const spoofedHost = await handleLocalApi({
     url: "http://attacker.example:9443/api/agents/unknown/models",
     method: "GET",
@@ -212,10 +217,7 @@ test("non-loopback peers cannot submit requests or poison the captured manifest 
     text: async () => "",
   });
   assert.equal(spoofedHost.status, 403);
-  assert.equal(
-    (await buildManifest({ agentId: "codex" }, project)).devControl.baseUrl,
-    "http://127.0.0.1:3000",
-  );
+  assert.equal(computerContext(project).env.ADE_API, "http://127.0.0.1:3000");
 
   for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
     const response = await handleLocalApi({
@@ -358,8 +360,7 @@ test("opt-in exposure is token-gated, loopback stays exempt, and login sets the 
     });
     assert.equal(poisoned.status, 401);
     assert.equal(
-      (await buildManifest({ agentId: "codex" }, { id: "peer-check", name: "peer", path: home }))
-        .devControl.baseUrl,
+      computerContext({ id: "peer-check", name: "peer", path: home }).env.ADE_API,
       "http://127.0.0.1:3000",
     );
     // A 0.0.0.0 bind spans interfaces: any Host name is accepted (token still
@@ -426,18 +427,6 @@ test("oversized request bodies are refused without being fully read", async () =
   });
   assert.equal(streamed.status, 413);
   assert.equal(cancelled, true);
-});
-
-test("dev-control skill write failures are recorded without throwing", async () => {
-  assert.equal(
-    await writeDevControlSkill(async () => {
-      throw new Error("disk full");
-    }),
-    false,
-  );
-  const manifest = await buildManifest({ agentId: "codex" }, { id: "p", name: "p", path: home });
-  assert.match(manifest.devControl.note, /skill could not be written \(disk full\)/);
-  assert.equal(await writeDevControlSkill(), true);
 });
 
 test("dev-server launch flags map by framework (next vs vite vs unknown)", () => {
@@ -560,6 +549,20 @@ test("run-checks refuses unless the session is ready", async () => {
   assert.match(stopped.json.error, /"stopped"/);
 });
 
+test("checksFor returns one clear skip when package.json is missing", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-nopf-"));
+  writeFileSync(path.join(dir, "app.py"), "import streamlit as st\n");
+  writeFileSync(path.join(dir, "requirements.txt"), "streamlit\n");
+  const checks = await checksFor({ id: "p-py", path: dir });
+  assert.equal(checks.length, 1);
+  assert.equal(checks[0].name, "Project checks");
+  assert.equal(checks[0].status, "skipped");
+  assert.match(checks[0].detail, /No package\.json/);
+  assert.match(checks[0].detail, /Python/);
+  assert.doesNotMatch(checks[0].detail, /ENOENT/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("executeChecks claims verifying before its first await and honors a stop during it", async () => {
   // Register a throwaway project with no scripts, so no check ever spawns.
   const dir = mkdtempSync(path.join(os.tmpdir(), "ade-checks-"));
@@ -624,29 +627,6 @@ test("refresh normalizes stale launch args while the record is not running", asy
   assert.deepEqual(proc.args, ["run", "dev"]);
   assert.equal(res.changed, true);
   rmSync(dir, { recursive: true, force: true });
-});
-
-test("dev-control skill file is generated at startup with private perms and full guidance", () => {
-  const skillPath = path.join(home, ".ade", "skills", "ade-dev-control", "SKILL.md");
-  const skill = readFileSync(skillPath, "utf8");
-  for (const needle of [
-    "api/projects/$PID/dev/start",
-    "api/projects/$PID/dev/stop",
-    'curl -fsS "$ADE/api/projects/$PID/dev"',
-    '"starting", "running", "stopped"',
-    "re-scans package.json",
-    "409",
-    "404",
-    "nohup",
-    "workspace-write",
-    "press Start in ADE",
-    "devControl.baseUrl",
-  ]) {
-    assert.ok(skill.includes(needle), `skill should mention ${needle}`);
-  }
-  // Private, like the other ~/.ade files.
-  assert.equal(statSync(path.dirname(path.dirname(skillPath))).mode & 0o777, 0o700);
-  assert.equal(statSync(skillPath).mode & 0o777, 0o600);
 });
 
 test("project dev control: 404 guidance, inline re-scan on start, 409 while running, idempotent stop", async () => {
@@ -798,8 +778,8 @@ test("dev stop during starting kills the child and missing records are 404", asy
   }
 });
 
-test("manifest devControl carries the real base URL, curls, and skill path", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-devctl-mf-"));
+test("manifest gives every agent its computer: tools, real ADE URL, and verify-visually rules", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-computer-mf-"));
   writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "x" }));
   // Any loopback request records the serving Host; this call also registers
   // the fixture project.
@@ -808,29 +788,26 @@ test("manifest devControl carries the real base URL, curls, and skill path", asy
   const project = reg.json.project;
 
   const manifest = await buildManifest({ request: "scaffold a thing", agentId: "codex" }, project);
-  assert.equal(manifest.devControl.baseUrl, "http://127.0.0.1:3000");
-  assert.equal(manifest.devControl.projectId, project.id);
-  assert.ok(manifest.devControl.skill.endsWith("skills/ade-dev-control/SKILL.md"));
-  assert.equal(
-    manifest.devControl.start,
-    `curl -fsS -X POST http://127.0.0.1:3000/api/projects/${project.id}/dev/start`,
-  );
-  assert.match(manifest.devControl.stop, /dev\/stop$/);
-  assert.match(manifest.devControl.status, /dev$/);
+  assert.equal(manifest.devControl, undefined);
+  assert.equal(manifest.agentComputer.available, true);
+  assert.equal(manifest.agentComputer.screen, "1280x800");
+  for (const tool of ["computer_screenshot", "computer_open_url", "dev_server_start"])
+    assert.ok(manifest.agentComputer.tools.includes(tool), `manifest lists ${tool}`);
+  const ctx = computerContext(project);
+  assert.deepEqual(ctx.env, { ADE_API: "http://127.0.0.1:3000", ADE_PROJECT_ID: project.id });
+  assert.ok(ctx.mcpScript.endsWith(path.join("src", "local", "computer-mcp.mjs")));
+  assert.ok(ctx.piExtension.endsWith(path.join("src", "local", "computer-pi-extension.mjs")));
 
-  // The 1e constraint is aligned with the bridge: control belongs to the
-  // agent now, detached servers stay forbidden, sandbox failure = ask user.
-  const bridge = manifest.constraints.find((c) => c.includes("dev-server control"));
-  assert.ok(bridge, "constraints mention the dev-server control");
-  assert.ok(bridge.includes("never start a detached background server"));
-  assert.ok(bridge.includes("devControl"));
-  assert.ok(bridge.includes("ask the user to start it in ADE"));
+  // Dev servers belong to ADE (via the tools); detached servers stay forbidden,
+  // and visible changes must be checked on the computer before "done".
+  const dev = manifest.constraints.find((c) => c.includes("dev_server_start"));
+  assert.ok(dev && dev.includes("never start a server yourself"));
+  assert.ok(manifest.constraints.some((c) => c.includes("verify it on your agent computer")));
 
+  // Pi gets the same computer (as a Pi extension), not a "use the UI" fallback.
   const piManifest = await buildManifest({ request: "preview it", agentId: "pi" }, project);
+  assert.equal(piManifest.agentComputer.available, true);
   assert.match(piManifest.otherServices, /does not verify/);
-  assert.ok(
-    piManifest.constraints.some((c) => c.includes("cannot call the devControl curl commands")),
-  );
   assert.ok(
     piManifest.constraints.some((c) =>
       c.includes("instead of asking the user which frontend port"),

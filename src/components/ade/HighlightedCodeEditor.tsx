@@ -1,10 +1,5 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import {
-  LanguageDescription,
-  syntaxHighlighting,
-  HighlightStyle,
-  defaultHighlightStyle,
-} from "@codemirror/language";
+import { LanguageDescription, syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { EditorState, Compartment } from "@codemirror/state";
 import {
@@ -26,48 +21,71 @@ type Props = {
 };
 
 const workbenchHighlight = HighlightStyle.define([
-  { tag: tags.comment, color: "#898477", fontStyle: "italic" },
+  { tag: tags.comment, color: "var(--syntax-comment)", fontStyle: "italic" },
   {
     tag: [tags.keyword, tags.controlKeyword, tags.operatorKeyword],
-    color: "#aa5818",
-    fontWeight: "600",
+    color: "var(--syntax-keyword)",
+    fontWeight: "500",
   },
-  { tag: [tags.string, tags.special(tags.string)], color: "#21786a" },
-  { tag: [tags.number, tags.bool, tags.null], color: "#8158a0" },
-  { tag: [tags.typeName, tags.className, tags.namespace], color: "#2e638f" },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "#855326" },
-  { tag: [tags.propertyName, tags.attributeName], color: "#5c6225" },
-  { tag: [tags.heading, tags.heading1, tags.heading2], color: "#955014", fontWeight: "700" },
-  { tag: tags.link, color: "#2e638f", textDecoration: "underline" },
-  { tag: [tags.invalid, tags.deleted], color: "#a23c31" },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--syntax-string)" },
+  { tag: [tags.number, tags.bool, tags.null], color: "var(--syntax-number)" },
+  { tag: [tags.typeName, tags.className, tags.namespace], color: "var(--syntax-type)" },
+  {
+    tag: [tags.function(tags.variableName), tags.function(tags.propertyName)],
+    color: "var(--syntax-function)",
+  },
+  { tag: [tags.propertyName, tags.attributeName], color: "var(--syntax-property)" },
+  {
+    tag: [tags.heading, tags.heading1, tags.heading2],
+    color: "var(--syntax-heading)",
+    fontWeight: "500",
+  },
+  { tag: tags.link, color: "var(--syntax-type)", textDecoration: "underline" },
+  { tag: [tags.invalid, tags.deleted], color: "var(--syntax-invalid)" },
+  { tag: tags.inserted, color: "var(--syntax-string)" },
+  { tag: [tags.atom, tags.labelName], color: "var(--syntax-number)" },
+  { tag: [tags.regexp, tags.escape], color: "var(--syntax-string)" },
+  {
+    tag: [tags.meta, tags.processingInstruction, tags.documentMeta],
+    color: "var(--syntax-comment)",
+  },
+  { tag: tags.definition(tags.variableName), color: "var(--syntax-type)" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.strong, fontWeight: "500" },
+  { tag: tags.strikethrough, textDecoration: "line-through" },
 ]);
 
 const workbenchTheme = EditorView.theme({
   "&": {
     height: "100%",
-    backgroundColor: "#fffdf8",
-    color: "#34342e",
-    fontSize: "11px",
+    backgroundColor: "var(--code-background)",
+    color: "var(--code-foreground)",
+    fontSize: "13px",
   },
   ".cm-scroller": {
     overflow: "auto",
     fontFamily: '"IBM Plex Mono", monospace',
     lineHeight: "1.65",
   },
-  ".cm-content": { padding: "10px 0", caretColor: "#c47b1b" },
+  ".cm-content": { padding: "10px 0", caretColor: "var(--accent)" },
   ".cm-line": { padding: "0 10px" },
   ".cm-gutters": {
-    backgroundColor: "#f8f2e7",
-    color: "#aca18d",
-    borderRight: "1px solid #e8dfd0",
+    backgroundColor: "var(--code-gutter)",
+    color: "var(--code-gutter-foreground)",
+    borderRight: "1px solid var(--border-subtle)",
   },
   ".cm-gutterElement": { padding: "0 7px 0 5px" },
-  ".cm-activeLine": { backgroundColor: "#f7eedf" },
-  ".cm-activeLineGutter": { backgroundColor: "#f0e4d0", color: "#756a58" },
-  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-    backgroundColor: "#e7c995 !important",
+  ".cm-activeLine": {
+    backgroundColor: "color-mix(in oklab, var(--amber) 8%, var(--code-background))",
   },
-  ".cm-cursor": { borderLeftColor: "#bd741a" },
+  ".cm-activeLineGutter": {
+    backgroundColor: "color-mix(in oklab, var(--amber) 14%, var(--code-gutter))",
+    color: "var(--text-secondary)",
+  },
+  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+    backgroundColor: "color-mix(in oklab, var(--amber) 38%, var(--code-background)) !important",
+  },
+  ".cm-cursor": { borderLeftColor: "var(--accent)" },
   "&.cm-focused": { outline: "none" },
 });
 
@@ -110,7 +128,6 @@ export function HighlightedCodeEditor({ path, value, onChange, onSave }: Props) 
           }),
           workbenchTheme,
           syntaxHighlighting(workbenchHighlight),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           language.of([]),
         ],
       }),

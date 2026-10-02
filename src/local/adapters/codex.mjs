@@ -1,3 +1,5 @@
+import { codexComputerArgs } from "./computer-tools.mjs";
+
 export const codex = {
   id: "codex",
   name: "OpenAI Codex",
@@ -14,7 +16,18 @@ export const codex = {
       result.code === 0 && /logged in|signed in/i.test(result.stdout + result.stderr);
     return { signedIn, ...(signedIn ? { account: "Codex account" } : {}) };
   },
-  command({ projectPath, prompt, session, continuing, model, effort, speed, permission }) {
+  command({
+    projectPath,
+    prompt,
+    session,
+    continuing,
+    model,
+    effort,
+    speed,
+    permission,
+    attachments,
+    computer,
+  }) {
     // `-m` is valid for both `codex exec` and `codex exec resume`; omit it when
     // no model was chosen so the CLI keeps its own configured default.
     const modelArgs = model ? ["-m", model] : [];
@@ -22,7 +35,16 @@ export const codex = {
       ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),
       ...(speed ? ["-c", `service_tier="${speed}"`] : []),
     ];
+    // The agent computer's MCP server, configured per turn (resume too).
+    const computerArgs = codexComputerArgs(computer);
     const plan = permission === "plan";
+    const imageArgs = (attachments ?? [])
+      .filter((a) => a.kind === "image")
+      .flatMap((a) => ["--image", a.path]);
+    // Codex's --image is greedy (num_args = 1..) on current CLIs, so without
+    // `--` it swallows the positional prompt and then fails on closed stdin:
+    // "No prompt provided via stdin."
+    const promptArgs = imageArgs.length ? ["--", prompt] : [prompt];
     return continuing && session.agentSessionId
       ? [
           "codex",
@@ -32,9 +54,11 @@ export const codex = {
             "--json",
             ...modelArgs,
             ...optionArgs,
+            ...computerArgs,
             ...(plan ? ["-c", 'sandbox_mode="read-only"'] : []),
             session.agentSessionId,
-            prompt,
+            ...imageArgs,
+            ...promptArgs,
           ],
         ]
       : [
@@ -44,11 +68,13 @@ export const codex = {
             "--json",
             ...modelArgs,
             ...optionArgs,
+            ...computerArgs,
             "--cd",
             projectPath,
             "--sandbox",
             plan ? "read-only" : "workspace-write",
-            prompt,
+            ...imageArgs,
+            ...promptArgs,
           ],
         ];
   },

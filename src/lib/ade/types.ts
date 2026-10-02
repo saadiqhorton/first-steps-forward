@@ -62,11 +62,19 @@ export interface FileChange {
   /** True when this file was already dirty before the agent's first turn. */
   preExisting?: boolean;
 }
+export interface MessageAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  kind: "image" | "file";
+}
 export interface Message {
   id: string;
   role: "user" | "agent" | "system";
   text: string;
   at: number;
+  attachments?: MessageAttachment[];
 }
 export interface AgentModel {
   id: string;
@@ -108,6 +116,20 @@ export interface ProjectDocument {
   name: string;
   modifiedAt: number;
   size: number;
+}
+/** A project's agent computer (Docker desktop the agent drives, user watches). */
+export interface AgentComputer {
+  projectId: string;
+  status: "unavailable" | "stopped" | "building" | "starting" | "running" | "error";
+  detail?: string;
+  /** Tail of the image build output while building / after a failed build. */
+  log?: string[];
+  screen: { width: number; height: number };
+  startedAt?: number | null;
+  /** noVNC URLs (loopback only): watch-only, and with keyboard/mouse input. */
+  viewerUrl?: string;
+  controlViewerUrl?: string;
+  /** Full noVNC page used when the user opens the desktop in a separate tab. */
 }
 export interface AgentModelsResult {
   available: boolean;
@@ -164,19 +186,13 @@ export interface Session {
     tools: string;
     devServer?: string;
     otherServices?: string;
-    devControl?: {
-      baseUrl: string | null;
-      projectId: string;
-      skill: string;
-      note?: string;
-      status?: string;
-      start?: string;
-      stop?: string;
-    };
+    agentComputer?: { available: boolean; screen?: string; tools?: string; note: string };
     dirtyWorktree: boolean;
     uncommittedFiles?: string[];
   };
   queuedMessages?: string[];
+  /** Prompt to run as soon as the current CLI process exits. */
+  steerNow?: string;
 }
 
 export interface AdeState {

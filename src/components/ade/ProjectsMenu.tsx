@@ -52,7 +52,7 @@ export function ProjectsMenu({
         className={
           showActiveName
             ? "inline-flex h-7 max-w-[14rem] items-center gap-1.5 rounded-md px-2 text-[13px] font-medium text-ink hover:bg-ink/[0.04] focus-visible:outline-2 focus-visible:outline-amber"
-            : "inline-flex h-7 max-w-[14rem] items-center gap-1.5 rounded-md px-2 font-mono text-[11px] uppercase tracking-[0.12em] text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+            : "inline-flex h-7 max-w-[14rem] items-center gap-1.5 rounded-md px-2 text-[13px] text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
         }
         aria-label="Projects menu"
       >

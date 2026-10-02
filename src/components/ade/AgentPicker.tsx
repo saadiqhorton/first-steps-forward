@@ -427,8 +427,7 @@ export function AgentPicker({
   const note = caps?.permissionNotes?.[value.permission] ?? "";
   const modelManual =
     showOther || (!!value.model && !listedModels.some((m) => m.id === value.model));
-  const pickerGrid =
-    "grid grid-cols-[minmax(0,1.05fr)_minmax(0,1.55fr)_minmax(0,0.85fr)_minmax(0,0.75fr)_minmax(0,0.9fr)] gap-px bg-line";
+  const pickerGrid = "grid grid-cols-[8.5rem_minmax(0,1fr)_7rem_6.5rem_7.5rem] gap-px bg-line";
 
   return (
     <>
@@ -555,7 +554,7 @@ export function AgentPicker({
                     />
                   </label>
                 </div>
-                <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+                <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1.5">
                   {filteredModelRows.filter((row) => row.id !== OTHER).length === 0 &&
                   modelQuery.trim() ? (
                     <p className="px-2 py-1.5 font-mono text-[11px] text-dim">No models match.</p>
@@ -573,7 +572,7 @@ export function AgentPicker({
                       }}
                       onClick={() => selectModel(row.id)}
                     >
-                      {row.label}
+                      <span className="[overflow-wrap:anywhere]">{row.label}</span>
                     </RowButton>
                   ))}
                   {modelManual && (

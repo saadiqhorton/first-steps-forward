@@ -29,9 +29,8 @@ export function TokenGate({ onUnlocked }: { onUnlocked: () => Promise<void> }) {
   };
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm rounded-lg border border-line bg-panel p-6">
-        <div className="label-mono">ADE · Access token</div>
-        <h1 className="mt-1 font-display text-2xl">Unlock with the access token</h1>
+      <div className="w-full max-w-sm rounded-2xl border border-line bg-panel p-6">
+        <h1 className="text-xl font-medium">Unlock with the access token</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-dim">
           ADE is listening on a non-loopback address, so other machines must prove the access token
           it was started with. Enter it once; the browser keeps the session.

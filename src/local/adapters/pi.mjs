@@ -1,6 +1,7 @@
 import { promises as fsp } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { COMPUTER_TOOL_NAMES } from "./computer-tools.mjs";
 
 export const pi = {
   id: "pi",
@@ -11,7 +12,7 @@ export const pi = {
   authNote:
     "Pi provides /login inside its interactive TUI; it does not expose a supported browser/device login command for this UI. Sign in with `pi`, then choose /login.",
   installHint: "Install from https://pi.dev/",
-  tools: "read, edit, write, grep, find, ls (no shell)",
+  tools: "read, edit, write, grep, find, ls (no shell), plus ADE's agent computer tools",
   /**
    * Pi is multi-provider. Probe credential-store provider names (never
    * inspect or log credential values), falling back to known names when the
@@ -52,19 +53,34 @@ export const pi = {
       account: `${ready.length} READY ${ready.length === 1 ? "provider" : "providers"}: ${ready.map((name) => (/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) ? name : "(unusual provider name)")).join(", ")}`,
     };
   },
-  command({ prompt, session, continuing, dataDir, providers, model, effort, permission }) {
+  command({
+    prompt,
+    session,
+    continuing,
+    dataDir,
+    providers,
+    model,
+    effort,
+    permission,
+    attachments,
+    computer,
+  }) {
     const sessionFile = `${dataDir}/sessions/${session.id}.jsonl`;
-    const tools = permission === "plan" ? "read,grep,find,ls" : "read,edit,write,grep,find,ls";
+    const fileTools = permission === "plan" ? "read,grep,find,ls" : "read,edit,write,grep,find,ls";
+    // Pi has no MCP client: ADE's agent computer arrives as a Pi extension
+    // (-e) with its tool names added to the allowlist.
+    const tools = [fileTools, ...(computer ? COMPUTER_TOOL_NAMES : [])].join(",");
     return [
       "pi",
       [
         "-p",
         "--mode",
         "json",
+        ...(computer ? ["-e", computer.piExtension] : []),
         // Extensions stay enabled so package-registered providers (e.g.
         // ollama-cloud via pi-ollama-cloud) resolve for a picked model. The
-        // --tools allowlist below still sandboxes the run: extension tools
-        // (web search, subagents, shell) are never granted.
+        // --tools allowlist below still sandboxes the run: other extension
+        // tools (web search, subagents, shell) are never granted.
         "--tools",
         tools,
         // A `provider/model` id embeds the provider, so --model wins outright.
@@ -81,8 +97,10 @@ export const pi = {
         "--session",
         sessionFile,
         ...(continuing ? ["--continue"] : []),
+        ...(attachments ?? []).map((a) => `@${a.path}`),
         prompt,
       ],
+      computer ? computer.env : {},
     ];
   },
   parse(line) {

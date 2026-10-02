@@ -8,7 +8,7 @@ export const Route = createFileRoute("/sessions/$sessionId")({
   notFoundComponent: () => (
     <main className="grid flex-1 place-items-center">
       <div className="text-center">
-        <div className="font-display text-3xl">Session not found</div>
+        <h1 className="text-xl font-medium">Session not found</h1>
         <Link to="/" className="btn-quiet mt-3 inline-block px-3 py-1.5 text-[12px]">
           Back home
         </Link>

@@ -66,6 +66,9 @@ writeFileSync(
   }),
 );
 process.env.HOME = home;
+// os.homedir() reads USERPROFILE on Windows, not HOME; without this the
+// tests would write into the real ~/.ade workspace.
+process.env.USERPROFILE = home;
 const { handleLocalApi } = await import("./ade-local.mjs");
 
 async function get(urlPath) {

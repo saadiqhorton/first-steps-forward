@@ -1,3 +1,5 @@
+import { opencodeComputerEnv } from "./computer-tools.mjs";
+
 export const opencode = {
   id: "opencode",
   name: "OpenCode",
@@ -15,7 +17,19 @@ export const opencode = {
       !/0 credentials/i.test(result.stdout);
     return { signedIn, ...(signedIn ? { account: "Configured in OpenCode" } : {}) };
   },
-  command({ projectPath, prompt, session, continuing, model, effort, permission }) {
+  command({
+    projectPath,
+    prompt,
+    session,
+    continuing,
+    model,
+    effort,
+    permission,
+    attachments,
+    computer,
+  }) {
+    // Third element: extra environment (the agent computer's MCP server).
+    const fileArgs = (attachments ?? []).flatMap((a) => ["--file", a.path]);
     return [
       "opencode",
       [
@@ -30,8 +44,10 @@ export const opencode = {
         // Build is OpenCode's default primary agent; only pass --agent for plan.
         ...(permission === "plan" ? ["--agent", "plan"] : []),
         ...(continuing && session.agentSessionId ? ["--session", session.agentSessionId] : []),
+        ...fileArgs,
         prompt,
       ],
+      opencodeComputerEnv(computer),
     ];
   },
   parse(line, session) {

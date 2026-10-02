@@ -2,6 +2,7 @@ import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import { NewTaskForm } from "@/components/ade/NewTaskForm";
 
 export const Route = createFileRoute("/p/$projectId/conversations/")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Conversations — ADE" },

@@ -1,11 +1,8 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, Search, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import {
-  editorFileIcon,
-  listEditorEntries,
-  searchEditorFiles,
-  type EditorEntry,
-} from "../HostEditorPane";
+import { entriesQuery } from "@/lib/ade/queries";
+import { editorFileIcon, searchEditorFiles, type EditorEntry } from "../editorApi";
 import "../host-editor.css";
 
 type Props = {
@@ -13,6 +10,7 @@ type Props = {
   activePath: string | null;
   dirtyPaths: ReadonlySet<string>;
   homeActive: boolean;
+  revealFolder: string | null;
   onOpenFile: (path: string) => void;
   onGoHome: () => void;
 };
@@ -22,10 +20,16 @@ export function FilesExplorer({
   activePath,
   dirtyPaths,
   homeActive,
+  revealFolder,
   onOpenFile,
   onGoHome,
 }: Props) {
-  const [directories, setDirectories] = useState<Record<string, EditorEntry[]>>({});
+  const queryClient = useQueryClient();
+  const cachedRoot = () => {
+    const root = queryClient.getQueryData(entriesQuery(projectId).queryKey);
+    return root ? { "": root } : {};
+  };
+  const [directories, setDirectories] = useState<Record<string, EditorEntry[]>>(cachedRoot);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -37,11 +41,13 @@ export function FilesExplorer({
     async (directory: string) => {
       setLoadingFolders((previous) => new Set(previous).add(directory));
       try {
-        const value = await listEditorEntries(projectId, directory);
-        setDirectories((previous) => ({ ...previous, [directory]: value.entries }));
+        const entries = await queryClient.fetchQuery(entriesQuery(projectId, directory));
+        setDirectories((previous) => ({ ...previous, [directory]: entries }));
         setError("");
+        return entries;
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
+        return [] as EditorEntry[];
       } finally {
         setLoadingFolders((previous) => {
           const next = new Set(previous);
@@ -54,12 +60,36 @@ export function FilesExplorer({
   );
 
   useEffect(() => {
-    setDirectories({});
+    const root = queryClient.getQueryData(entriesQuery(projectId).queryKey);
+    setDirectories(root ? { "": root } : {});
     setExpanded(new Set());
     setQuery("");
     setResults([]);
     void loadDirectory("");
   }, [loadDirectory]);
+
+  // Expand ancestor folders when Home (or elsewhere) asks to reveal a path.
+  useEffect(() => {
+    if (revealFolder == null) return;
+    let cancelled = false;
+    void (async () => {
+      const parts = revealFolder.split("/").filter(Boolean);
+      const ancestors = parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+      setExpanded((previous) => {
+        const next = new Set(previous);
+        for (const path of ancestors) next.add(path);
+        return next;
+      });
+      // Always load each ancestor so nested children render after expand.
+      for (const path of ["", ...ancestors]) {
+        if (cancelled) return;
+        await loadDirectory(path);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [revealFolder, loadDirectory]);
 
   useEffect(() => {
     const term = query.trim();
@@ -121,7 +151,7 @@ export function FilesExplorer({
           </button>
           {expanded.has(entry.path) && (
             <div role="group">
-              {loadingFolders.has(entry.path) ? (
+              {loadingFolders.has(entry.path) && !directories[entry.path] ? (
                 <div className="ed-tree-empty">Reading folder…</div>
               ) : (
                 renderEntries(entry.path, depth + 1)
@@ -207,10 +237,10 @@ export function FilesExplorer({
             ) : (
               <div className="ed-tree-empty">No matching files</div>
             )
-          ) : loadingFolders.has("") ? (
-            <div className="ed-tree-empty">Reading project…</div>
           ) : directories[""]?.length ? (
             renderEntries("")
+          ) : loadingFolders.has("") ? (
+            <div className="ed-tree-empty">Reading project…</div>
           ) : (
             <div className="ed-tree-empty">No files in this folder</div>
           )}

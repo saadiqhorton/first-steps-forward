@@ -72,14 +72,7 @@ export function AddProjectForm({
         embedded ? "w-full px-6 pb-6 pt-6 pr-12" : "mx-auto w-full max-w-xl px-7 pb-8 pt-8"
       }
     >
-      <div className="label-mono">Add project</div>
-      <h1
-        className={
-          embedded
-            ? "mt-1 font-display text-3xl leading-tight tracking-wide"
-            : "mt-1 font-display text-[44px] leading-[0.9]"
-        }
-      >
+      <h1 className={embedded ? "text-xl font-medium" : "heading-display text-3xl"}>
         Point ADE at a folder
       </h1>
       <p className="mt-2 text-[13px] text-dim">

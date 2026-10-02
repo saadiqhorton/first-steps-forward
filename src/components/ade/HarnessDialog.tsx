@@ -89,20 +89,19 @@ export function HarnessDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4"
+      className="fixed inset-0 z-50 grid place-items-center bg-scrim p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="harness-title"
     >
-      <div className="w-full max-w-lg rounded-lg bg-panel p-6 ring-1 ring-ink/10 animate-rise">
-        <div className="label-mono">{kind === "install" ? "Install CLI" : "Update CLI"}</div>
-        <h2 id="harness-title" className="mt-1 font-display text-3xl tracking-wide">
+      <div className="w-full max-w-lg rounded-2xl border bg-surface-raised p-6 shadow-lg animate-rise">
+        <h2 id="harness-title" className="text-xl font-medium">
           {title}
         </h2>
 
         {!started ? (
           <>
-            <pre className="mt-4 overflow-x-auto rounded-md bg-ink px-3 py-2 font-mono text-[11px] leading-relaxed text-paper/80">
+            <pre className="mt-4 overflow-x-auto rounded-md bg-deck px-3 py-2 font-mono text-[11px] leading-relaxed text-deck-foreground/80">
               {command || "(no command configured)"}
             </pre>
             <p className="mt-3 text-[12px] leading-relaxed text-dim">
@@ -131,7 +130,7 @@ export function HarnessDialog({
           <>
             <pre
               ref={outputRef}
-              className="mt-4 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-ink px-3 py-2 font-mono text-[11px] leading-relaxed text-paper/80 [overflow-wrap:anywhere]"
+              className="mt-4 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-deck px-3 py-2 font-mono text-[11px] leading-relaxed text-deck-foreground/80 [overflow-wrap:anywhere]"
             >
               {(job?.output ?? []).join("") || "Waiting for output…"}
             </pre>

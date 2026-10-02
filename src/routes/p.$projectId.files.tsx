@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Group,
@@ -8,14 +8,19 @@ import {
   type Layout,
 } from "react-resizable-panels";
 import { X } from "lucide-react";
-import { FileTab } from "@/components/ade/files/FileTab";
 import { FilesExplorer } from "@/components/ade/files/FilesExplorer";
 import { FilesHome } from "@/components/ade/files/FilesHome";
-import { editorFileIcon } from "@/components/ade/HostEditorPane";
+import { clearEditorDraft, listDirtyDraftPaths } from "@/components/ade/files/editorDrafts";
+import { editorFileIcon } from "@/components/ade/editorApi";
 import { usePersistedLayout } from "@/components/ade/persistLayout";
+
+const FileTab = lazy(() =>
+  import("@/components/ade/files/FileTab").then((module) => ({ default: module.FileTab })),
+);
 
 export const Route = createFileRoute("/p/$projectId/files")({
   head: () => ({ meta: [{ title: "Files — ADE" }] }),
+  ssr: false,
   component: FilesPage,
 });
 
@@ -65,15 +70,20 @@ function FilesPage() {
   const groupRef = useRef<GroupImperativeHandle | null>(null);
   const { onLayoutChanged, hydrateGroup } = usePersistedLayout(LAYOUT_ID);
   const [tabs, setTabs] = useState<TabsState>(() => readTabs(projectId));
-  const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(() => new Set());
+  const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(
+    () => new Set(listDirtyDraftPaths(projectId, readTabs(projectId).open)),
+  );
+  const [revealFolder, setRevealFolder] = useState<string | null>(null);
 
   useEffect(() => {
     hydrateGroup(groupRef, DEFAULT_LAYOUT);
   }, [hydrateGroup]);
 
   useEffect(() => {
-    setTabs(readTabs(projectId));
-    setDirtyPaths(new Set());
+    const next = readTabs(projectId);
+    setTabs(next);
+    setDirtyPaths(new Set(listDirtyDraftPaths(projectId, next.open)));
+    setRevealFolder(null);
   }, [projectId]);
 
   useEffect(() => {
@@ -104,6 +114,7 @@ function FilesPage() {
   const closeFile = useCallback(
     (path: string) => {
       if (dirtyPaths.has(path) && !window.confirm(`Discard unsaved changes in ${path}?`)) return;
+      clearEditorDraft(projectId, path);
       setTabs((previous) => {
         const index = previous.open.indexOf(path);
         const open = previous.open.filter((entry) => entry !== path);
@@ -120,7 +131,7 @@ function FilesPage() {
         return next;
       });
     },
-    [dirtyPaths],
+    [dirtyPaths, projectId],
   );
 
   const onDirtyChange = useCallback((path: string, dirty: boolean) => {
@@ -157,6 +168,7 @@ function FilesPage() {
           activePath={homeActive ? null : tabs.active}
           dirtyPaths={dirtyPaths}
           homeActive={homeActive}
+          revealFolder={revealFolder}
           onOpenFile={openFile}
           onGoHome={goHome}
         />
@@ -174,7 +186,7 @@ function FilesPage() {
               role="tab"
               aria-selected={homeActive}
               onClick={goHome}
-              className={`shrink-0 border-b-2 px-3 font-mono text-[10px] uppercase tracking-[0.12em] ${
+              className={`shrink-0 border-b-2 px-3 text-sm ${
                 homeActive ? "border-amber text-ink" : "border-transparent text-dim hover:text-ink"
               }`}
             >
@@ -218,17 +230,29 @@ function FilesPage() {
           </div>
 
           <div className={`${homeActive ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
-            <FilesHome projectId={projectId} onOpenFile={openFile} />
+            <FilesHome
+              projectId={projectId}
+              onOpenFile={openFile}
+              onRevealFolder={setRevealFolder}
+            />
           </div>
 
           {tabs.open.map((path) => (
-            <FileTab
+            <Suspense
               key={path}
-              projectId={projectId}
-              path={path}
-              visible={tabs.active === path}
-              onDirtyChange={onDirtyChange}
-            />
+              fallback={
+                <div className="grid min-h-0 flex-1 place-items-center font-mono text-[12px] text-dim">
+                  Opening file…
+                </div>
+              }
+            >
+              <FileTab
+                projectId={projectId}
+                path={path}
+                visible={tabs.active === path}
+                onDirtyChange={onDirtyChange}
+              />
+            </Suspense>
           ))}
         </div>
       </Panel>
