@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ActivityLogs } from "@/components/ade/ActivityLogs";
 import { ChecksList } from "@/components/ade/ChecksList";
 import type { Session } from "@/lib/ade/types";
+import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
 import { useAde } from "@/lib/ade/store";
 
 export function ActivityPanel({ session }: { session: Session }) {
@@ -10,16 +11,18 @@ export function ActivityPanel({ session }: { session: Session }) {
 
   const checksClick = async () => {
     if (
-      !window.confirm(
-        "Run this project's detected check scripts now? Project scripts can execute code and may access the network.",
-      )
+      !(await askConfirm({
+        title: "Run this project's detected check scripts now?",
+        description: "Project scripts can execute code and may access the network.",
+        confirmLabel: "Run",
+      }))
     )
       return;
     setBusy(true);
     try {
       await runChecks(session.id);
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : String(e));
+      void warnUser(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

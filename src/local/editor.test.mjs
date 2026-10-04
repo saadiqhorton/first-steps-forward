@@ -179,4 +179,43 @@ test("listDocuments returns recent Markdown files and skips ignored paths", asyn
   }
 });
 
+test("editor creates and deletes files inside the project", async () => {
+  const created = await call("/api/editor/p1/create", { path: "src/created.txt" });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.path, "src/created.txt");
+  assert.equal(readFileSync(path.join(project, "src", "created.txt"), "utf8"), "");
+  const listed = await call("/api/editor/p1/entries?path=src");
+  assert.ok(listed.body.entries.some((entry) => entry.path === "src/created.txt"));
+  const opened = await call("/api/editor/p1/file?path=src%2Fcreated.txt");
+  assert.equal(opened.status, 200);
+  assert.equal(opened.body.content, "");
+  assert.equal(opened.body.version, created.body.version);
+
+  const duplicate = await call("/api/editor/p1/create", { path: "src/created.txt" });
+  assert.equal(duplicate.status, 409);
+  const missingFolder = await call("/api/editor/p1/create", { path: "missing/created.txt" });
+  assert.equal(missingFolder.status, 404);
+  const traversal = await call("/api/editor/p1/create", { path: "../created.txt" });
+  assert.equal(traversal.status, 400);
+  assert.equal(readFileSync(outside, "utf8"), "outside\n");
+  const gitCreate = await call("/api/editor/p1/create", { path: ".git/config" });
+  assert.equal(gitCreate.status, 400);
+
+  const removed = await call("/api/editor/p1/delete", { path: "src/created.txt" });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.body.ok, true);
+  assert.throws(() => readFileSync(path.join(project, "src", "created.txt"), "utf8"));
+  const folder = await call("/api/editor/p1/delete", { path: "src" });
+  assert.equal(folder.status, 400);
+  assert.equal(readFileSync(path.join(project, "src", "app.ts"), "utf8").includes("title"), true);
+  const link = await call("/api/editor/p1/delete", { path: "outside-link" });
+  assert.equal(link.status, 403);
+  assert.equal(readFileSync(outside, "utf8"), "outside\n");
+  const gitDelete = await call("/api/editor/p1/delete", { path: ".git" });
+  assert.equal(gitDelete.status, 400);
+  const escaped = await call("/api/editor/p1/delete", { path: "../outside.txt" });
+  assert.equal(escaped.status, 400);
+  assert.equal(readFileSync(outside, "utf8"), "outside\n");
+});
+
 test.after(() => rmSync(home, { recursive: true, force: true }));

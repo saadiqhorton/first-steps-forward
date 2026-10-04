@@ -17,6 +17,7 @@ import {
   ComposerAttachments,
   type AttachmentDraft,
 } from "@/components/ade/ComposerAttachments";
+import { warnUser } from "@/components/ade/NoticeDialog";
 import { useAde } from "@/lib/ade/store";
 
 const PICKER_MAX_WIDTH = 960;
@@ -141,6 +142,7 @@ export function Composer({
 
   const addFiles = (incoming: File[]) => {
     if (disabled) return;
+    const oversized: string[] = [];
     setDrafts((prev) => {
       let next = [...prev];
       let totalBytes = next.reduce((sum, d) => sum + d.file.size, 0);
@@ -148,7 +150,7 @@ export function Composer({
         if (!file.size) continue;
         if (next.length >= MAX_FILES) break;
         if (file.size > MAX_FILE_BYTES) {
-          window.alert(`${file.name} is larger than 10 MB.`);
+          oversized.push(file.name);
           continue;
         }
         if (totalBytes + file.size > MAX_TURN_BYTES) continue;
@@ -161,6 +163,7 @@ export function Composer({
       }
       return next;
     });
+    for (const name of oversized) void warnUser(`${name} is larger than 10 MB.`);
   };
 
   const removeDraft = (key: string) => {

@@ -1428,6 +1428,17 @@ export async function executeChecks(session) {
   session.status = "ready";
   await save();
 }
+// A browser disconnect ends the response before it is written. Waiting reads
+// listen for that so a closed tab does not hold a PTY poll open.
+function terminalWaitSignal(req, res) {
+  if (req.signal) return req.signal;
+  if (!res || typeof res.on !== "function") return undefined;
+  const controller = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  return controller.signal;
+}
 function json(res, status, body) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json; charset=utf-8");
@@ -1598,7 +1609,16 @@ async function handle(req, res) {
         const cursor = Number(url.searchParams.get("cursor") ?? "0");
         if (!Number.isInteger(cursor) || cursor < 0)
           return json(res, 400, { error: "Invalid output cursor." });
-        const output = terminal.readTerminal(parts[1], cursor);
+        const waitParam = url.searchParams.get("wait");
+        const waitMs = waitParam == null || waitParam === "" ? 0 : Number(waitParam);
+        if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 10_000)
+          return json(res, 400, { error: "Invalid output wait." });
+        const output = await terminal.readTerminal(
+          parts[1],
+          cursor,
+          waitMs,
+          terminalWaitSignal(req, res),
+        );
         return output
           ? json(res, 200, output)
           : json(res, 404, { error: "Terminal session ended." });
@@ -1657,6 +1677,14 @@ async function handle(req, res) {
             200,
             await editor.writeEditorFile(project.path, data.path, data.content, data.version),
           );
+        }
+        if (parts.length === 3 && req.method === "POST" && parts[2] === "create") {
+          const data = await body(req);
+          return json(res, 201, await editor.createEditorFile(project.path, data.path));
+        }
+        if (parts.length === 3 && req.method === "POST" && parts[2] === "delete") {
+          const data = await body(req);
+          return json(res, 200, await editor.deleteEditorFile(project.path, data.path));
         }
       } catch (error) {
         if (error instanceof editor.EditorError)
@@ -2649,6 +2677,7 @@ export async function handleLocalApi(request) {
     url: `${url.pathname}${url.search}`,
     headers,
     ...(remoteAddress ? { socket: { remoteAddress } } : {}),
+    signal: request.signal,
     async *[Symbol.asyncIterator]() {
       if (payload) yield Buffer.from(payload);
     },

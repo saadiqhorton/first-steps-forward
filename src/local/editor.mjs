@@ -125,6 +125,86 @@ export async function readEditorFile(projectPath, relative) {
   return { path: relative, content, version: versionOf(bytes) };
 }
 
+function rejectGit(parts) {
+  if (parts.some((part) => part === ".git"))
+    throw new EditorError(400, "Git internals cannot be changed here.");
+}
+
+async function projectRoot(projectPath) {
+  let root;
+  try {
+    root = await fs.realpath(projectPath);
+    if (!(await fs.stat(root)).isDirectory()) throw new Error("Not a directory");
+  } catch {
+    throw new EditorError(404, "The project folder is unavailable.");
+  }
+  return root;
+}
+
+async function parentDirectory(root, parts) {
+  const parentJoined = path.join(root, ...parts.slice(0, -1));
+  if (!within(root, parentJoined)) throw new EditorError(400, "Choose a file inside the project.");
+  let parentReal;
+  try {
+    parentReal = await fs.realpath(parentJoined);
+  } catch {
+    throw new EditorError(404, "That folder does not exist.");
+  }
+  if (!within(root, parentReal))
+    throw new EditorError(403, "Files outside this project cannot be opened.");
+  const stat = await fs.lstat(parentReal);
+  if (!stat.isDirectory()) throw new EditorError(400, "Choose a folder inside the project.");
+  return parentReal;
+}
+
+export async function createEditorFile(projectPath, relative) {
+  const parts = validateRelative(relative);
+  if (!parts.length) throw new EditorError(400, "Choose a file name.");
+  rejectGit(parts);
+  const root = await projectRoot(projectPath);
+  const parentReal = await parentDirectory(root, parts);
+  const target = path.join(parentReal, parts.at(-1));
+  if (!within(root, target)) throw new EditorError(400, "Choose a file inside the project.");
+  try {
+    await fs.lstat(target);
+    throw new EditorError(409, "A file with that name already exists.");
+  } catch (error) {
+    if (error instanceof EditorError) throw error;
+    if (error?.code !== "ENOENT") throw new EditorError(400, "Could not create that file.");
+  }
+  try {
+    await fs.writeFile(target, "", { flag: "wx" });
+  } catch (error) {
+    if (error?.code === "EEXIST")
+      throw new EditorError(409, "A file with that name already exists.");
+    throw new EditorError(400, "Could not create that file.");
+  }
+  return {
+    path: toPosix(path.relative(root, target)),
+    version: versionOf(Buffer.alloc(0)),
+  };
+}
+
+export async function deleteEditorFile(projectPath, relative) {
+  const parts = validateRelative(relative);
+  if (!parts.length) throw new EditorError(400, "Choose a file.");
+  rejectGit(parts);
+  const root = await projectRoot(projectPath);
+  const parentReal = await parentDirectory(root, parts);
+  const target = path.join(parentReal, parts.at(-1));
+  if (!within(root, target)) throw new EditorError(400, "Choose a file inside the project.");
+  let info;
+  try {
+    info = await fs.lstat(target);
+  } catch {
+    throw new EditorError(404, "File not found.");
+  }
+  if (info.isSymbolicLink()) throw new EditorError(403, "Links cannot be removed here.");
+  if (!info.isFile()) throw new EditorError(400, "Choose a file, not a folder.");
+  await fs.unlink(target);
+  return { ok: true, path: toPosix(path.relative(root, target)) };
+}
+
 export async function writeEditorFile(projectPath, relative, content, expectedVersion) {
   if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES)
     throw new EditorError(413, "Text must be 512 KB or smaller.");

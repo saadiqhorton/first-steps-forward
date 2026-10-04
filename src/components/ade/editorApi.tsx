@@ -66,3 +66,15 @@ export async function searchEditorFiles(projectId: string, query: string) {
   const params = new URLSearchParams({ q: query });
   return editorApi<{ entries: EditorEntry[] }>(`/api/editor/${projectId}/search?${params}`);
 }
+
+export async function createEditorFile(projectId: string, file: string) {
+  return editorApi<{ path: string; version: string }>(`/api/editor/${projectId}/create`, {
+    path: file,
+  });
+}
+
+export async function deleteEditorFile(projectId: string, file: string) {
+  return editorApi<{ ok: boolean; path: string }>(`/api/editor/${projectId}/delete`, {
+    path: file,
+  });
+}

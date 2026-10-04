@@ -14,6 +14,7 @@ import {
   type WorkflowFilter,
 } from "@/components/ade/workflows/workflowFilters.mjs";
 import { workflowsQuery } from "@/lib/ade/queries";
+import { askConfirm } from "@/components/ade/NoticeDialog";
 import { deleteWorkflow } from "@/lib/ade/store";
 import type { Workflow } from "@/lib/ade/types";
 
@@ -107,7 +108,14 @@ function WorkflowsPage() {
 
   const onDelete = async (workflow: Workflow) => {
     if (workflow.builtIn) return;
-    if (!window.confirm(`Delete workflow “${workflow.name}”? This cannot be undone.`)) return;
+    if (
+      !(await askConfirm({
+        title: `Delete workflow “${workflow.name}”?`,
+        description: "This cannot be undone.",
+        confirmLabel: "Delete",
+      }))
+    )
+      return;
     try {
       await deleteWorkflow(workflow.id);
       if (editor !== "new" && editor?.id === workflow.id) setEditor(null);

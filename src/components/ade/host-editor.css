@@ -54,6 +54,38 @@
   border-radius: 50%;
   background: var(--accent);
 }
+.ed-tree-open {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+.ed-tree-remove {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.45;
+}
+.ed-tree-remove:hover,
+.ed-tree-remove:focus-visible {
+  opacity: 1;
+  background: color-mix(in oklab, currentColor 12%, transparent);
+}
 .ed-search {
   display: flex;
   align-items: center;

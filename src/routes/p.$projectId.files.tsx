@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Group,
@@ -11,7 +12,8 @@ import { X } from "lucide-react";
 import { FilesExplorer } from "@/components/ade/files/FilesExplorer";
 import { FilesHome } from "@/components/ade/files/FilesHome";
 import { clearEditorDraft, listDirtyDraftPaths } from "@/components/ade/files/editorDrafts";
-import { editorFileIcon } from "@/components/ade/editorApi";
+import { createEditorFile, deleteEditorFile, editorFileIcon } from "@/components/ade/editorApi";
+import { askConfirm } from "@/components/ade/NoticeDialog";
 import { usePersistedLayout } from "@/components/ade/persistLayout";
 
 const FileTab = lazy(() =>
@@ -67,6 +69,7 @@ function writeTabs(projectId: string, state: TabsState) {
 
 function FilesPage() {
   const { projectId } = Route.useParams();
+  const queryClient = useQueryClient();
   const groupRef = useRef<GroupImperativeHandle | null>(null);
   const { onLayoutChanged, hydrateGroup } = usePersistedLayout(LAYOUT_ID);
   const [tabs, setTabs] = useState<TabsState>(() => readTabs(projectId));
@@ -74,6 +77,7 @@ function FilesPage() {
     () => new Set(listDirtyDraftPaths(projectId, readTabs(projectId).open)),
   );
   const [revealFolder, setRevealFolder] = useState<string | null>(null);
+  const [entriesRevision, setEntriesRevision] = useState(0);
 
   useEffect(() => {
     hydrateGroup(groupRef, DEFAULT_LAYOUT);
@@ -111,9 +115,19 @@ function FilesPage() {
     setTabs((previous) => ({ ...previous, active: "home" }));
   }, []);
 
-  const closeFile = useCallback(
+  const refreshFileLists = useCallback(
+    async (path?: string) => {
+      await queryClient.invalidateQueries({ queryKey: ["entries", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["documents", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["document-previews", projectId] });
+      if (path) await queryClient.invalidateQueries({ queryKey: ["file", projectId, path] });
+      setEntriesRevision((value) => value + 1);
+    },
+    [projectId, queryClient],
+  );
+
+  const forgetFile = useCallback(
     (path: string) => {
-      if (dirtyPaths.has(path) && !window.confirm(`Discard unsaved changes in ${path}?`)) return;
       clearEditorDraft(projectId, path);
       setTabs((previous) => {
         const index = previous.open.indexOf(path);
@@ -131,7 +145,49 @@ function FilesPage() {
         return next;
       });
     },
-    [dirtyPaths, projectId],
+    [projectId],
+  );
+
+  const createFile = useCallback(
+    async (path: string) => {
+      const created = await createEditorFile(projectId, path);
+      await refreshFileLists(created.path);
+      openFile(created.path);
+    },
+    [openFile, projectId, refreshFileLists],
+  );
+
+  const removeFile = useCallback(
+    async (path: string) => {
+      const confirmed = await askConfirm({
+        title: `Delete ${path}?`,
+        description: dirtyPaths.has(path)
+          ? "Unsaved changes will be discarded. This cannot be undone."
+          : "This cannot be undone.",
+        confirmLabel: "Delete",
+      });
+      if (!confirmed) return false;
+      await deleteEditorFile(projectId, path);
+      forgetFile(path);
+      await refreshFileLists(path);
+      return true;
+    },
+    [dirtyPaths, forgetFile, projectId, refreshFileLists],
+  );
+
+  const closeFile = useCallback(
+    async (path: string) => {
+      if (
+        dirtyPaths.has(path) &&
+        !(await askConfirm({
+          title: `Discard unsaved changes in ${path}?`,
+          confirmLabel: "Discard",
+        }))
+      )
+        return;
+      forgetFile(path);
+    },
+    [dirtyPaths, forgetFile],
   );
 
   const onDirtyChange = useCallback((path: string, dirty: boolean) => {
@@ -169,8 +225,11 @@ function FilesPage() {
           dirtyPaths={dirtyPaths}
           homeActive={homeActive}
           revealFolder={revealFolder}
+          entriesRevision={entriesRevision}
           onOpenFile={openFile}
           onGoHome={goHome}
+          onCreateFile={createFile}
+          onRemoveFile={removeFile}
         />
       </Panel>
       <Separator id="seam-files-explorer" className="panel-seam" data-orientation="vertical" />
@@ -234,6 +293,8 @@ function FilesPage() {
               projectId={projectId}
               onOpenFile={openFile}
               onRevealFolder={setRevealFolder}
+              onCreateFile={createFile}
+              onRemoveFile={removeFile}
             />
           </div>
 

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Folder } from "lucide-react";
+import { ChevronRight, Folder, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { documentPreviewsQuery, documentsQuery, entriesQuery } from "@/lib/ade/queries";
@@ -13,6 +13,8 @@ type Props = {
   onOpenFile: (path: string) => void;
   /** Expand/reveal a folder path in the explorer tree when the user opens it here. */
   onRevealFolder?: (path: string) => void;
+  onCreateFile: (path: string) => Promise<void>;
+  onRemoveFile: (path: string) => Promise<boolean>;
 };
 
 function formatBytes(size: number) {
@@ -35,9 +37,19 @@ function errorText(reason: unknown) {
   return reason instanceof Error ? reason.message : String(reason);
 }
 
-export function FilesHome({ projectId, onOpenFile, onRevealFolder }: Props) {
+export function FilesHome({
+  projectId,
+  onOpenFile,
+  onRevealFolder,
+  onCreateFile,
+  onRemoveFile,
+}: Props) {
   const { state } = useAde();
   const [cwd, setCwd] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState("");
   const docsQuery = useQuery(documentsQuery(projectId));
   const documents = docsQuery.data ?? NO_DOCUMENTS;
   const previews = useQuery(documentPreviewsQuery(projectId, documents)).data ?? {};
@@ -45,7 +57,7 @@ export function FilesHome({ projectId, onOpenFile, onRevealFolder }: Props) {
   const entries = dirQuery.data ?? NO_ENTRIES;
   const loadingDocs = docsQuery.isPending;
   const loadingDir = dirQuery.isPending;
-  const error = errorText(docsQuery.error) || errorText(dirQuery.error);
+  const error = actionError || errorText(docsQuery.error) || errorText(dirQuery.error);
   const entrySizes = useMemo(() => {
     const sizes: Record<string, number> = {};
     for (const doc of documents) sizes[doc.path] = doc.size;
@@ -59,6 +71,32 @@ export function FilesHome({ projectId, onOpenFile, onRevealFolder }: Props) {
   const openFolder = (path: string) => {
     setCwd(path);
     onRevealFolder?.(path);
+  };
+
+  const submitCreate = async () => {
+    const name = fileName.trim().replace(/^\/+/, "");
+    if (!name || saving) return;
+    const path = cwd ? `${cwd}/${name}` : name;
+    setSaving(true);
+    try {
+      await onCreateFile(path);
+      setFileName("");
+      setCreating(false);
+      setActionError("");
+    } catch (reason) {
+      setActionError(errorText(reason));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeFile = async (path: string) => {
+    try {
+      const removed = await onRemoveFile(path);
+      if (removed) setActionError("");
+    } catch (reason) {
+      setActionError(errorText(reason));
+    }
   };
 
   const crumbs = cwd ? cwd.split("/").filter(Boolean) : [];
@@ -114,10 +152,22 @@ export function FilesHome({ projectId, onOpenFile, onRevealFolder }: Props) {
 
       <section className="mt-8">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="label-mono">Project files</h2>
+          <div className="flex items-center gap-1">
+            <h2 className="label-mono">Project files</h2>
+            <button
+              type="button"
+              aria-label="New file"
+              title="New file"
+              aria-expanded={creating}
+              onClick={() => setCreating((open) => !open)}
+              className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+            >
+              <Plus className="size-4" aria-hidden strokeWidth={2} />
+            </button>
+          </div>
           <nav
             aria-label="Folder path"
-            className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5 font-mono text-[11px] text-dim"
+            className="flex w-full min-w-0 flex-wrap items-center gap-0.5 font-mono text-[11px] text-dim"
           >
             <button
               type="button"
@@ -144,6 +194,37 @@ export function FilesHome({ projectId, onOpenFile, onRevealFolder }: Props) {
             })}
           </nav>
         </div>
+        {creating && (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitCreate();
+            }}
+            className="mt-3 flex items-center gap-2"
+          >
+            <input
+              aria-label="New file name"
+              placeholder="name.txt"
+              value={fileName}
+              autoFocus
+              onChange={(event) => setFileName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setCreating(false);
+                  setFileName("");
+                }
+              }}
+              className="min-w-0 flex-1 rounded-md border border-line bg-paper px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
+            />
+            <button
+              type="submit"
+              disabled={saving || !fileName.trim()}
+              className="shrink-0 font-mono text-[11px] text-ink hover:underline disabled:opacity-40"
+            >
+              Create
+            </button>
+          </form>
+        )}
         {loadingDir ? (
           <TextShimmer as="p" className="mt-3 text-[13px] text-dim">
             Loading files…
@@ -183,18 +264,29 @@ export function FilesHome({ projectId, onOpenFile, onRevealFolder }: Props) {
                       <span className="ml-auto shrink-0 text-[10px] text-dim">folder</span>
                     </button>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => onOpenFile(entry.path)}
-                      className="flex w-full items-center gap-2 px-1 py-2.5 text-left font-mono text-[12px] text-ink hover:bg-ink/5"
-                      title={entry.path}
-                    >
-                      <span className="shrink-0 text-dim">{editorFileIcon(entry.path)}</span>
-                      <span className="truncate">{entry.name}</span>
-                      <span className="ml-auto shrink-0 text-[10px] text-dim">
-                        {size != null ? formatBytes(size) : "file"}
-                      </span>
-                    </button>
+                    <div className="flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => onOpenFile(entry.path)}
+                        className="flex min-w-0 flex-1 items-center gap-2 px-1 py-2.5 text-left font-mono text-[12px] text-ink hover:bg-ink/5"
+                        title={entry.path}
+                      >
+                        <span className="shrink-0 text-dim">{editorFileIcon(entry.path)}</span>
+                        <span className="truncate">{entry.name}</span>
+                        <span className="ml-auto shrink-0 text-[10px] text-dim">
+                          {size != null ? formatBytes(size) : "file"}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete ${entry.path}`}
+                        title="Delete file"
+                        onClick={() => void removeFile(entry.path)}
+                        className="ed-tree-remove mr-1"
+                      >
+                        <Trash2 size={12} aria-hidden />
+                      </button>
+                    </div>
                   )}
                 </li>
               );

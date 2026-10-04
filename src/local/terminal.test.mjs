@@ -210,6 +210,45 @@ test("output can be drained after a fast shell exits", async () => {
   }
 });
 
+test("terminal output wait returns the shell echo without holding the full interval", async () => {
+  const opened = await call("/api/terminal", { projectId: "project-1", cols: 80, rows: 24 });
+  assert.equal(opened.status, 201);
+  const id = opened.body.id;
+  try {
+    let cursor = 0;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const read = await call(`/api/terminal/${id}?cursor=${cursor}&wait=200`);
+      assert.equal(read.status, 200);
+      cursor = read.body.cursor;
+      if (!read.body.data && !read.body.hasMore) break;
+    }
+    const started = Date.now();
+    const pending = call(`/api/terminal/${id}?cursor=${cursor}&wait=2000`);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal((await call(`/api/terminal/${id}/input`, { data: "x" })).status, 200);
+    const read = await pending;
+    const elapsed = Date.now() - started;
+    assert.equal(read.status, 200);
+    assert.ok(read.body.data.includes("x"), "the shell echo was delivered to the waiting read");
+    assert.ok(elapsed < 1000, `echo took ${elapsed}ms; the read held the full wait`);
+  } finally {
+    await call(`/api/terminal/${id}/close`, {});
+  }
+});
+
+test("terminal output wait rejects out-of-range values", async () => {
+  const opened = await call("/api/terminal", { projectId: "project-1", cols: 80, rows: 24 });
+  assert.equal(opened.status, 201);
+  const id = opened.body.id;
+  try {
+    assert.equal((await call(`/api/terminal/${id}?cursor=0&wait=-1`)).status, 400);
+    assert.equal((await call(`/api/terminal/${id}?cursor=0&wait=10001`)).status, 400);
+    assert.equal((await call(`/api/terminal/${id}?cursor=0&wait=nope`)).status, 400);
+  } finally {
+    await call(`/api/terminal/${id}/close`, {});
+  }
+});
+
 test("host terminal rejects non-loopback peers even when the API is otherwise exposed", async () => {
   const remote = await call(
     "/api/terminal",

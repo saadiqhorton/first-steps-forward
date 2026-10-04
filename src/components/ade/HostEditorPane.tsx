@@ -18,6 +18,7 @@ import {
   type EditorDocument,
   type EditorEntry,
 } from "./editorApi";
+import { askConfirm } from "./NoticeDialog";
 import "./host-editor.css";
 
 export type { EditorDocument, EditorEntry, EditorApiError } from "./editorApi";
@@ -197,9 +198,16 @@ export function HostEditorPane({ projectId, projectName, projectPath }: Props) {
     }
   };
 
-  const closeFile = (file: string) => {
+  const closeFile = async (file: string) => {
     if (saving && active === file) return;
-    if (isDirtyPath(file) && !window.confirm(`Discard unsaved changes in ${file}?`)) return;
+    if (
+      isDirtyPath(file) &&
+      !(await askConfirm({
+        title: `Discard unsaved changes in ${file}?`,
+        confirmLabel: "Discard",
+      }))
+    )
+      return;
     const index = openFiles.indexOf(file);
     const remaining = openFiles.filter((openFile) => openFile !== file);
     setDocs((previous) => {

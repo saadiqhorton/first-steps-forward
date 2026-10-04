@@ -1,6 +1,16 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, Search, X } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { entriesQuery } from "@/lib/ade/queries";
 import { editorFileIcon, searchEditorFiles, type EditorEntry } from "../editorApi";
 import "../host-editor.css";
@@ -11,8 +21,11 @@ type Props = {
   dirtyPaths: ReadonlySet<string>;
   homeActive: boolean;
   revealFolder: string | null;
+  entriesRevision: number;
   onOpenFile: (path: string) => void;
   onGoHome: () => void;
+  onCreateFile: (path: string) => Promise<void>;
+  onRemoveFile: (path: string) => Promise<boolean>;
 };
 
 export function FilesExplorer({
@@ -21,8 +34,11 @@ export function FilesExplorer({
   dirtyPaths,
   homeActive,
   revealFolder,
+  entriesRevision,
   onOpenFile,
   onGoHome,
+  onCreateFile,
+  onRemoveFile,
 }: Props) {
   const queryClient = useQueryClient();
   const cachedRoot = () => {
@@ -36,6 +52,11 @@ export function FilesExplorer({
   const [results, setResults] = useState<EditorEntry[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
 
   const loadDirectory = useCallback(
     async (directory: string) => {
@@ -67,6 +88,20 @@ export function FilesExplorer({
     setResults([]);
     void loadDirectory("");
   }, [loadDirectory]);
+
+  useEffect(() => {
+    if (!entriesRevision) return;
+    let cancelled = false;
+    void (async () => {
+      for (const folder of ["", ...expandedRef.current]) {
+        if (cancelled) return;
+        await loadDirectory(folder);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [entriesRevision, loadDirectory]);
 
   // Expand ancestor folders when Home (or elsewhere) asks to reveal a path.
   useEffect(() => {
@@ -121,6 +156,65 @@ export function FilesExplorer({
     };
   }, [projectId, query]);
 
+  const submitCreate = async () => {
+    const path = fileName.trim().replace(/^\/+/, "");
+    if (!path || saving) return;
+    setSaving(true);
+    try {
+      await onCreateFile(path);
+      setFileName("");
+      setCreating(false);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeFile = async (path: string) => {
+    try {
+      const removed = await onRemoveFile(path);
+      if (!removed) return;
+      setResults((previous) => previous.filter((entry) => entry.path !== path));
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  const fileRow = (entry: EditorEntry, depth: number, label = entry.name) => (
+    <div
+      key={entry.path}
+      role="treeitem"
+      aria-selected={activePath === entry.path}
+      className={`ed-tree-row ed-file ${activePath === entry.path ? "is-active" : ""}`}
+      style={{ paddingLeft: `${depth}px` }}
+    >
+      <button
+        type="button"
+        className="ed-tree-open"
+        onClick={() => onOpenFile(entry.path)}
+        title={entry.path}
+      >
+        {editorFileIcon(entry.path)}
+        <span>{label}</span>
+        {dirtyPaths.has(entry.path) && (
+          <span className="ed-dirty-dot" aria-label="Unsaved changes" />
+        )}
+      </button>
+      <button
+        type="button"
+        className="ed-tree-remove"
+        aria-label={`Delete ${entry.path}`}
+        title="Delete file"
+        onClick={() => void removeFile(entry.path)}
+      >
+        <Trash2 size={12} aria-hidden />
+      </button>
+    </div>
+  );
+
   const toggleFolder = (directory: string) => {
     const openingFolder = !expanded.has(directory);
     setExpanded((previous) => {
@@ -160,22 +254,7 @@ export function FilesExplorer({
           )}
         </div>
       ) : (
-        <button
-          type="button"
-          role="treeitem"
-          aria-selected={activePath === entry.path}
-          key={entry.path}
-          className={`ed-tree-row ed-file ${activePath === entry.path ? "is-active" : ""}`}
-          style={{ paddingLeft: `${25 + depth * 13}px` }}
-          onClick={() => onOpenFile(entry.path)}
-          title={entry.path}
-        >
-          {editorFileIcon(entry.path)}
-          <span>{entry.name}</span>
-          {dirtyPaths.has(entry.path) && (
-            <span className="ed-dirty-dot" aria-label="Unsaved changes" />
-          )}
-        </button>
+        fileRow(entry, 25 + depth * 13)
       ),
     );
   };
@@ -184,7 +263,49 @@ export function FilesExplorer({
     <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-line bg-panel">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-line px-3">
         <h2 className="label-mono">Explorer</h2>
+        <button
+          type="button"
+          aria-label="New file"
+          title="New file"
+          aria-expanded={creating}
+          onClick={() => setCreating((open) => !open)}
+          className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+        >
+          <Plus className="size-4" aria-hidden strokeWidth={2} />
+        </button>
       </div>
+      {creating && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitCreate();
+          }}
+          className="flex flex-wrap items-center gap-2 border-b border-line px-2 py-2"
+        >
+          <label className="ed-search w-full text-ink">
+            <input
+              aria-label="New file name"
+              placeholder="name.txt"
+              value={fileName}
+              autoFocus
+              onChange={(event) => setFileName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setCreating(false);
+                  setFileName("");
+                }
+              }}
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={saving || !fileName.trim()}
+            className="shrink-0 font-mono text-[11px] text-ink hover:underline disabled:opacity-40"
+          >
+            Create
+          </button>
+        </form>
+      )}
       <button
         type="button"
         onClick={onGoHome}
@@ -216,24 +337,7 @@ export function FilesExplorer({
             searching ? (
               <div className="ed-tree-empty">Searching…</div>
             ) : results.length ? (
-              results.map((entry) => (
-                <button
-                  type="button"
-                  role="treeitem"
-                  aria-selected={activePath === entry.path}
-                  key={entry.path}
-                  className={`ed-tree-row ed-file ${activePath === entry.path ? "is-active" : ""}`}
-                  style={{ paddingLeft: 12 }}
-                  onClick={() => onOpenFile(entry.path)}
-                  title={entry.path}
-                >
-                  {editorFileIcon(entry.path)}
-                  <span>{entry.path}</span>
-                  {dirtyPaths.has(entry.path) && (
-                    <span className="ed-dirty-dot" aria-label="Unsaved changes" />
-                  )}
-                </button>
-              ))
+              results.map((entry) => fileRow(entry, 12, entry.path))
             ) : (
               <div className="ed-tree-empty">No matching files</div>
             )

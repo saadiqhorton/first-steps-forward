@@ -7,6 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
 import { useAde } from "@/lib/ade/store";
 
 export function ProjectsMenu({
@@ -22,13 +23,12 @@ export function ProjectsMenu({
 
   const removeActive = async () => {
     if (!active) return;
-    if (
-      !window.confirm(
-        `Remove ${active.name} from ADE? This deletes only ADE's metadata (sessions, process entries) for it — the folder ${active.path} and every file in it are untouched.`,
-      )
-    ) {
-      return;
-    }
+    const confirmed = await askConfirm({
+      title: `Remove ${active.name} from ADE?`,
+      description: `This deletes only ADE's metadata (sessions, process entries) for it — the folder ${active.path} and every file in it are untouched.`,
+      confirmLabel: "Remove",
+    });
+    if (!confirmed) return;
     try {
       await removeProject(active.id);
       const next = state.projects.find((p) => p.id !== active.id);
@@ -42,7 +42,7 @@ export function ProjectsMenu({
         void navigate({ to: "/" });
       }
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : String(e));
+      void warnUser(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -93,7 +93,9 @@ export function ProjectsMenu({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="cursor-pointer text-[12px] text-danger focus:text-danger"
-              onSelect={() => void removeActive()}
+              onSelect={() => {
+                window.setTimeout(() => void removeActive(), 0);
+              }}
             >
               Remove {active.name}…
             </DropdownMenuItem>

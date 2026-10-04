@@ -14,6 +14,7 @@ import { useShell } from "@/components/ade/shellContext";
 import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 import { currentActivity } from "@/lib/ade/formatLogs.mjs";
 import { sessionTitle } from "@/lib/ade/sessionTitle";
+import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
 import { agentModels, timeAgo, uploadAttachment, useAde } from "@/lib/ade/store";
 
 function waitingPreview(prompt: string) {
@@ -190,16 +191,18 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   const runProjectChecks = async () => {
     if (checksBusy) return;
     if (
-      !window.confirm(
-        "Run this project's detected check scripts now? Project scripts can execute code and may access the network.",
-      )
+      !(await askConfirm({
+        title: "Run this project's detected check scripts now?",
+        description: "Project scripts can execute code and may access the network.",
+        confirmLabel: "Run",
+      }))
     )
       return;
     setChecksBusy(true);
     try {
       await runChecks(session.id);
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : String(e));
+      void warnUser(e instanceof Error ? e.message : String(e));
     } finally {
       setChecksBusy(false);
     }
@@ -221,7 +224,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
         )
         .catch((e) => {
           setSelection(prev);
-          window.alert(e instanceof Error ? e.message : String(e));
+          void warnUser(e instanceof Error ? e.message : String(e));
         });
       return;
     }
@@ -240,7 +243,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
       permission: next.permission,
     }).catch((e) => {
       setSelection(prev);
-      window.alert(e instanceof Error ? e.message : String(e));
+      void warnUser(e instanceof Error ? e.message : String(e));
     });
   };
 

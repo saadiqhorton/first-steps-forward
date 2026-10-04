@@ -19,6 +19,12 @@ type Output = {
   exitCode: number | null;
 };
 
+function nextPollDelay(output: Output, elapsed: number) {
+  // An empty body that comes back immediately means wait was ignored.
+  // Keep the old idle pace so that cannot spin the event loop.
+  return !output.data && !output.hasMore && elapsed < 30 ? 150 : 0;
+}
+
 const options = {
   fontFamily: '"IBM Plex Mono", monospace',
   fontSize: 12,
@@ -38,17 +44,17 @@ const options = {
   },
 };
 
-async function api<T>(url: string, data?: object): Promise<T> {
-  const response = await fetch(
-    url,
-    data === undefined
-      ? undefined
+async function api<T>(url: string, data?: object, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
+    ...(data === undefined
+      ? {}
       : {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(data),
-        },
-  );
+        }),
+    ...(signal ? { signal } : {}),
+  });
   const result = await response.json();
   if (!response.ok) {
     const error = new Error(result.error || "Terminal request failed.") as Error & {
@@ -139,6 +145,7 @@ export function HostTerminalPane({
     let cancelled = false;
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
     let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    const pollAbort = new AbortController();
     let currentId: string | null = null;
     let cursor = 0;
     setStatus("connecting");
@@ -179,29 +186,36 @@ export function HostTerminalPane({
 
     const poll = async () => {
       if (!currentId || cancelled) return;
+      const started = performance.now();
+      let output: Output;
       try {
-        const output = await api<Output>(`/api/terminal/${currentId}?cursor=${cursor}`);
-        if (cancelled) return;
-        if (output.truncated) instance.writeln("\r\n[Earlier output was discarded]\r");
-        if (output.data) instance.write(output.data);
-        cursor = output.cursor;
-        if (output.exited && !output.hasMore) {
-          const finishedId = currentId;
-          currentId = null;
-          sessionRef.current = null;
-          if (finishedId) void api(`/api/terminal/${finishedId}/close`, {}).catch(() => undefined);
-          setStatus("exited");
-          setMessage(`Shell exited with code ${output.exitCode ?? "unknown"}.`);
-          return;
-        }
+        // The shell echoes each key. Hold this read until that echo arrives
+        // instead of sampling on a timer, which is what made typing lag.
+        output = await api<Output>(
+          `/api/terminal/${currentId}?cursor=${cursor}&wait=1000`,
+          undefined,
+          pollAbort.signal,
+        );
       } catch (error) {
-        if (!cancelled) {
-          setStatus("error");
-          setMessage(error instanceof Error ? error.message : String(error));
-        }
+        if (cancelled || (error instanceof Error && error.name === "AbortError")) return;
+        setStatus("error");
+        setMessage(error instanceof Error ? error.message : String(error));
         return;
       }
-      pollTimer = setTimeout(poll, 150);
+      if (cancelled) return;
+      if (output.truncated) instance.writeln("\r\n[Earlier output was discarded]\r");
+      if (output.data) instance.write(output.data);
+      cursor = output.cursor;
+      if (output.exited && !output.hasMore) {
+        const finishedId = currentId;
+        currentId = null;
+        sessionRef.current = null;
+        if (finishedId) void api(`/api/terminal/${finishedId}/close`, {}).catch(() => undefined);
+        setStatus("exited");
+        setMessage(`Shell exited with code ${output.exitCode ?? "unknown"}.`);
+        return;
+      }
+      pollTimer = setTimeout(poll, nextPollDelay(output, performance.now() - started));
     };
 
     const opening = api<Session>("/api/terminal", {
@@ -233,6 +247,7 @@ export function HostTerminalPane({
 
     return () => {
       cancelled = true;
+      pollAbort.abort();
       if (openingRef.current === opening) openingRef.current = null;
       observer.disconnect();
       window.removeEventListener("pagehide", closeOnPageHide);

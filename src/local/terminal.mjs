@@ -37,22 +37,30 @@ export function openTerminal(cwd, size) {
     lastSeen: Date.now(),
     exited: false,
     exitCode: null,
+    waiters: [],
   };
   child.onData((data) => {
     session.output.push({ cursor: ++session.nextCursor, data });
     session.outputSize += data.length;
     while (session.outputSize > MAX_OUTPUT && session.output.length > 1)
       session.outputSize -= session.output.shift().data.length;
+    wake(session);
   });
   child.onExit(({ exitCode }) => {
     session.exited = true;
     session.exitCode = exitCode;
+    wake(session);
   });
   sessions.set(session.id, session);
   return { id: session.id, shell: shell.split(/[\\/]/).at(-1), cwd, pid: child.pid };
 }
 
-export function readTerminal(id, cursor = 0) {
+function wake(session) {
+  const waiters = session.waiters.splice(0);
+  for (const waiter of waiters) waiter();
+}
+
+function snapshotTerminal(id, cursor = 0) {
   const session = sessions.get(id);
   if (!session) return null;
   session.lastSeen = Date.now();
@@ -74,6 +82,33 @@ export function readTerminal(id, cursor = 0) {
     exited: session.exited,
     exitCode: session.exitCode,
   };
+}
+
+// xterm shows the PTY echo, not the keystroke. A waiting read returns as soon
+// as that echo arrives so typing is not stuck on the client's poll interval.
+export function readTerminal(id, cursor = 0, waitMs = 0, signal) {
+  const immediate = snapshotTerminal(id, cursor);
+  const ready = (value) => value && (value.data || value.truncated || value.exited);
+  if (!immediate || waitMs <= 0 || ready(immediate) || signal?.aborted)
+    return Promise.resolve(immediate);
+  const session = sessions.get(id);
+  if (!session) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      const index = session.waiters.indexOf(finish);
+      if (index >= 0) session.waiters.splice(index, 1);
+      resolve(sessions.has(id) ? snapshotTerminal(id, cursor) : null);
+    };
+    session.waiters.push(finish);
+    const timer = setTimeout(finish, waitMs);
+    signal?.addEventListener("abort", finish, { once: true });
+    if (!sessions.has(id) || ready(snapshotTerminal(id, cursor))) finish();
+  });
 }
 
 export function writeTerminal(id, data) {
@@ -135,6 +170,7 @@ export function closeTerminal(id) {
   const session = sessions.get(id);
   if (!session) return false;
   sessions.delete(id);
+  wake(session);
   const processIds = terminalProcessIds(session.child.pid);
   if (!session.exited) session.child.destroy();
   for (const pid of processIds) {

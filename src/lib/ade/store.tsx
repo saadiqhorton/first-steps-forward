@@ -21,6 +21,7 @@ import type {
   Session,
   Workflow,
 } from "./types";
+import { NoticeDialogHost, warnUser } from "@/components/ade/NoticeDialog";
 import { TokenGate } from "@/components/ade/TokenGate";
 
 const empty: AdeState = {
@@ -230,7 +231,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         if (inFlight) return inFlight;
         const call = request(`/api/sessions/${id}/complete`, "POST")
           .then(refresh)
-          .catch((e) => window.alert(e.message))
+          .catch((e) => void warnUser(e.message))
           .finally(() => completeCalls.current.delete(id));
         completeCalls.current.set(id, call);
         return call;
@@ -238,12 +239,12 @@ export function AdeProvider({ children }: { children: ReactNode }) {
       reopen: (id) => {
         void request(`/api/sessions/${id}/reopen`, "POST")
           .then(refresh)
-          .catch((e) => window.alert(e.message));
+          .catch((e) => void warnUser(e.message));
       },
       stop: (id) => {
         void request(`/api/sessions/${id}/stop`, "POST")
           .then(refresh)
-          .catch((e) => window.alert(e.message));
+          .catch((e) => void warnUser(e.message));
       },
       switchAgent: async (sessionId, agentId) => {
         await request(`/api/sessions/${sessionId}/switch-agent`, "POST", { agentId });
@@ -272,7 +273,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
       setDefaultAgent: (projectId, agentId) => {
         void request(`/api/projects/${projectId}/default-agent`, "POST", { agentId })
           .then(refresh)
-          .catch((e) => window.alert(e.message));
+          .catch((e) => void warnUser(e.message));
       },
       runChecks: async (id) => {
         await request(`/api/sessions/${id}/checks`, "POST");
@@ -284,6 +285,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={api}>
       {state.authRequired ? <TokenGate onUnlocked={() => refresh()} /> : children}
+      <NoticeDialogHost />
     </Ctx.Provider>
   );
 }
