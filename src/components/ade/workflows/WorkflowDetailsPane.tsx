@@ -1,7 +1,11 @@
-import { FilePenLine, Play, Sparkles, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Clipboard, FilePenLine, Play, Sparkles, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import type { Workflow } from "@/lib/ade/types";
+import { warnUser } from "@/components/ade/NoticeDialog";
 import { workflowAccent } from "./workflowFilters.mjs";
+
+const COPY_RESET_MS = 2000;
 
 function agentTagLabel(agentId?: Workflow["agentId"]) {
   if (!agentId) return "Any agent";
@@ -32,6 +36,22 @@ export function WorkflowDetailsPane({
   const accent = workflowAccent(workflow.id);
   const builtIn = !!workflow.builtIn;
   const permissionLabel = permissionTagLabel(workflow.permission);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), COPY_RESET_MS);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(workflow.prompt);
+      setCopied(true);
+    } catch {
+      void warnUser("Could not copy the prompt. Select the text and copy it manually.");
+    }
+  };
 
   return (
     <aside className="flex h-full min-h-0 w-full flex-col bg-panel">
@@ -71,7 +91,21 @@ export function WorkflowDetailsPane({
         ) : null}
 
         <div className="mt-5">
-          <div className="label-mono mb-2">Prompt</div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="label-mono">Prompt</span>
+            <button
+              type="button"
+              onClick={() => void copyPrompt()}
+              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px]"
+            >
+              {copied ? (
+                <Check className="size-3.5" aria-hidden />
+              ) : (
+                <Clipboard className="size-3.5" aria-hidden />
+              )}
+              {copied ? "Copied" : "Copy prompt"}
+            </button>
+          </div>
           <pre className="whitespace-pre-wrap rounded-md border border-line bg-paper p-3 font-mono text-[12px] leading-relaxed text-ink">
             {workflow.prompt}
           </pre>
