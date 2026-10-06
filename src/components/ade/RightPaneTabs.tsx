@@ -1,0 +1,103 @@
+import { type ReactNode, type Ref } from "react";
+import { Activity, FileDiff, Monitor, SquareTerminal, X, type LucideIcon } from "lucide-react";
+import { GlideIndicator } from "@/components/ade/motion";
+import { type RightTab } from "@/lib/ade/navigation";
+
+export const RIGHT_PANE_TABS: Array<{
+  id: "activity" | "diff" | "computer" | "terminal";
+  label: string;
+  Icon: LucideIcon;
+}> = [
+  { id: "activity", label: "Activity", Icon: Activity },
+  { id: "diff", label: "Diff", Icon: FileDiff },
+  { id: "computer", label: "Computer", Icon: Monitor },
+  { id: "terminal", label: "Terminal", Icon: SquareTerminal },
+];
+
+export function RightPaneTabs(props: {
+  tab: RightTab;
+  onSelect: (tab: "activity" | "diff" | "computer" | "terminal") => void;
+  terminalOpened: boolean;
+  terminalClosing: boolean;
+  onCloseTerminal: () => void;
+  activityTabRef?: Ref<HTMLButtonElement>;
+  actions?: ReactNode;
+}): ReactNode {
+  const {
+    tab,
+    onSelect,
+    terminalOpened,
+    terminalClosing,
+    onCloseTerminal,
+    activityTabRef,
+    actions,
+  } = props;
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Right panel"
+      className="@container/tabs min-w-0 flex h-9 shrink-0 items-center gap-0.5 border-b border-line bg-panel overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    >
+      {RIGHT_PANE_TABS.map(({ id, label, Icon }) => {
+        const isActive = tab === id;
+        const isTerminal = id === "terminal";
+        const ariaControls =
+          id === "computer"
+            ? "right-computer-panel"
+            : id === "terminal"
+              ? "right-terminal-panel"
+              : "right-session-panel";
+
+        return (
+          <div key={id} className="relative flex shrink-0 items-center">
+            <button
+              type="button"
+              role="tab"
+              id={`right-${id}-tab`}
+              ref={id === "activity" ? activityTabRef : undefined}
+              aria-selected={isActive}
+              aria-controls={ariaControls}
+              onClick={() => onSelect(id)}
+              title={label}
+              aria-label={isActive ? undefined : label}
+              className={`relative inline-flex h-9 shrink-0 items-center gap-1.5 px-2.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-amber ${isActive ? "text-ink" : "text-dim hover:text-ink"}`}
+            >
+              <Icon className="size-3.5 shrink-0" aria-hidden />
+              <span
+                className={
+                  isActive
+                    ? "inline whitespace-nowrap"
+                    : "hidden whitespace-nowrap @[26rem]/tabs:inline"
+                }
+              >
+                {label}
+              </span>
+              {isActive && (
+                <GlideIndicator
+                  id="right-pane-tab"
+                  className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-amber"
+                />
+              )}
+            </button>
+            {isTerminal && terminalOpened && (
+              <button
+                type="button"
+                aria-label="Close terminal tab"
+                title="Close terminal"
+                onClick={onCloseTerminal}
+                disabled={terminalClosing}
+                className="mx-1 grid h-5 w-5 place-items-center rounded text-dim hover:bg-ink/10 hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:opacity-40 shrink-0"
+              >
+                <X className="size-3" aria-hidden />
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {actions && (
+        <div className="ml-auto flex shrink-0 items-center gap-0.5 pr-1.5 pl-1">{actions}</div>
+      )}
+    </div>
+  );
+}

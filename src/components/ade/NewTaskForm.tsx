@@ -175,8 +175,8 @@ export function NewTaskForm({
 
   if (!state.projects.length || !project)
     return (
-      <main className="min-w-0 flex-1 px-7 py-8">
-        <h1 className="heading-display text-3xl">Add a project first</h1>
+      <main className="min-w-0 flex-1 px-4 py-6 @lg:px-7 @lg:py-8 @container">
+        <h1 className="heading-display text-2xl @lg:text-3xl">Add a project first</h1>
         <Link to="/projects/add" className="btn-amber mt-5 inline-block px-4 py-2 text-sm">
           + Add project
         </Link>
@@ -266,9 +266,9 @@ export function NewTaskForm({
   const preview = workflows.slice(0, 3);
 
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-      <div className="flex w-full max-w-3xl flex-col px-7 py-10">
-        <h1 className="heading-display text-3xl">What are you working on?</h1>
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto @container">
+      <div className="flex w-full max-w-3xl flex-col px-4 py-6 @lg:px-7 @lg:py-10">
+        <h1 className="heading-display text-2xl @lg:text-3xl">What are you working on?</h1>
         <p className="mt-3 text-[13px] text-dim">Describe a change and an agent gets started.</p>
         {preview.length > 0 && (
           <div className="mt-8">

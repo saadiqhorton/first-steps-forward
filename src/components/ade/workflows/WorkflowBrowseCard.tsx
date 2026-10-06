@@ -21,7 +21,7 @@ export function WorkflowBrowseCard({
       type="button"
       onClick={() => onSelect(workflow)}
       aria-pressed={selected}
-      className={`card-panel group relative flex flex-col items-start gap-2 p-4 text-left transition ${
+      className={`card-panel group relative flex flex-col items-start gap-2 p-4 pb-11 text-left transition ${
         selected ? "border-amber ring-1 ring-amber/40" : "hover:border-ink/25"
       }`}
     >
@@ -29,7 +29,9 @@ export function WorkflowBrowseCard({
         <WorkflowIcon className="size-4 text-ink/70" />
       </div>
       <div className="min-w-0 w-full pr-8">
-        <h3 className="text-[14px] font-medium leading-snug">{workflow.name}</h3>
+        <h3 className="min-w-0 break-words text-[14px] font-medium leading-snug">
+          {workflow.name}
+        </h3>
         {workflow.description ? (
           <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-dim">
             {workflow.description}

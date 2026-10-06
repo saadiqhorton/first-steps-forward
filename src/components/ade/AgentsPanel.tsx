@@ -9,15 +9,15 @@ export function AgentsPanel() {
   const [signing, setSigning] = useState<Agent | null>(null);
   return (
     <>
-      <div className="px-7 pt-6 pb-4">
-        <h1 className="heading-display text-3xl">Agents & accounts</h1>
+      <div className="px-4 @lg:px-7 pt-6 pb-4 @container">
+        <h1 className="heading-display text-2xl @lg:text-3xl">Agents & accounts</h1>
         <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-dim">
           ADE starts the installed agent CLIs in the selected project. Sign-in belongs to each agent
           and stays in its user-level credential store. ADE never stores provider tokens. Model
           usage may have provider costs.
         </p>
       </div>
-      <div className="space-y-3 px-7 pb-8">
+      <div className="space-y-3 px-4 @lg:px-7 pb-8">
         {state.agents.map((a, i) => (
           <section
             key={a.id}

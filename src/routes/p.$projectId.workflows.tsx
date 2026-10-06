@@ -130,10 +130,10 @@ function WorkflowsPage() {
   const emptyResults = !loading && filtered.length === 0;
 
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+    <main className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden @container/workflows">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-7 py-8">
-          <h1 className="heading-display text-3xl">Workflows</h1>
+        <div className="mx-auto w-full max-w-4xl px-4 py-6 @lg/workflows:px-7 @lg/workflows:py-8">
+          <h1 className="heading-display text-2xl @lg/workflows:text-3xl">Workflows</h1>
           <p className="mt-3 text-[13px] text-dim">
             Reusable prompts that prefill the start screen. They never auto-send.
           </p>
@@ -182,7 +182,7 @@ function WorkflowsPage() {
             {grouped.builtIn.length > 0 ? (
               <section>
                 <h2 className="label-mono">Built-in</h2>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="mt-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]">
                   <AnimatePresence initial={false} mode="popLayout">
                     {grouped.builtIn.map((workflow) => (
                       <MotionItem key={workflow.id} className="grid">
@@ -205,7 +205,7 @@ function WorkflowsPage() {
             {grouped.yours.length > 0 ? (
               <section>
                 <h2 className="label-mono">Yours</h2>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="mt-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]">
                   <AnimatePresence initial={false} mode="popLayout">
                     {grouped.yours.map((workflow) => (
                       <MotionItem key={workflow.id} className="grid">
@@ -245,7 +245,7 @@ function WorkflowsPage() {
         {showPane ? (
           <MotionPane
             key="workflow-pane"
-            className="flex h-full min-h-0 w-full min-w-[20rem] max-w-md shrink-0 flex-col border-l border-line bg-panel"
+            className="absolute inset-y-0 right-0 z-10 w-full max-w-md shadow-xl flex h-full min-h-0 shrink-0 flex-col border-l border-line bg-panel @3xl/workflows:static @3xl/workflows:z-auto @3xl/workflows:w-[min(28rem,45%)] @3xl/workflows:max-w-none @3xl/workflows:shadow-none"
           >
             {editor !== null ? (
               <div className="min-h-0 flex-1 overflow-y-auto p-4">

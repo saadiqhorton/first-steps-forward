@@ -5,24 +5,37 @@ import {
   Separator,
   type GroupImperativeHandle,
   type Layout,
+  type PanelImperativeHandle,
 } from "react-resizable-panels";
-import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import {
+  PanelBottom,
+  PanelBottomClose,
+  PanelBottomOpen,
+  PanelRight,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ComponentType,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import type { RightTab } from "@/lib/ade/navigation";
 import { useAde } from "@/lib/ade/store";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { AgentsDialog } from "./AgentsDialog";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
-import { GlideIndicator, SectionFade } from "./motion";
+import { SectionFade } from "./motion";
 import { AgentComputerPane } from "./AgentComputerPane";
 import { RightPaneHostContext } from "./rightPaneContext";
+import { RightPaneTabs } from "./RightPaneTabs";
+import { RightRail } from "./RightRail";
+import type { ComputerTone, RightDock } from "./rightPaneTypes";
 import { SectionTabs } from "./SectionTabs";
 import { ShellContext, type ShellDialog } from "./shellContext";
 import { migrateDefaultLayout } from "./migrateDefaultLayout.mjs";
@@ -30,6 +43,8 @@ import { TopBar } from "./TopBar";
 import { usePersistedLayout } from "./persistLayout";
 
 const SHELL_LAYOUT_ID = "ade-shell-layout-v2";
+const BOTTOM_LAYOUT_ID = "ade-shell-layout-bottom";
+const DOCK_PREF_KEY = "ade-right-dock";
 const SHELL_PANEL_IDS = ["shell-main", "shell-right"] as const;
 type ShellPanelId = (typeof SHELL_PANEL_IDS)[number];
 
@@ -37,19 +52,20 @@ type ShellPanelId = (typeof SHELL_PANEL_IDS)[number];
 // Persisted user layouts still take precedence when the group hydrates.
 const DEFAULT_LAYOUT: Layout = { "shell-main": 56, "shell-right": 44 };
 const PREVIOUS_DEFAULT_LAYOUT: Layout = { "shell-main": 74, "shell-right": 26 };
-const RIGHT_MIN_PX = 240;
-/** Allow Diff/Activity to grow until main hits its 40% floor. */
+const DEFAULT_LAYOUT_BOTTOM: Layout = { "shell-main": 62, "shell-right": 38 };
+const RIGHT_MIN_PX = 300;
+/** Allow Diff/Activity to grow until main hits its floor. */
 const RIGHT_MAX_PCT = 60;
-const RIGHT_REST_PCT = 44;
+const BOTTOM_MIN_PX = 180;
+const BOTTOM_MAX_PCT = 70;
+const COLLAPSED_SIZE = "40px";
 
 const RIGHT_TABS: RightTab[] = ["activity", "diff", "computer", "terminal"];
 
 /**
  * Tracks whether we're on the `lg` breakpoint or wider. Renders `true` on the
  * server and during the first client render (so hydration matches), then
- * reconciles in an effect. The desktop `Group` sets `display: flex` inline
- * itself, so we can't hide it with the Tailwind `hidden` class — we choose
- * which layout to mount instead to avoid rendering the sidebar twice.
+ * reconciles in an effect.
  */
 function useIsDesktop(): boolean {
   const [isDesktop, setIsDesktop] = useState(true);
@@ -103,10 +119,40 @@ function PanelSash({
             ) : (
               <PanelRightClose className="size-3.5" aria-hidden strokeWidth={2.5} />
             )
+          ) : side === "bottom" ? (
+            collapsed ? (
+              <PanelBottomOpen className="size-3.5" aria-hidden strokeWidth={2.5} />
+            ) : (
+              <PanelBottomClose className="size-3.5" aria-hidden strokeWidth={2.5} />
+            )
           ) : null}
         </button>
       )}
     </Separator>
+  );
+}
+
+/**
+ * Appends a persistent DOM node (owned by `ShellInner`) into this Panel and
+ * removes it on cleanup. The node itself is never destroyed, so whatever
+ * React portals into it (terminal, computer viewer) survives being moved
+ * between the side-docked and bottom-docked Panels.
+ */
+function PaneSlot({ el }: { el: HTMLDivElement }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.appendChild(el);
+    return () => {
+      if (el.parentNode === container) container.removeChild(el);
+    };
+  }, [el]);
+  return (
+    <div
+      ref={containerRef}
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+    />
   );
 }
 
@@ -149,9 +195,8 @@ function ShellInner({
   const [terminalOpened, setTerminalOpened] = useState(false);
   const [terminalClosing, setTerminalClosing] = useState(false);
   const [terminalCloseError, setTerminalCloseError] = useState("");
+  const [computerTone, setComputerTone] = useState<ComputerTone>("idle");
   const activityTabRef = useRef<HTMLButtonElement | null>(null);
-  const diffTabRef = useRef<HTMLButtonElement | null>(null);
-  const computerTabRef = useRef<HTMLButtonElement | null>(null);
   const sessionPaneActive = rightTab === "activity" || rightTab === "diff";
   const terminalCloseRef = useRef<(() => Promise<void>) | null>(null);
   const listToggleRef = useRef<(() => void) | null>(null);
@@ -189,6 +234,15 @@ function ShellInner({
     } finally {
       setTerminalClosing(false);
     }
+  };
+
+  // Selecting a tab opens the terminal session on first use; otherwise just switches.
+  const selectTab = (tab: "activity" | "diff" | "computer" | "terminal") => {
+    if (tab === "terminal" && !terminalOpened) {
+      openTerminal();
+      return;
+    }
+    setRightTab(tab);
   };
 
   const [HostTerminal, setHostTerminal] = useState<ComponentType<{
@@ -245,42 +299,84 @@ function ShellInner({
   }, [search, searchStr, pathname, router]);
 
   const isDesktop = useIsDesktop();
-  const groupRef = useRef<GroupImperativeHandle | null>(null);
-  const { onLayoutChanged: onShellLayoutChanged, hydrateGroup } =
-    usePersistedLayout(SHELL_LAYOUT_ID);
-  useEffect(() => {
-    // Move only the exact prior default. Resized and collapsed user layouts are
-    // preserved, while returning users get the approved split desk once.
-    try {
-      const stored = window.localStorage.getItem(SHELL_LAYOUT_ID);
-      const migrated = migrateDefaultLayout(stored, PREVIOUS_DEFAULT_LAYOUT, DEFAULT_LAYOUT);
-      if (migrated !== stored && migrated) window.localStorage.setItem(SHELL_LAYOUT_ID, migrated);
-    } catch {
-      // The layout hook falls back to DEFAULT_LAYOUT when storage is unavailable.
-    }
-    hydrateGroup(groupRef, DEFAULT_LAYOUT);
-  }, [hydrateGroup]);
 
-  const togglePanel = useCallback((panelId: ShellPanelId, restPct: number) => {
-    const current = groupRef.current?.getLayout();
-    if (!current) return;
-    const cur = current[panelId] ?? 0;
-    const curMain = current["shell-main"] ?? 0;
-    if (cur < 1) {
-      const others = SHELL_PANEL_IDS.filter((id) => id !== panelId && id !== "shell-main").reduce(
-        (sum, id) => sum + (current[id] ?? 0),
-        0,
-      );
-      groupRef.current?.setLayout({
-        ...current,
-        [panelId]: restPct,
-        "shell-main": Math.max(0, 100 - restPct - others),
-      });
-    } else {
-      groupRef.current?.setLayout({ ...current, [panelId]: 0, "shell-main": curMain + cur });
+  // Dock preference: "side" or "bottom", persisted in localStorage. Below the
+  // desktop breakpoint the pane is always bottom-docked, regardless of pref.
+  const [dockPref, setDockPref] = useState<RightDock>("side");
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(DOCK_PREF_KEY);
+      if (stored === "side" || stored === "bottom") setDockPref(stored);
+    } catch {
+      // Private mode etc. — keep the default.
     }
   }, []);
-  const toggleRight = useCallback(() => togglePanel("shell-right", RIGHT_REST_PCT), [togglePanel]);
+  const setDock = useCallback((next: RightDock) => {
+    setDockPref(next);
+    try {
+      window.localStorage.setItem(DOCK_PREF_KEY, next);
+    } catch {
+      // Storage may be full or disabled; the in-memory pref still applies.
+    }
+  }, []);
+  const effectiveDock: RightDock = isDesktop ? dockPref : "bottom";
+
+  const sideGroupRef = useRef<GroupImperativeHandle | null>(null);
+  const bottomGroupRef = useRef<GroupImperativeHandle | null>(null);
+  const sidePanelRef = useRef<PanelImperativeHandle | null>(null);
+  const bottomPanelRef = useRef<PanelImperativeHandle | null>(null);
+  const activePanelRef = effectiveDock === "side" ? sidePanelRef : bottomPanelRef;
+
+  const { onLayoutChanged: onSideLayoutChanged, hydrateGroup: hydrateSideGroup } =
+    usePersistedLayout(SHELL_LAYOUT_ID);
+  const { onLayoutChanged: onBottomLayoutChanged, hydrateGroup: hydrateBottomGroup } =
+    usePersistedLayout(BOTTOM_LAYOUT_ID);
+
+  // Hydrate whichever Group is current, on mount and whenever the dock changes
+  // (switching dock swaps in a differently-keyed Group, which remounts fresh).
+  useEffect(() => {
+    if (effectiveDock === "side") {
+      // Move only the exact prior default. Resized and collapsed user layouts
+      // are preserved, while returning users get the approved split desk once.
+      try {
+        const stored = window.localStorage.getItem(SHELL_LAYOUT_ID);
+        const migrated = migrateDefaultLayout(stored, PREVIOUS_DEFAULT_LAYOUT, DEFAULT_LAYOUT);
+        if (migrated !== stored && migrated) window.localStorage.setItem(SHELL_LAYOUT_ID, migrated);
+      } catch {
+        // The layout hook falls back to DEFAULT_LAYOUT when storage is unavailable.
+      }
+      hydrateSideGroup(sideGroupRef, DEFAULT_LAYOUT);
+    } else {
+      hydrateBottomGroup(bottomGroupRef, DEFAULT_LAYOUT_BOTTOM);
+    }
+    // Old layouts could persist the right panel at 0 (fully hidden). With the
+    // new rail, 0 — or anything short of the min size — must resolve to a
+    // clean collapse instead of an under-sized panel. Measuring needs a frame.
+    const panelRef = effectiveDock === "side" ? sidePanelRef : bottomPanelRef;
+    const minPx = effectiveDock === "side" ? RIGHT_MIN_PX : BOTTOM_MIN_PX;
+    requestAnimationFrame(() => {
+      const size = panelRef.current?.getSize();
+      if (size && size.inPixels < minPx) panelRef.current?.collapse();
+    });
+  }, [effectiveDock, hydrateSideGroup, hydrateBottomGroup]);
+
+  const [collapsedRight, setCollapsedRight] = useState(false);
+
+  const expandRight = useCallback(() => {
+    activePanelRef.current?.expand();
+  }, [activePanelRef]);
+  const collapseRight = useCallback(() => {
+    activePanelRef.current?.collapse();
+  }, [activePanelRef]);
+  const toggleRight = useCallback(() => {
+    if (activePanelRef.current?.isCollapsed()) activePanelRef.current.expand();
+    else activePanelRef.current?.collapse();
+  }, [activePanelRef]);
+  // Rail tabs both select and expand.
+  const railSelect = (tab: "activity" | "diff" | "computer" | "terminal") => {
+    selectTab(tab);
+    expandRight();
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -308,10 +404,6 @@ function ShellInner({
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate, toggleList, toggleRight, activeProject?.id]);
 
-  const [collapsedRight, setCollapsedRight] = useState(false);
-  const onRightResize = (size: { asPercentage: number }) =>
-    setCollapsedRight((c) => (c === (size.asPercentage === 0) ? c : size.asPercentage === 0));
-
   const shellContextValue = {
     rightTab,
     setRightTab,
@@ -320,98 +412,73 @@ function ShellInner({
     registerListToggle,
   };
 
-  const tabClass = (active: boolean) =>
-    `relative px-3 text-sm transition-colors ${active ? "text-ink" : "text-dim hover:text-ink"}`;
-  const tabIndicator = (
-    <GlideIndicator
-      id="right-pane-tab"
-      className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-amber"
-    />
+  // One persistent element, created on the client after mount, that holds the
+  // whole pane body. It's portaled into and then DOM-reparented (via
+  // `PaneSlot`) into whichever Panel is current, so switching dock or
+  // collapsing never unmounts the terminal session or the computer viewer
+  // inside it. Starting from `null` keeps the first client render identical
+  // to the server's (which never has a `document`), avoiding a hydration
+  // mismatch; the element appears a tick later, once mounted.
+  const [paneEl, setPaneEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = document.createElement("div");
+    el.className = "flex h-full min-h-0 min-w-0 flex-col overflow-hidden";
+    setPaneEl(el);
+  }, []);
+
+  const dockToggle = isDesktop && (
+    <button
+      type="button"
+      aria-label={dockPref === "side" ? "Dock to bottom" : "Dock to side"}
+      title={dockPref === "side" ? "Dock to bottom" : "Dock to side"}
+      onClick={() => setDock(dockPref === "side" ? "bottom" : "side")}
+      className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+    >
+      {dockPref === "side" ? (
+        <PanelBottom className="size-3.5" aria-hidden />
+      ) : (
+        <PanelRight className="size-3.5" aria-hidden />
+      )}
+    </button>
+  );
+  const collapseButton = (
+    <button
+      type="button"
+      aria-label="Collapse right panel"
+      title="Collapse right panel"
+      onClick={collapseRight}
+      className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+    >
+      {effectiveDock === "side" ? (
+        <PanelRightClose className="size-3.5" aria-hidden />
+      ) : (
+        <PanelBottomClose className="size-3.5" aria-hidden />
+      )}
+    </button>
   );
 
-  const rightPane = (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
-      <div
-        role="tablist"
-        aria-label="Right panel"
-        className="flex h-9 shrink-0 border-b border-line bg-panel px-2"
-      >
-        <button
-          type="button"
-          role="tab"
-          id="right-activity-tab"
-          ref={activityTabRef}
-          aria-selected={rightTab === "activity"}
-          aria-controls="right-session-panel"
-          onClick={() => setRightTab("activity")}
-          className={tabClass(rightTab === "activity")}
-        >
-          Activity
-          {rightTab === "activity" && tabIndicator}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="right-diff-tab"
-          ref={diffTabRef}
-          aria-selected={rightTab === "diff"}
-          aria-controls="right-session-panel"
-          onClick={() => setRightTab("diff")}
-          className={tabClass(rightTab === "diff")}
-        >
-          Diff
-          {rightTab === "diff" && tabIndicator}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="right-computer-tab"
-          ref={computerTabRef}
-          aria-selected={rightTab === "computer"}
-          aria-controls="right-computer-panel"
-          onClick={() => setRightTab("computer")}
-          className={tabClass(rightTab === "computer")}
-        >
-          Computer
-          {rightTab === "computer" && tabIndicator}
-        </button>
-        {terminalOpened ? (
-          <div
-            className={`relative flex items-center transition-colors ${rightTab === "terminal" ? "text-ink" : "text-dim"}`}
-          >
-            {rightTab === "terminal" && tabIndicator}
-            <button
-              type="button"
-              role="tab"
-              id="right-terminal-tab"
-              aria-selected={rightTab === "terminal"}
-              aria-controls="right-terminal-panel"
-              onClick={() => setRightTab("terminal")}
-              className="h-full pl-3 pr-1 text-sm hover:text-ink"
-            >
-              Terminal
-            </button>
-            <button
-              type="button"
-              aria-label="Close terminal tab"
-              title="Close terminal"
-              onClick={() => void closeTerminal()}
-              disabled={terminalClosing}
-              className="mx-1 grid size-5 place-items-center rounded text-dim hover:bg-ink/10 hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:opacity-40"
-            >
-              <X className="size-3" aria-hidden />
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={openTerminal}
-            aria-label="Open terminal"
-            className="ml-auto flex items-center gap-1.5 px-2 text-sm text-dim hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
-          >
-            <span aria-hidden>›_</span> Terminal
-          </button>
-        )}
+  const paneContent = (
+    <>
+      {/* Actions live outside RightPaneTabs' own overflow-x-auto tab row so
+          the collapse button can never scroll out of view on a narrow pane.
+          RightPaneTabs nests its `role=tablist` row a level deep (inside a
+          `@container` div), so `[&_[role=tablist]]:border-b-0` reaches in and
+          drops its inner border — this wrapper's border is the only one drawn. */}
+      <div className="flex h-9 shrink-0 items-stretch border-b border-line bg-panel [&_[role=tablist]]:border-b-0">
+        <div className="min-w-0 flex-1">
+          <RightPaneTabs
+            tab={rightTab}
+            onSelect={selectTab}
+            terminalOpened={terminalOpened}
+            terminalClosing={terminalClosing}
+            onCloseTerminal={closeTerminal}
+            activityTabRef={activityTabRef}
+          />
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5 pr-1.5 pl-1">
+          {dockToggle}
+          {collapseButton}
+        </div>
       </div>
 
       <div
@@ -434,7 +501,12 @@ function ShellInner({
         className={`min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto ${rightTab === "computer" ? "flex" : "hidden"}`}
       >
         {activeProject ? (
-          <AgentComputerPane project={activeProject} session={activeSession} />
+          <AgentComputerPane
+            project={activeProject}
+            session={activeSession}
+            dock={effectiveDock}
+            onToneChange={setComputerTone}
+          />
         ) : (
           <div className="grid flex-1 place-items-center px-5 text-center font-mono text-[11px] text-dim">
             Add a project to give agents a computer.
@@ -475,6 +547,34 @@ function ShellInner({
           )}
         </div>
       )}
+    </>
+  );
+
+  const railOrientation = effectiveDock === "side" ? "vertical" : "horizontal";
+  const rail = (
+    <RightRail
+      orientation={railOrientation}
+      tab={rightTab}
+      computerTone={computerTone}
+      onSelect={railSelect}
+      onExpand={expandRight}
+      dock={effectiveDock}
+    />
+  );
+
+  // Collapsed panel body: the portaled pane content stays mounted (just
+  // hidden) so the terminal/computer never reconnect, while the rail — kept
+  // outside the portal so it renders directly in the Panel — takes its place.
+  const panelBody = (
+    <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+      <div
+        className={
+          collapsedRight ? "hidden" : "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+        }
+      >
+        {paneEl && <PaneSlot el={paneEl} />}
+      </div>
+      {collapsedRight && rail}
     </div>
   );
 
@@ -485,13 +585,14 @@ function ShellInner({
         <SectionTabs />
 
         <div className="flex min-h-0 flex-1">
-          {isDesktop ? (
+          {effectiveDock === "side" ? (
             <Group
+              key={SHELL_LAYOUT_ID}
               id={SHELL_LAYOUT_ID}
-              groupRef={groupRef}
+              groupRef={sideGroupRef}
               orientation="horizontal"
               defaultLayout={DEFAULT_LAYOUT}
-              onLayoutChanged={onShellLayoutChanged}
+              onLayoutChanged={onSideLayoutChanged}
               style={{ flex: 1, minHeight: 0 }}
               className="min-h-0 min-w-0 flex-1"
             >
@@ -499,7 +600,7 @@ function ShellInner({
                 id="shell-main"
                 className="min-w-0 overflow-hidden"
                 style={{ minWidth: 0, overflow: "hidden" }}
-                minSize="40%"
+                minSize="480px"
               >
                 <SectionFade
                   sectionKey={sectionKey}
@@ -519,24 +620,65 @@ function ShellInner({
               />
               <Panel
                 id="shell-right"
+                panelRef={sidePanelRef}
                 className="min-w-0 overflow-hidden"
                 collapsible
-                collapsedSize={0}
+                collapsedSize={COLLAPSED_SIZE}
                 minSize={`${RIGHT_MIN_PX}px`}
                 maxSize={`${RIGHT_MAX_PCT}%`}
                 style={{ minWidth: 0, overflow: "hidden" }}
-                onResize={onRightResize}
+                onResize={() => setCollapsedRight(sidePanelRef.current?.isCollapsed() ?? false)}
               >
-                {rightPane}
+                {panelBody}
               </Panel>
             </Group>
           ) : (
-            <SectionFade
-              sectionKey={sectionKey}
-              className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+            <Group
+              key={BOTTOM_LAYOUT_ID}
+              id={BOTTOM_LAYOUT_ID}
+              groupRef={bottomGroupRef}
+              orientation="vertical"
+              defaultLayout={DEFAULT_LAYOUT_BOTTOM}
+              onLayoutChanged={onBottomLayoutChanged}
+              style={{ flex: 1, minHeight: 0 }}
+              className="min-h-0 min-w-0 flex-1"
             >
-              {children}
-            </SectionFade>
+              <Panel
+                id="shell-main"
+                className="min-w-0 overflow-hidden"
+                style={{ minWidth: 0, overflow: "hidden" }}
+                minSize="200px"
+              >
+                <SectionFade
+                  sectionKey={sectionKey}
+                  className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                >
+                  {children}
+                </SectionFade>
+              </Panel>
+              <PanelSash
+                orientation="horizontal"
+                panelId="shell-right"
+                side="bottom"
+                onToggleCollapsed={toggleRight}
+                collapsed={collapsedRight}
+                collapseLabel="Hide bottom panel"
+                expandLabel="Show bottom panel"
+              />
+              <Panel
+                id="shell-right"
+                panelRef={bottomPanelRef}
+                className="min-w-0 overflow-hidden"
+                collapsible
+                collapsedSize={COLLAPSED_SIZE}
+                minSize={`${BOTTOM_MIN_PX}px`}
+                maxSize={`${BOTTOM_MAX_PCT}%`}
+                style={{ minWidth: 0, overflow: "hidden" }}
+                onResize={() => setCollapsedRight(bottomPanelRef.current?.isCollapsed() ?? false)}
+              >
+                {panelBody}
+              </Panel>
+            </Group>
           )}
         </div>
 
@@ -549,6 +691,7 @@ function ShellInner({
           onOpenChange={(open) => setDialog(open ? "agents" : null)}
         />
       </div>
+      {paneEl && createPortal(paneContent, paneEl)}
     </ShellContext.Provider>
   );
 }

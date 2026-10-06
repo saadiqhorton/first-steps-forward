@@ -240,7 +240,7 @@ export function Composer({
 
   return (
     <div
-      className="card-panel relative overflow-visible has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-amber/35 has-[textarea:focus-visible]:ring-inset"
+      className="card-panel relative overflow-visible has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-amber/35 has-[textarea:focus-visible]:ring-inset @container/composer"
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}
@@ -293,7 +293,7 @@ export function Composer({
             </div>,
             document.body,
           )}
-        <div className="flex items-center gap-2 px-3 pb-3">
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-3">
           <button
             ref={chipRef}
             type="button"
@@ -310,13 +310,13 @@ export function Composer({
             </span>
           </button>
           <span
-            className="flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-dim"
+            className="@max-[22rem]/composer:hidden flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-dim"
             title={`Branch ${branch}`}
           >
             <GitBranch className="size-3.5 shrink-0" aria-hidden />
             <span className="truncate">{branch || "unknown"}</span>
           </span>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <ComposerAttachButton
               disabled={disabled}
               atLimit={drafts.length >= MAX_FILES}

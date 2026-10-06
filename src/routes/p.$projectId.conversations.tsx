@@ -4,6 +4,7 @@ import {
   Group,
   Panel,
   Separator,
+  usePanelRef,
   type GroupImperativeHandle,
   type Layout,
 } from "react-resizable-panels";
@@ -57,12 +58,17 @@ const LIST_REST_PCT = 24;
 const DEFAULT_LAYOUT: Layout = { [LIST_PANEL]: 24, [MAIN_PANEL]: 76 };
 const LIST_MIN_PX = 240;
 const LIST_MAX_PX = 440;
+const AUTO_COLLAPSE_THRESHOLD = 720;
 
 function ConversationsLayout() {
   const { registerListToggle } = useShell();
   const groupRef = useRef<GroupImperativeHandle | null>(null);
+  const groupElementRef = useRef<HTMLDivElement | null>(null);
+  const listPanelRef = usePanelRef();
   const { onLayoutChanged, hydrateGroup } = usePersistedLayout(LAYOUT_ID);
   const [collapsedList, setCollapsedList] = useState(false);
+  const autoCollapsedRef = useRef(false);
+  const prevNarrowRef = useRef(false);
 
   useEffect(() => {
     hydrateGroup(groupRef, DEFAULT_LAYOUT);
@@ -86,6 +92,8 @@ function ConversationsLayout() {
         [MAIN_PANEL]: curMain + cur,
       });
     }
+    // User manually toggled, reset auto-collapse tracking
+    autoCollapsedRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -96,50 +104,86 @@ function ConversationsLayout() {
   const onListResize = (size: { asPercentage: number }) =>
     setCollapsedList((c) => (c === (size.asPercentage === 0) ? c : size.asPercentage === 0));
 
+  // Auto-collapse when Group width crosses threshold
+  useEffect(() => {
+    const groupElement = groupElementRef.current;
+    if (!groupElement) return;
+
+    const observer = new ResizeObserver(() => {
+      const width = groupElement.offsetWidth;
+      const isNarrow = width < AUTO_COLLAPSE_THRESHOLD;
+
+      // Detect crossing from wide to narrow
+      if (isNarrow && !prevNarrowRef.current) {
+        // Crossing into narrow: collapse if not already collapsed
+        if (!listPanelRef.current?.isCollapsed()) {
+          listPanelRef.current?.collapse();
+          autoCollapsedRef.current = true;
+        }
+      }
+      // Detect crossing from narrow to wide
+      else if (!isNarrow && prevNarrowRef.current && autoCollapsedRef.current) {
+        // Re-expand only if we auto-collapsed it
+        if (listPanelRef.current?.isCollapsed()) {
+          listPanelRef.current?.expand();
+          autoCollapsedRef.current = false;
+        }
+      }
+
+      prevNarrowRef.current = isNarrow;
+    });
+
+    observer.observe(groupElement);
+    return () => observer.disconnect();
+  }, [listPanelRef]);
+
   return (
-    <Group
-      id={LAYOUT_ID}
-      groupRef={groupRef}
-      orientation="horizontal"
-      defaultLayout={DEFAULT_LAYOUT}
-      onLayoutChanged={onLayoutChanged}
-      style={{ flex: 1, minHeight: 0, minWidth: 0 }}
-      className="min-h-0 min-w-0 flex-1"
-    >
-      <Panel
-        id={LIST_PANEL}
-        className="min-w-0 overflow-hidden"
-        collapsible
-        collapsedSize={0}
-        minSize={`${LIST_MIN_PX}px`}
-        maxSize={`${LIST_MAX_PX}px`}
-        style={{ minWidth: 0, overflow: "hidden" }}
-        onResize={onListResize}
+    <div ref={groupElementRef} style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
+      <Group
+        id={LAYOUT_ID}
+        groupRef={groupRef}
+        orientation="horizontal"
+        defaultLayout={DEFAULT_LAYOUT}
+        onLayoutChanged={onLayoutChanged}
+        style={{ flex: 1, minHeight: 0, minWidth: 0 }}
+        className="min-h-0 min-w-0 flex-1"
       >
-        <ConversationList />
-      </Panel>
-      <Separator id="seam-conversations-list" className="panel-seam" data-orientation="vertical">
-        <button
-          type="button"
-          aria-label={collapsedList ? "Show conversation list" : "Hide conversation list"}
-          title={collapsedList ? "Show conversation list" : "Hide conversation list"}
-          aria-expanded={!collapsedList}
-          aria-controls={LIST_PANEL}
-          onClick={toggleList}
-          className="panel-collapse-handle"
-          data-always-visible={collapsedList ? "true" : undefined}
-        />
-      </Separator>
-      <Panel
-        id={MAIN_PANEL}
-        className="min-w-0 overflow-hidden"
-        style={{ minWidth: 0, overflow: "hidden" }}
-        minSize="30%"
-      >
-        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <Outlet />
-        </div>
-      </Panel>
-    </Group>
+        <Panel
+          panelRef={listPanelRef}
+          id={LIST_PANEL}
+          className="min-w-0 overflow-hidden"
+          collapsible
+          collapsedSize={0}
+          minSize={`${LIST_MIN_PX}px`}
+          maxSize={`${LIST_MAX_PX}px`}
+          style={{ minWidth: 0, overflow: "hidden" }}
+          onResize={onListResize}
+        >
+          <ConversationList />
+        </Panel>
+        <Separator id="seam-conversations-list" className="panel-seam" data-orientation="vertical">
+          <button
+            type="button"
+            aria-label={collapsedList ? "Show conversation list" : "Hide conversation list"}
+            title={collapsedList ? "Show conversation list" : "Hide conversation list"}
+            aria-expanded={!collapsedList}
+            aria-controls={LIST_PANEL}
+            onClick={toggleList}
+            className="panel-collapse-handle"
+            data-always-visible={collapsedList ? "true" : undefined}
+          />
+        </Separator>
+        <Panel
+          id={MAIN_PANEL}
+          className="min-w-0 overflow-hidden"
+          style={{ minWidth: 0, overflow: "hidden" }}
+          minSize="360px"
+        >
+          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <Outlet />
+          </div>
+        </Panel>
+      </Group>
+    </div>
   );
 }

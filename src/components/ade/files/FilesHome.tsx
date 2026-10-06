@@ -102,7 +102,7 @@ export function FilesHome({
   const crumbs = cwd ? cwd.split("/").filter(Boolean) : [];
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 @lg:px-6 @container">
       {error && (
         <p role="alert" className="mb-4 font-mono text-[12px] text-amber">
           {error}
@@ -118,7 +118,7 @@ export function FilesHome({
         ) : documents.length === 0 ? (
           <p className="mt-3 text-[13px] text-dim">No Markdown documents in this project yet.</p>
         ) : (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]">
             {documents.map((doc, i) => {
               const preview = previews[doc.path] ?? "";
               return (

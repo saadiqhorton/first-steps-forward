@@ -121,7 +121,7 @@ export function WorkflowEditor({
         />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(12rem,1fr))]">
         <div>
           <label className="label-mono block" htmlFor="wf-agent">
             Agent (optional)

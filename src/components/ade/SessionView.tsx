@@ -249,8 +249,8 @@ export function SessionView({ sessionId }: { sessionId: string }) {
 
   return (
     <>
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="shrink-0 border-b border-line px-7 pt-5 pb-4">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col @container">
+        <header className="shrink-0 border-b border-line px-4 @lg:px-7 pt-5 pb-4">
           <div className="flex items-center gap-2">
             <Link
               to="/p/$projectId/conversations"
@@ -312,7 +312,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
         <div
           ref={scrollRef}
           onScroll={onMessagesScroll}
-          className="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-7 py-5"
+          className="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-4 @lg:px-7 py-5"
         >
           <AnimatePresence initial={false}>
             {threadMessages.map((m) => (
@@ -403,7 +403,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           <div ref={endRef} />
         </div>
 
-        <div className="shrink-0 border-t border-line px-7 py-4">
+        <div className="shrink-0 border-t border-line px-4 @lg:px-7 py-4">
           {(session.queuedMessages?.length ?? 0) > 0 && (
             <div className="mb-3 rounded-md border border-line bg-paper px-3 py-2.5">
               <p className="text-[12px] font-medium text-ink">Waiting to send</p>
