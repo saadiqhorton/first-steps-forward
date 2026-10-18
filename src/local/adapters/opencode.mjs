@@ -36,8 +36,10 @@ export const opencode = {
         "run",
         "--format",
         "json",
-        "--dir",
-        projectPath,
+        // `opencode run` has no --dir/--cwd option (only `attach` does), and
+        // unknown flags make it print usage and exit 1 without sending the
+        // prompt. The project is selected by the process working directory,
+        // which ADE sets when it spawns the CLI.
         // `-m provider/model` also works with `--session` continuation.
         ...(model ? ["-m", model] : []),
         ...(effort ? ["--variant", effort] : []),

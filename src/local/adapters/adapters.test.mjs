@@ -64,7 +64,7 @@ test("Pi adapter restricts shell tools and parses actual JSON events", () => {
   const event = pi.parse(
     JSON.stringify({
       type: "message_end",
-      message: { content: [{ type: "text", text: "Pi response" }] },
+      message: { role: "assistant", content: [{ type: "text", text: "Pi response" }] },
     }),
   );
   assert.equal(event.text, "Pi response");
@@ -130,6 +130,91 @@ test("Pi reports only auth-check READY providers, not credential or catalog coun
     else process.env.USERPROFILE = previousProfile;
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("Pi reports only assistant messages, never the echoed user prompt", () => {
+  // Pi emits message_end for its system preamble and the user's prompt too.
+  // Treating those as agent output duplicated the prompt as a fake reply.
+  assert.deepEqual(
+    pi.parse(
+      JSON.stringify({
+        type: "message_end",
+        message: { role: "user", content: [{ type: "text", text: "My question" }] },
+      }),
+    ),
+    {},
+  );
+  assert.deepEqual(
+    pi.parse(
+      JSON.stringify({
+        type: "message_end",
+        message: { role: "system", content: [{ type: "text", text: "Preamble" }] },
+      }),
+    ),
+    {},
+  );
+  assert.deepEqual(
+    pi.parse(
+      JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "hmm" },
+            { type: "text", text: "Answer" },
+          ],
+        },
+      }),
+    ),
+    { text: "Answer" },
+  );
+});
+
+test("Pi surfaces a settled failed turn so ADE does not report success", () => {
+  // Print mode's JSON path exits 0 even when every retry failed, so the
+  // adapter's agent_end event is the only failure signal.
+  const failed = pi.parse(
+    JSON.stringify({
+      type: "agent_end",
+      willRetry: false,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "go" }] },
+        {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: "500 status code (no body)",
+        },
+      ],
+    }),
+  );
+  assert.equal(failed.text, undefined);
+  assert.equal(failed.failsTurn, true);
+  assert.equal(failed.error, "500 status code (no body)");
+
+  // A retryable agent_end is not the end of the turn.
+  const retrying = pi.parse(
+    JSON.stringify({
+      type: "agent_end",
+      willRetry: true,
+      messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: "boom" }],
+    }),
+  );
+  assert.equal(retrying.failsTurn, undefined);
+
+  // A settled successful turn reports nothing at all.
+  assert.deepEqual(
+    pi.parse(
+      JSON.stringify({
+        type: "agent_end",
+        willRetry: false,
+        messages: [
+          { role: "assistant", content: [{ type: "text", text: "OK" }], stopReason: "stop" },
+        ],
+      }),
+    ),
+    {},
+  );
 });
 
 test("Pi does not label a configured but non-READY provider as signed in", async () => {
@@ -263,14 +348,10 @@ test("adapters omit effort/speed/permission flags when options are absent (byte-
     "workspace-write",
     "Go",
   ]);
-  assert.deepEqual(opencode.command(base)[1], [
-    "run",
-    "--format",
-    "json",
-    "--dir",
-    "/tmp/project",
-    "Go",
-  ]);
+  // `opencode run` has no --dir option (only `attach` does); the project comes
+  // from the process cwd ADE spawns the CLI in. Passing --dir made the CLI
+  // print usage and exit 1 without ever sending the prompt.
+  assert.deepEqual(opencode.command(base)[1], ["run", "--format", "json", "Go"]);
   assert.deepEqual(pi.command({ ...base, dataDir: "/tmp/ade", providers: ["opencode-go"] })[1], [
     "-p",
     "--mode",
@@ -344,8 +425,6 @@ test("OpenCode maps effort to --variant and plan to --agent plan", () => {
     "run",
     "--format",
     "json",
-    "--dir",
-    "/tmp/project",
     "-m",
     "opencode/ling",
     "--variant",

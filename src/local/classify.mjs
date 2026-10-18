@@ -9,7 +9,7 @@ const QUOTA =
 
 // The CLI rejected the selected model id itself.
 const MODEL_NOT_FOUND =
-  /Model not found:|"name"\s*:\s*"ModelNotFoundError"|\b(?:unknown|invalid|unsupported|not found|unavailable|does not exist)\s+model\b|\bmodel\b[^\n]{0,60}\b(?:not found|not available|unavailable|unsupported|invalid|unknown|does not exist|is not available)\b|no models matching|\bmodel\b[^\n]{0,60}\b(?:not authorized|no access|not on your (?:plan|tier)|plan (?:does not|doesn't) include|requires (?:a |an )?(?:higher|different) (?:plan|tier))\b|model_availability/i;
+  /Model not found:|"name"\s*:\s*"ModelNotFoundError"|\b(?:Provider)?ModelNotFoundError\b|\b(?:unknown|invalid|unsupported|not found|unavailable|does not exist)\s+model\b|\bmodel\b[^\n]{0,60}\b(?:not found|not available|unavailable|unsupported|invalid|unknown|does not exist|is not available)\b|no models matching|\bmodel\b[^\n]{0,60}\b(?:not authorized|no access|not on your (?:plan|tier)|plan (?:does not|doesn't) include|requires (?:a |an )?(?:higher|different) (?:plan|tier))\b|model_availability/i;
 
 // The provider behind the agent could not be used at all (nothing to do with
 // the chosen model id).

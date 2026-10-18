@@ -685,6 +685,7 @@ function parseAgentOutput(session, line) {
   const update = adapters[session.agentId].parse(line, session);
   if (update.text) addMessage(session, "agent", update.text);
   if (update.error) addMessage(session, "system", update.error);
+  return update;
 }
 /**
  * Classify one agent turn from its own output slice only: history before
@@ -960,6 +961,12 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
   children.set(session.id, child);
   let stdoutBuffer = "",
     stderrBuffer = "";
+  // Some CLIs (Pi print mode) exit 0 even when the provider rejected the
+  // turn, so an adapter's own settled-event failure is recorded here for
+  // this turn only. sawAgentText tracks real output from this turn's own
+  // events, which message positions cannot (consecutive agent messages merge).
+  let turnFailed = false;
+  let sawAgentText = false;
   const consume = (data, isErr = false) => {
     if (isErr) {
       const text = data.toString();
@@ -981,7 +988,12 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
     stdoutBuffer += data.toString();
     const lines = stdoutBuffer.split(/\r?\n/);
     stdoutBuffer = lines.pop() ?? "";
-    for (const line of lines) if (line.trim()) parseAgentOutput(session, line);
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const update = parseAgentOutput(session, line);
+      if (update?.failsTurn) turnFailed = true;
+      if (update?.text?.trim()) sawAgentText = true;
+    }
   };
   child.stdout.on("data", (d) => consume(d));
   child.stderr.on("data", (d) => consume(d, true));
@@ -993,7 +1005,11 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
     await save();
   });
   child.on("close", async (code, signal) => {
-    if (stdoutBuffer.trim()) parseAgentOutput(session, stdoutBuffer);
+    if (stdoutBuffer.trim()) {
+      const update = parseAgentOutput(session, stdoutBuffer);
+      if (update?.failsTurn) turnFailed = true;
+      if (update?.text?.trim()) sawAgentText = true;
+    }
     children.delete(session.id);
     delete session.pid;
     // Refresh the live diff on every exit path and flag files that were
@@ -1033,22 +1049,28 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
       // to the immediately spawned turn, not to drained queue entries.
       return runAgent(session, queue.join("\n\n"), true, []);
     }
-    session.status = code === 0 ? "ready" : "blocked";
+    // A CLI that exits 0 after its own settled error (Pi print mode) still
+    // failed: never report "ready to review" for a turn that produced nothing.
+    // OpenCode does the same thing on an uncaught provider/model rejection —
+    // exit 0, empty stdout, stack trace on stderr — so a zero exit with no
+    // agent output and real error wording is also a failed turn.
+    let effectiveCode = turnFailed && code === 0 ? 1 : code;
+    let turnSlice = classifyTurnFailure(session, effectiveCode, turnLogStart, turnMessageStart);
+    if (effectiveCode === 0 && !sawAgentText && classifyFailure(turnSlice.texts) !== "process") {
+      effectiveCode = 1;
+      turnSlice = classifyTurnFailure(session, effectiveCode, turnLogStart, turnMessageStart);
+    }
+    session.status = effectiveCode === 0 ? "ready" : "blocked";
     // Classify from this turn's own output slice only; a successful turn
     // also clears any stale failureKind left by an earlier failure.
-    const { kind: failureKind, texts: failureTexts } = classifyTurnFailure(
-      session,
-      code,
-      turnLogStart,
-      turnMessageStart,
-    );
-    if (code === 0 && !session.messages.some((m) => m.role === "agent"))
+    const { kind: failureKind, texts: failureTexts } = turnSlice;
+    if (effectiveCode === 0 && !sawAgentText)
       addMessage(
         session,
         "system",
         "The CLI exited successfully but did not emit a parseable response. Review the Logs tab for its raw output.",
       );
-    if (code !== 0) {
+    if (effectiveCode !== 0) {
       const modelNote = session.model ? ` The selected model was "${session.model}".` : "";
       const suggestion = failureKind === "model_not_found" ? modelSuggestion(failureTexts) : "";
       addMessage(
@@ -1064,7 +1086,9 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
                 ? `The agent's sign-in or credentials were refused — no work was performed. Re-authenticate with this CLI's own sign-in flow from the Agents page, then retry. Nothing in the project was changed; your task is kept.`
                 : failureKind === "context_overflow"
                   ? `The conversation exceeded the model's context window and the turn stopped. Shorten or summarize your follow-up (or start a fresh session for a narrower task); a larger-context model may also help — use Change model. Any project edits made before the failure were left in place.`
-                  : `Agent process exited with ${signal ?? `code ${code}`}. Existing project changes were left in place. See Logs for details.`,
+                  : turnFailed
+                    ? `The agent reported that this turn failed and produced no result; nothing was applied. The CLI's own error is shown above and in Logs. Your task is kept — retry, switch model, or switch agents.`
+                    : `Agent process exited with ${signal ?? `code ${code}`}. Existing project changes were left in place. See Logs for details.`,
       );
     }
     session.summary = session.messages.filter((m) => m.role === "agent").at(-1)?.text;
@@ -2156,9 +2180,16 @@ async function handle(req, res) {
       s.agentId = target.id;
       s.agentSessionId = undefined;
       // Model ids belong to one CLI's catalog; never transplant them across
-      // agents. The new CLI starts on its own configured default.
+      // agents. The new CLI starts on its own configured default. Effort and
+      // speed are model-scoped too: a level valid for the old CLI (e.g. Pi's
+      // "high") can map to a flag the new CLI rejects outright, so they go
+      // with the model rather than breaking the next turn.
       const droppedModel = s.model;
+      const droppedEffort = s.effort;
+      const droppedSpeed = s.speed;
       delete s.model;
+      delete s.effort;
+      delete s.speed;
       const carriesConversation = false;
       addMessage(
         s,
@@ -2166,7 +2197,10 @@ async function handle(req, res) {
         `Switched from ${from?.name ?? s.agentId} to ${target.name}. The new CLI starts fresh: repository state, the task, and the current diff carry over, but the prior conversation does not.` +
           (droppedModel
             ? ` The selected model (${droppedModel}) belonged to the previous agent and was dropped; ${target.name} starts with its own configured default.`
-            : " The model resets to the new agent's configured default."),
+            : " The model resets to the new agent's configured default.") +
+          (droppedEffort || droppedSpeed
+            ? ` Its model settings (${[droppedEffort && `effort ${droppedEffort}`, droppedSpeed && `speed ${droppedSpeed}`].filter(Boolean).join(", ")}) were cleared too, because they are tied to the previous agent's model.`
+            : ""),
       );
       addLog(
         s,

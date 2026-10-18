@@ -33,6 +33,11 @@ test("model rejections are classified as model_not_found", () => {
     "model_not_found",
   );
   assert.equal(classifyFailure(['No models matching "claude-x"']), "model_not_found");
+  // OpenCode's uncaught provider rejection prints a bare error class name.
+  assert.equal(
+    classifyFailure(["ProviderModelNotFoundError: ProviderModelNotFoundError"]),
+    "model_not_found",
+  );
   assert.equal(
     classifyFailure(["model gpt-6-astra is not on your plan, upgrade to continue"]),
     "model_not_found",

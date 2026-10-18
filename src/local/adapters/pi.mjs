@@ -111,12 +111,25 @@ export const pi = {
       return { text: line };
     }
     if (event.type === "text" && event.text) return { text: event.text };
-    if (event.type === "message_end" && event.message?.content) {
-      const text = event.message.content
+    // Pi emits message_end for the system preamble and the user's own prompt
+    // too. Only assistant messages are agent output — reporting the prompt
+    // back would fabricate a reply the agent never produced.
+    if (event.type === "message_end" && event.message?.role === "assistant") {
+      const text = (event.message.content ?? [])
         .filter?.((part) => part.type === "text")
         .map((part) => part.text)
         .join("");
       return { text: text ?? "" };
+    }
+    // Print mode's JSON path always exits 0, even when every retry failed and
+    // the run produced no answer. `agent_end` with willRetry === false is the
+    // settled point, so the last assistant message's error is the only
+    // failure signal ADE gets. failsTurn makes the turn end blocked instead
+    // of "ready to review" with no work done.
+    if (event.type === "agent_end" && event.willRetry === false) {
+      const last = [...(event.messages ?? [])].reverse().find((m) => m.role === "assistant");
+      if (last?.stopReason === "error")
+        return { error: last.errorMessage || "Pi reported an error and stopped.", failsTurn: true };
     }
     return {};
   },
