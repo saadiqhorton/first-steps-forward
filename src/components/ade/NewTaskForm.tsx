@@ -33,7 +33,7 @@ export function NewTaskForm({
     speed: "",
     permission: initialSelection?.permission ?? "build",
   }));
-  const [composerText, setComposerText] = useState(initialText);
+  const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
   const [criteria, setCriteria] = useState("");
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [signing, setSigning] = useState<Agent | null>(null);
@@ -52,7 +52,7 @@ export function NewTaskForm({
   const dirty = !!project && project.uncommittedFiles.length > 0;
 
   const applyWorkflow = useCallback((workflow: Workflow) => {
-    setComposerText(workflow.prompt);
+    setSelectedWorkflow(workflow);
     setSelection((prev) => ({
       ...prev,
       ...(workflow.agentId ? { agentId: workflow.agentId } : {}),
@@ -305,7 +305,9 @@ export function NewTaskForm({
             sending={busy}
             error={error}
             onSend={onSend}
-            {...(composerText !== undefined ? { initialText: composerText } : {})}
+            {...(initialText !== undefined ? { initialText } : {})}
+            workflow={selectedWorkflow}
+            onWorkflowRemove={() => setSelectedWorkflow(null)}
             extra={extra}
           />
         </div>

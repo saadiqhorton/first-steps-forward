@@ -10,8 +10,9 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp, GitBranch } from "lucide-react";
+import { ArrowUp, GitBranch, Sparkles, X } from "lucide-react";
 import { AgentPicker, agentChipLabel, type AgentSelection } from "@/components/ade/AgentPicker";
+import type { Workflow } from "@/lib/ade/types";
 import {
   ComposerAttachButton,
   ComposerAttachments,
@@ -49,6 +50,8 @@ export function Composer({
   extra,
   agentLocked,
   running = false,
+  workflow,
+  onWorkflowRemove,
 }: {
   mode: "new" | "follow-up";
   selection: AgentSelection;
@@ -64,6 +67,9 @@ export function Composer({
   agentLocked?: string;
   /** While a turn is running, the composer offers wait-and-send and send-now. */
   running?: boolean;
+  /** A selected workflow renders as a token; its prompt is sent with the draft. */
+  workflow?: Workflow | null;
+  onWorkflowRemove?: () => void;
 }) {
   const { state } = useAde();
   const [text, setText] = useState(initialText ?? "");
@@ -82,7 +88,8 @@ export function Composer({
   const chip = agentChipLabel(selection, state.agents);
   const labelId = useId();
   const disabled = !!disabledReason || sending;
-  const canSend = !!text.trim() && !disabled;
+  const workflowPrompt = workflow?.prompt.trim() ?? "";
+  const canSend = (!!text.trim() || !!workflowPrompt) && !disabled;
 
   useEffect(() => {
     if (initialText === undefined) return;
@@ -217,12 +224,13 @@ export function Composer({
   };
 
   const send = async (delivery?: "now" | "later") => {
-    const outgoing = text.trim();
+    const outgoing = [workflowPrompt, text.trim()].filter(Boolean).join("\n\n");
     if (!outgoing || disabled) return;
     const files = drafts.map((d) => d.file);
     const clear = await onSend(outgoing, files, running ? (delivery ?? "later") : undefined);
     if (clear) {
       setText("");
+      onWorkflowRemove?.();
       setDrafts((prev) => {
         for (const draft of prev) {
           if (draft.previewUrl) URL.revokeObjectURL(draft.previewUrl);
@@ -248,8 +256,37 @@ export function Composer({
     >
       {extra ? <div className="border-b border-line px-4 py-3">{extra}</div> : null}
       <label htmlFor={labelId} className="sr-only">
-        {mode === "new" ? "Describe a change" : "Follow-up message"}
+        {mode === "new"
+          ? workflow
+            ? "Add instructions for the selected workflow"
+            : "Describe a change"
+          : "Follow-up message"}
       </label>
+      {workflow ? (
+        <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
+          <span
+            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber/40 bg-amber/10 py-1 pr-1 pl-2.5 text-[12px] text-ink"
+            title={workflow.description || workflow.name}
+          >
+            <Sparkles className="size-3.5 shrink-0 text-amber-deep" aria-hidden />
+            <span className="min-w-0 truncate font-medium">{workflow.name}</span>
+            <span className="hidden shrink-0 font-mono text-[10px] tracking-[0.08em] text-dim uppercase @[18rem]/composer:inline">
+              Workflow
+            </span>
+            {onWorkflowRemove ? (
+              <button
+                type="button"
+                onClick={onWorkflowRemove}
+                disabled={disabled}
+                aria-label={`Remove ${workflow.name} workflow`}
+                className="grid size-6 shrink-0 place-items-center rounded-full text-dim transition hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/40 disabled:opacity-60"
+              >
+                <X className="size-3.5" aria-hidden />
+              </button>
+            ) : null}
+          </span>
+        </div>
+      ) : null}
       <textarea
         id={labelId}
         ref={textareaRef}
@@ -258,9 +295,12 @@ export function Composer({
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         disabled={!!disabledReason}
-        placeholder={disabledReason ?? placeholder}
+        placeholder={
+          disabledReason ??
+          (workflow ? "Add instructions for this workflow (optional)…" : placeholder)
+        }
         rows={mode === "new" ? 3 : 1}
-        className="block w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed placeholder:text-dim/70 focus-visible:outline-none disabled:opacity-60"
+        className={`block w-full resize-none bg-transparent px-4 ${workflow ? "pt-2" : "pt-3"} pb-2 text-[15px] leading-relaxed placeholder:text-dim/70 focus-visible:outline-none disabled:opacity-60`}
       />
       <ComposerAttachments
         drafts={drafts}

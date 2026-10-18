@@ -135,7 +135,8 @@ function WorkflowsPage() {
         <div className="mx-auto w-full max-w-4xl px-4 py-6 @lg/workflows:px-7 @lg/workflows:py-8">
           <h1 className="heading-display text-2xl @lg/workflows:text-3xl">Workflows</h1>
           <p className="mt-3 text-[13px] text-dim">
-            Reusable prompts that prefill the start screen. They never auto-send.
+            Reusable prompts that attach to the start screen composer as a token. They never
+            auto-send.
           </p>
 
           {error ? (
