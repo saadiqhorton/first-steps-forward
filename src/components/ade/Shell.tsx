@@ -32,6 +32,8 @@ import { AgentsDialog } from "./AgentsDialog";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { SectionFade } from "./motion";
 import { AgentComputerPane } from "./AgentComputerPane";
+import { BrowserMiniPlayer } from "./browser/BrowserMiniPlayer";
+import { BrowserPreviewProvider } from "./browser/BrowserPreviewProvider";
 import { RightPaneHostContext } from "./rightPaneContext";
 import { RightPaneTabs } from "./RightPaneTabs";
 import { RightRail } from "./RightRail";
@@ -158,9 +160,14 @@ function PaneSlot({ el }: { el: HTMLDivElement }) {
 
 export function Shell({ children }: { children: ReactNode }) {
   const [rightHost, setRightHost] = useState<HTMLDivElement | null>(null);
+  const { state } = useAde();
+  const activeProject =
+    state.projects.find((project) => project.id === state.activeProjectId) ?? state.projects[0];
   return (
     <RightPaneHostContext.Provider value={rightHost}>
-      <ShellInner onRightHostChange={setRightHost}>{children}</ShellInner>
+      <BrowserPreviewProvider projectId={activeProject?.id ?? null}>
+        <ShellInner onRightHostChange={setRightHost}>{children}</ShellInner>
+      </BrowserPreviewProvider>
     </RightPaneHostContext.Provider>
   );
 }
@@ -691,6 +698,7 @@ function ShellInner({
           onOpenChange={(open) => setDialog(open ? "agents" : null)}
         />
       </div>
+      <BrowserMiniPlayer dock={effectiveDock} />
       {paneEl && createPortal(paneContent, paneEl)}
     </ShellContext.Provider>
   );

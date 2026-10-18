@@ -58,6 +58,69 @@ test("computer tools post the action to ADE and return the screenshot as an imag
   assert.deepEqual(result.content[1], { type: "image", data: "SU1H", mimeType: "image/png" });
 });
 
+test("browser tools route to the browser action endpoint and return screenshots as images", async () => {
+  const names = TOOLS.map((t) => t.name);
+  for (const name of ["browser_status", "browser_snapshot", "browser_click", "browser_screenshot"])
+    assert.ok(names.includes(name), `${name} is advertised`);
+  const calls = [];
+  const callTool = createToolCaller({
+    api: "http://127.0.0.1:3000",
+    projectId: "p1",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      if (calls.length === 1) return { status: 200, json: async () => ({ text: "Clicked e5." }) };
+      return {
+        status: 200,
+        json: async () => ({ text: "Screenshot.", image: "QjE=", mimeType: "image/png" }),
+      };
+    },
+  });
+  const clicked = await callTool("browser_click", { ref: "e5" });
+  assert.equal(calls[0].url, "http://127.0.0.1:3000/api/projects/p1/browser/action");
+  assert.deepEqual(calls[0].body, { action: "click", ref: "e5" });
+  assert.equal(clicked.content[0].text, "Clicked e5.");
+  const shot = await callTool("browser_screenshot");
+  assert.deepEqual(calls[1].body, { action: "screenshot" });
+  assert.deepEqual(shot.content[1], { type: "image", data: "QjE=", mimeType: "image/png" });
+});
+
+test("browser_scroll applies its default deltaY when no delta is given", async () => {
+  const bodies = [];
+  const callTool = createToolCaller({
+    api: "http://127.0.0.1:3000",
+    projectId: "p1",
+    fetchImpl: async (url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return { status: 200, json: async () => ({ text: "Scrolled." }) };
+    },
+  });
+  await callTool("browser_scroll", {});
+  await callTool("browser_scroll", { deltaX: 0 });
+  assert.equal(bodies[0].deltaY, 400);
+  assert.equal(bodies[1].deltaY, undefined);
+});
+
+test("a human-controlled computer or browser returns a readable tool error", async () => {
+  const message =
+    "The user has taken control of the agent computer. Wait for them to hand control back, then try again.";
+  const callTool = createToolCaller({
+    api: "http://127.0.0.1:3000",
+    projectId: "p1",
+    fetchImpl: fakeFetch({
+      "POST /api/projects/p1/browser/action": [409, { error: message, code: "human_control" }],
+      "POST /api/projects/p1/computer/action": [409, { error: message, code: "human_control" }],
+    }),
+  });
+  for (const name of ["browser_navigate", "computer_click"]) {
+    const result = await callTool(
+      name,
+      name === "browser_navigate" ? { url: "x" } : { x: 1, y: 1 },
+    );
+    assert.equal(result.isError, true);
+    assert.equal(result.content[0].text, message);
+  }
+});
+
 test("dev server tools report the URL to open, and failures are tool errors", async () => {
   const callTool = createToolCaller({
     api: "http://127.0.0.1:3000",

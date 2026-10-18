@@ -16,7 +16,8 @@ ENV DISPLAY=:99 \
 
 COPY --chmod=0755 start.sh computer-server.py /opt/ade/
 
-# 6080: noVNC (human view), 7000: control API (agent tools). ADE publishes
-# both on 127.0.0.1 only. Replaces Selenium's own entrypoint (no Grid/Java).
-EXPOSE 6080 7000
+# 6080: noVNC (human view), 7000: control API (agent tools), 9223: Chromium
+# DevTools bridge (agent browser). ADE publishes all on 127.0.0.1 only.
+# Replaces Selenium's own entrypoint (no Grid/Java).
+EXPOSE 6080 7000 9223
 ENTRYPOINT ["/opt/ade/start.sh"]

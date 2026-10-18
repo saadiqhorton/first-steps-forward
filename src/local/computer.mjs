@@ -70,6 +70,8 @@ export function runArgs({ projectId, image, vncPassword, controlToken }) {
     "127.0.0.1::6080",
     "-p",
     "127.0.0.1::7000",
+    "-p",
+    "127.0.0.1::9223",
     image,
   ];
 }
@@ -92,6 +94,7 @@ export function describeContainer(info) {
     image: info.Config?.Image ?? null,
     vncPort: hostPort("6080/tcp"),
     controlPort: hostPort("7000/tcp"),
+    cdpPort: hostPort("9223/tcp"),
     vncPassword: labels["ade.vnc"] ?? "",
     controlToken: labels["ade.token"] ?? "",
   };
@@ -160,7 +163,9 @@ export function createComputerManager({ run = defaultRun, root, fetchImpl = fetc
     if (!daemon.ok)
       return { projectId, screen: SCREEN, status: "unavailable", detail: daemon.detail };
     const info = await inspect(projectId);
-    if (info?.running)
+    if (info?.running) {
+      // A container started from an older image has no CDP bridge; the UI asks for a restart.
+      const tag = await imageTag(imageDir(root));
       return {
         projectId,
         screen: SCREEN,
@@ -168,7 +173,10 @@ export function createComputerManager({ run = defaultRun, root, fetchImpl = fetc
         startedAt: info.startedAt,
         viewerUrl: viewerUrl(info.vncPort, info.vncPassword, true),
         controlViewerUrl: viewerUrl(info.vncPort, info.vncPassword, false),
+        cdpPort: info.cdpPort || null,
+        outdated: info.image !== tag,
       };
+    }
     if (phase) return { projectId, screen: SCREEN, ...phase };
     return {
       projectId,

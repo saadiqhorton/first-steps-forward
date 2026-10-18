@@ -7,6 +7,9 @@ import { killTree, spawnCommand as spawn } from "./spawn.mjs";
 import { adapters } from "./adapters/index.mjs";
 import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
 import { adeRoot, createComputerManager, SCREEN } from "./computer.mjs";
+import { createBrowserHub } from "./browser-page.mjs";
+import { createBrowserStreamServer } from "./browser-stream-server.mjs";
+import { createControlRegistry, HumanControlError } from "./browser-control.mjs";
 import { listModels, MODEL_ID, clearModelsCache } from "./models.mjs";
 import { optionCapabilities, validateOptions } from "./capabilities.mjs";
 import {
@@ -41,6 +44,54 @@ let lastApiBaseUrl = null;
 const devStartClaims = new Set();
 // One agent computer (Docker desktop) per project; see computer.mjs.
 const computers = createComputerManager();
+// One control lock per project, shared by the browser stream, the noVNC view,
+// computer_* and browser_* tools. The CDP hub and the WebSocket stream server
+// start lazily on first use.
+const controls = createControlRegistry();
+const coded = (code, message) => Object.assign(new Error(message), { code });
+const browserHub = createBrowserHub({
+  async getCdpEndpoint(projectId) {
+    const computer = await computers.status(projectId);
+    if (computer.status !== "running")
+      throw coded(
+        "cdp_unavailable",
+        computer.detail ?? "The agent computer is not running. Call a computer_* tool to start it.",
+      );
+    if (computer.outdated || !computer.cdpPort)
+      throw coded(
+        "cdp_unavailable",
+        "The agent computer was created before the browser preview. Restart the computer to pick up the new image.",
+      );
+    return `http://127.0.0.1:${computer.cdpPort}`;
+  },
+  // Before the browser opens localhost, make that port reachable inside the computer.
+  async beforeNavigate(projectId, url) {
+    const port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);
+    const { status, payload } = await computers.action(projectId, { action: "forward", port });
+    if (status !== 200)
+      throw coded("invalid_url", payload.error ?? `Could not forward port ${port}.`);
+  },
+});
+// Address headers of the latest trusted loopback API request (see handle()).
+// The stream's Origin check runs the same originAllowed rule against them.
+let lastApiHeaders = null;
+const browserStream = createBrowserStreamServer({
+  hub: browserHub,
+  controls,
+  originAllowed: (origin) =>
+    lastApiHeaders !== null && originAllowed({ headers: { ...lastApiHeaders, origin } }),
+});
+const BROWSER_ERROR_STATUS = {
+  human_control: 409,
+  dialog_pending: 409,
+  stale_ref: 409,
+  cdp_unavailable: 503,
+  invalid_url: 400,
+  timeout: 504,
+  unknown_action: 400,
+};
+const OBSERVE_BROWSER_ACTIONS = new Set(["status", "snapshot", "screenshot", "wait_for"]);
+const OBSERVE_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
 const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
 let probingAgents = false;
 let refreshingBootstrap = false;
@@ -1581,8 +1632,14 @@ async function handle(req, res) {
     localRequest(req) &&
     req.headers.host &&
     ["127.0.0.1", "localhost", "::1"].includes(hostnameOf(req.headers.host))
-  )
+  ) {
     lastApiBaseUrl = `http://${req.headers.host}`;
+    lastApiHeaders = {
+      host: req.headers.host,
+      "x-forwarded-proto": req.headers["x-forwarded-proto"],
+      "x-forwarded-host": req.headers["x-forwarded-host"],
+    };
+  }
   try {
     if (parts[0] === "terminal") {
       const terminal = await import("./terminal.mjs");
@@ -2203,16 +2260,101 @@ async function handle(req, res) {
       }
       if (req.method === "POST" && parts[3] === "stop") {
         await computers.stop(project.id);
+        // The browser session and control lock belonged to the container that just went away.
+        await browserHub.close(project.id);
+        await controls.delete(project.id);
         return json(res, 200, await computers.status(project.id));
       }
       if (req.method === "POST" && parts[3] === "action") {
         // Agent tools (MCP server / Pi extension): starts the computer on
         // first use, then forwards one screenshot/mouse/keyboard action.
         try {
-          const { status, payload } = await computers.action(project.id, await body(req));
+          const input = await body(req);
+          const control = controls.for(project.id);
+          const run = () => computers.action(project.id, input);
+          const { status, payload } = OBSERVE_COMPUTER_ACTIONS.has(input.action)
+            ? await control.observe(run)
+            : await control.agent(run);
           return json(res, status, payload);
         } catch (error) {
+          if (error instanceof HumanControlError)
+            return json(res, 409, { error: error.message, code: error.code });
           return json(res, 503, { error: error.message });
+        }
+      }
+      if (req.method === "POST" && parts[3] === "control") {
+        // Take or hand back control of the computer; shared with the browser stream.
+        const input = await body(req);
+        const viewer = String(input.viewer ?? "");
+        if (!viewer) return json(res, 400, { error: "viewer is required." });
+        const control = controls.for(project.id);
+        try {
+          if (input.action === "take") return json(res, 200, control.take(viewer));
+          if (input.action === "release")
+            return json(
+              res,
+              200,
+              control.release(viewer, async () => {
+                // Best effort: release keys and buttons the viewer left held in Chromium.
+                try {
+                  (await browserHub.get(project.id)).releaseInput();
+                } catch {}
+              }),
+            );
+        } catch (error) {
+          if (error instanceof HumanControlError)
+            return json(res, 409, { error: error.message, code: error.code });
+          throw error;
+        }
+        return json(res, 400, { error: 'action must be "take" or "release".' });
+      }
+      return json(res, 404, { error: "Not found." });
+    }
+    // ---- Agent browser preview: live view of the computer's Chromium (see browser-page.mjs) ----
+    if (parts[0] === "projects" && parts[2] === "browser") {
+      const project = state.projects.find((x) => x.id === parts[1]);
+      if (!project) return json(res, 404, { error: "Project not found." });
+      if (req.method === "GET" && parts.length === 3) {
+        const computer = await computers.status(project.id);
+        const { owner, generation } = controls.for(project.id).state();
+        const control = { owner, generation };
+        if (computer.status !== "running" || !computer.cdpPort || computer.outdated) {
+          const reason =
+            computer.status !== "running"
+              ? (computer.detail ??
+                "The agent computer is not running. Start it to see its browser.")
+              : "The agent computer was created before the browser preview. Restart the computer to pick up the new image.";
+          return json(res, 200, {
+            available: false,
+            reason,
+            ...(computer.outdated ? { outdated: true } : {}),
+            control,
+          });
+        }
+        await browserStream.start();
+        return json(res, 200, {
+          available: true,
+          streamUrl: browserStream.url(project.id),
+          control,
+        });
+      }
+      if (req.method === "POST" && parts[3] === "action") {
+        // Agent tools (browser_* in computer-tools-defs.mjs): one Playwright action.
+        const input = await body(req);
+        const name = String(input.action ?? "").replace(/^browser_/, "");
+        const control = controls.for(project.id);
+        const run = () => browserHub.get(project.id).then((s) => s.runAgentAction(input));
+        try {
+          const result = OBSERVE_BROWSER_ACTIONS.has(name)
+            ? await control.observe(run)
+            : await control.agent(run);
+          return json(res, 200, result);
+        } catch (error) {
+          const code = error?.code;
+          return json(res, BROWSER_ERROR_STATUS[code] ?? 500, {
+            error: error?.message ?? String(error),
+            ...(code ? { code } : {}),
+          });
         }
       }
       return json(res, 404, { error: "Not found." });

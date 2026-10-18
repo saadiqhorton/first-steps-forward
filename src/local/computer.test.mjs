@@ -26,7 +26,11 @@ const inspectJson = (running = true) =>
       State: { Running: running, ExitCode: running ? 0 : 137, StartedAt: "2026-10-01T12:00:00Z" },
       Config: { Image: "ade-computer:abc", Labels: { "ade.vnc": "pw123456", "ade.token": "tok" } },
       NetworkSettings: {
-        Ports: { "6080/tcp": [{ HostPort: "49001" }], "7000/tcp": [{ HostPort: "49002" }] },
+        Ports: {
+          "6080/tcp": [{ HostPort: "49001" }],
+          "7000/tcp": [{ HostPort: "49002" }],
+          "9223/tcp": [{ HostPort: "49003" }],
+        },
       },
     },
   ]);
@@ -35,6 +39,7 @@ test("container args publish on loopback only, drop caps, and carry secrets as l
   const args = runArgs({ projectId: "p/1", image: "img", vncPassword: "pw", controlToken: "tok" });
   assert.equal(containerName("p/1"), "ade-computer-p1");
   assert.ok(args.includes("127.0.0.1::6080") && args.includes("127.0.0.1::7000"));
+  assert.ok(args.includes("127.0.0.1::9223"));
   assert.ok(!args.some((a) => /^0\.0\.0\.0|^::/.test(a)));
   assert.ok(args.includes("ALL") && args.includes("no-new-privileges"));
   assert.ok(args.includes("ade.vnc=pw") && args.includes("ade.token=tok"));
@@ -61,6 +66,7 @@ test("describeContainer reads ports, state, and label secrets", () => {
       image: "ade-computer:abc",
       vncPort: 49001,
       controlPort: 49002,
+      cdpPort: 49003,
       vncPassword: "pw123456",
       controlToken: "tok",
     },
@@ -75,6 +81,40 @@ test("image tag changes when the image sources change", async () => {
   writeFileSync(path.join(dir, "start.sh"), "# changed\n");
   assert.notEqual(await imageTag(dir), before);
   assert.match(before, /^ade-computer:[0-9a-f]{12}$/);
+});
+
+test("running status reports the CDP port and whether the image is outdated", async () => {
+  const root = fixtureRoot();
+  const current = await imageTag(path.join(root, "docker", "agent-computer"));
+  const runningWith = (image, ports) => {
+    const info = JSON.parse(inspectJson())[0];
+    info.Config.Image = image;
+    info.NetworkSettings.Ports = ports;
+    return JSON.stringify([info]);
+  };
+  const ports = {
+    "6080/tcp": [{ HostPort: "49001" }],
+    "7000/tcp": [{ HostPort: "49002" }],
+    "9223/tcp": [{ HostPort: "49003" }],
+  };
+  let stdout = runningWith(current, ports);
+  const run = async (bin, args) => {
+    if (args[0] === "version") return { code: 0, stdout: "29", stderr: "" };
+    if (args[0] === "inspect") return { code: 0, stdout, stderr: "" };
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const manager = createComputerManager({ root, run });
+
+  const fresh = await manager.status("p1");
+  assert.equal(fresh.status, "running");
+  assert.equal(fresh.cdpPort, 49003);
+  assert.equal(fresh.outdated, false);
+
+  stdout = runningWith("ade-computer:old", { ...ports, "9223/tcp": undefined });
+  const old = await manager.status("p1");
+  assert.equal(old.status, "running");
+  assert.equal(old.cdpPort, null);
+  assert.equal(old.outdated, true);
 });
 
 test("status reports Docker missing honestly instead of pretending", async () => {

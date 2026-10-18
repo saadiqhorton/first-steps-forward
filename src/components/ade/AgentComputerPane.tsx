@@ -3,10 +3,18 @@ import { Expand, LoaderCircle, Monitor, RotateCw, Shrink } from "lucide-react";
 import type { AgentComputer, Project, Session } from "@/lib/ade/types";
 import { computerControl, computerStatus } from "@/lib/ade/store";
 import { noVncPassword, noVncWebSocketUrl } from "@/lib/ade/noVncConnection.mjs";
+import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
 import { summarizeChecks } from "./ChecksList";
+import { BrowserChromeRow } from "./browser/BrowserChromeRow";
+import { BrowserSurface } from "./browser/BrowserSurface";
+import { useBrowserPreview, type BrowserView } from "./browser/browserPreviewContext";
 import type { RightDock, ComputerTone } from "./rightPaneTypes";
 
 const POLL_MS = 2000;
+const VIEW_OPTIONS = [
+  { value: "browser", label: "Browser" },
+  { value: "desktop", label: "Desktop" },
+];
 
 /**
  * The project's agent computer: an isolated Linux desktop the coding agent
@@ -26,7 +34,9 @@ export function AgentComputerPane({
 }) {
   const [computer, setComputer] = useState<AgentComputer | null>(null);
   const [error, setError] = useState("");
-  const [control, setControl] = useState(false);
+  const browser = useBrowserPreview();
+  // Control is shared with the browser preview and the agent's tools, so it lives in the provider.
+  const control = browser.control?.controller === "you";
   const [busy, setBusy] = useState(false);
   const [viewerState, setViewerState] = useState<"connecting" | "connected" | "reconnecting">(
     "connecting",
@@ -35,6 +45,7 @@ export function AgentComputerPane({
   const [fullscreen, setFullscreen] = useState(false);
   const screenRef = useRef<HTMLDivElement>(null);
   const rfbTargetRef = useRef<HTMLDivElement>(null);
+  const browserFrameRef = useRef<HTMLDivElement>(null);
   const onToneChangeRef = useRef(onToneChange);
 
   useEffect(() => {
@@ -68,7 +79,6 @@ export function AgentComputerPane({
 
   useEffect(() => {
     setComputer(null);
-    setControl(false);
     void refresh();
     const timer = window.setInterval(() => void refresh(), POLL_MS);
     return () => window.clearInterval(timer);
@@ -78,7 +88,6 @@ export function AgentComputerPane({
     setBusy(true);
     try {
       setComputer(await computerControl(project.id, op));
-      if (op === "stop") setControl(false);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -87,7 +96,14 @@ export function AgentComputerPane({
     }
   };
 
-  const src = running ? (control ? computer.controlViewerUrl : computer.viewerUrl) : null;
+  // The Desktop (noVNC) view is only connected while it is the shown view.
+  const view = browser.view;
+  const src =
+    running && view === "desktop"
+      ? control
+        ? computer.controlViewerUrl
+        : computer.viewerUrl
+      : null;
 
   useEffect(() => {
     if (!src || !rfbTargetRef.current) return;
@@ -212,7 +228,7 @@ export function AgentComputerPane({
       ? "w-full flex-none pb-3 @[40rem]/computer:w-[min(26rem,45%)] @[40rem]/computer:shrink-0 @[40rem]/computer:pb-0"
       : "flex-none pb-3";
 
-  const media =
+  const desktopScreen =
     running && src ? (
       <div
         ref={screenRef}
@@ -324,6 +340,54 @@ export function AgentComputerPane({
       </div>
     );
 
+  const browserScreen =
+    browser.place !== "dock" ? (
+      <div className="mx-3 flex flex-col items-start gap-3 rounded-xl border border-line bg-surface-muted p-4">
+        <p className="text-[13px] text-dim">
+          {browser.place === "float" ? "Showing in floating window" : "Browser is hidden"}
+        </p>
+        <button
+          type="button"
+          onClick={() => browser.setPlace("dock")}
+          className="btn-quiet px-3 py-1.5 text-[12px]"
+        >
+          Dock here
+        </button>
+      </div>
+    ) : !browser.status ? (
+      <div className="mx-3 rounded-xl border border-line bg-surface-muted p-4 text-[12px] text-dim">
+        Checking the browser…
+      </div>
+    ) : !browser.status.available ? (
+      <div className="mx-3 rounded-xl border border-line bg-surface-muted p-4 text-[12px] leading-snug text-dim">
+        {browser.status.reason ?? "The browser is not available on this computer yet."}
+      </div>
+    ) : (
+      <div ref={browserFrameRef} className="flex flex-col">
+        <BrowserChromeRow frameRef={browserFrameRef} />
+        <BrowserSurface mode="dock" className="aspect-[16/10] w-full" />
+      </div>
+    );
+
+  const screen = running && view === "browser" ? browserScreen : desktopScreen;
+
+  const media = running ? (
+    <div className="flex flex-col">
+      <div className="px-3 pt-3 pb-2">
+        <SegmentedControl
+          className="w-full max-w-none"
+          label="Computer view"
+          value={view}
+          onValueChange={(next) => browser.setView(next as BrowserView)}
+          options={VIEW_OPTIONS}
+        />
+      </div>
+      {screen}
+    </div>
+  ) : (
+    screen
+  );
+
   const info = (
     <>
       <div className="px-4 pb-4">
@@ -337,6 +401,11 @@ export function AgentComputerPane({
         {error && (
           <p role="alert" className="mt-2 text-[12px] leading-snug text-danger">
             {error}
+          </p>
+        )}
+        {browser.actionError && (
+          <p role="alert" className="mt-2 text-[12px] leading-snug text-danger">
+            {browser.actionError}
           </p>
         )}
         {computer?.log?.length ? (
@@ -353,19 +422,21 @@ export function AgentComputerPane({
           <div className="mt-2 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setControl((c) => !c)}
+              onClick={() => void browser.changeControl(control ? "release" : "take")}
               aria-pressed={control}
               className={`${control ? "btn-amber" : "btn-quiet"} px-3 py-1.5 text-[12px]`}
             >
               {control ? "Hand back" : "Take control"}
             </button>
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              className="btn-quiet px-3 py-1.5 text-[12px]"
-            >
-              Full screen
-            </button>
+            {view === "desktop" && (
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="btn-quiet px-3 py-1.5 text-[12px]"
+              >
+                Full screen
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void run("stop")}

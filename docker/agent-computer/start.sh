@@ -39,8 +39,10 @@ CTRL=$!
 
 # The container is the sandbox, so Chromium's own sandbox is disabled
 # (--test-type hides the warning bar that would otherwise eat screen space).
+# The DevTools port (9222, loopback only) is bridged by computer-server.py.
 chromium --no-sandbox --test-type --no-first-run --no-default-browser-check \
   --disable-dev-shm-usage --disable-features=Translate --password-store=basic \
+  --remote-debugging-port=9222 \
   --user-data-dir="$HOME/.chromium" --window-position=0,0 \
   --window-size="${SCREEN_WIDTH},${SCREEN_HEIGHT}" about:blank >/dev/null 2>&1 &
 

@@ -26,6 +26,10 @@ TOKEN = os.environ["CONTROL_TOKEN"]
 WIDTH = int(os.environ.get("SCREEN_WIDTH", "1280"))
 HEIGHT = int(os.environ.get("SCREEN_HEIGHT", "800"))
 HOST_ALIAS = "host.docker.internal"
+# Chromium's DevTools endpoint binds 127.0.0.1 inside the container, so ADE's
+# published port cannot reach it directly. Bridge 0.0.0.0:9223 to it instead.
+CDP_PORT = 9222
+CDP_BRIDGE_PORT = 9223
 BUTTONS = {"left": 1, "middle": 2, "right": 3}
 SCROLL = {"up": 4, "down": 5, "left": 6, "right": 7}
 KEY_ALIASES = {
@@ -39,6 +43,7 @@ KEY_ALIASES = {
 CHROMIUM = [
     "chromium", "--no-sandbox", "--test-type", "--no-first-run", "--no-default-browser-check",
     "--disable-dev-shm-usage", "--disable-features=Translate", "--password-store=basic",
+    f"--remote-debugging-port={CDP_PORT}",
     f"--user-data-dir={os.path.expanduser('~/.chromium')}", "--window-position=0,0",
     f"--window-size={WIDTH},{HEIGHT}",
 ]
@@ -270,9 +275,9 @@ def pump(src, dst):
             pass
 
 
-def bridge(client, port):
+def bridge(client, port, host=HOST_ALIAS):
     try:
-        upstream = socket.create_connection((HOST_ALIAS, port), timeout=10)
+        upstream = socket.create_connection((host, port), timeout=10)
         upstream.settimeout(None)
     except OSError:
         client.close()
@@ -314,6 +319,22 @@ def ensure_forward(port):
             threading.Thread(target=bridge, args=(client, port), daemon=True).start()
 
     threading.Thread(target=accept_loop, daemon=True).start()
+
+
+def serve_cdp_bridge(listener):
+    """Accept loop for Chromium's DevTools port. Each client connects upstream on
+    its own, so it tolerates Chromium not listening yet (or having exited)."""
+    while True:
+        client, _ = listener.accept()
+        threading.Thread(target=bridge, args=(client, CDP_PORT, "127.0.0.1"), daemon=True).start()
+
+
+def start_cdp_bridge():
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("0.0.0.0", CDP_BRIDGE_PORT))
+    listener.listen(64)
+    threading.Thread(target=serve_cdp_bridge, args=(listener,), daemon=True).start()
 
 
 def open_url(url):
@@ -394,6 +415,17 @@ def perform(body):
         time.sleep(1.5)
     elif action == "wait":
         time.sleep(max(0.0, min(float(body.get("seconds", 1)), 10.0)))
+    elif action == "forward":
+        # Opens localhost:PORT inside the computer to the host's dev server. Only
+        # ADE calls this (before the browser navigates); no screenshot is taken.
+        try:
+            port = int(body.get("port"))
+        except (TypeError, ValueError):
+            raise ActionError("port must be an integer")
+        if not 1 <= port <= 65535:
+            raise ActionError("port must be between 1 and 65535")
+        ensure_forward(port)
+        return {"ok": True}
     else:
         raise ActionError(f"unknown action: {action}")
     if action not in ("screenshot", "wait", "open_url"):
@@ -450,4 +482,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    try:
+        start_cdp_bridge()
+    except OSError as error:  # the computer tools still work without the browser bridge
+        print(f"CDP bridge not started: {error}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", 7000), Handler).serve_forever()
