@@ -2,7 +2,9 @@
 export function noVncWebSocketUrl(viewerUrl) {
   const endpoint = new URL(viewerUrl);
   endpoint.protocol = endpoint.protocol === "https:" ? "wss:" : "ws:";
-  endpoint.pathname = "/websockify";
+  if (!endpoint.pathname.startsWith("/websockify/")) {
+    endpoint.pathname = "/websockify";
+  }
   endpoint.search = "";
   endpoint.hash = "";
   return endpoint.toString();

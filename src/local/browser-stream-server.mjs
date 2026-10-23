@@ -489,24 +489,29 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
     });
   });
 
-  server.on("upgrade", (req, socket, head) => {
+  const handleUpgrade = (req, socket, head) => {
     const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
-    if (pathname !== PATH) {
+    if (pathname !== PATH) return false;
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+    return true;
+  };
+
+  server.on("upgrade", (req, socket, head) => {
+    if (!handleUpgrade(req, socket, head)) {
       socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
       socket.destroy();
-      return;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   });
 
   return {
-    /** Starts listening on 127.0.0.1 on a random port. Idempotent. */
+    handleUpgrade,
+    /** Starts listening on a random port. Idempotent. */
     start() {
       if (!started) {
         started = new Promise((resolve, reject) => {
           const onError = (error) => reject(error);
           server.once("error", onError);
-          server.listen(0, "127.0.0.1", () => {
+          server.listen(0, "0.0.0.0", () => {
             server.off("error", onError);
             port = server.address().port;
             resolve({ port });

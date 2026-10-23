@@ -124,27 +124,9 @@ export function BrowserSurface({
     return () => releaseCanvas(canvas);
   }, [canvas, attachCanvas, releaseCanvas]);
 
-  // Only the docked surface tells the server its size. Floating keeps the page size.
-  useEffect(() => {
-    if (mode !== "dock" || !stage) return;
-    let timer: number | undefined;
-    const measure = () => {
-      timer = undefined;
-      const rect = stage.getBoundingClientRect();
-      if (rect.width < 1 || rect.height < 1) return;
-      requestViewportSize({ width: Math.round(rect.width), height: Math.round(rect.height) });
-    };
-    measure();
-    const observer = new ResizeObserver(() => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(measure, RESIZE_DEBOUNCE_MS);
-    });
-    observer.observe(stage);
-    return () => {
-      observer.disconnect();
-      window.clearTimeout(timer);
-    };
-  }, [mode, stage, requestViewportSize]);
+  // Keep the agent computer's native desktop browser viewport (1280x800 window)
+  // and scale the frame to fit the docked/floating surface, rather than shrinking
+  // the remote page's CSS viewport down to the side-pane pixel size.
 
   // Wheel must be non-passive so the page can scroll without the pane scrolling too.
   useEffect(() => {

@@ -7,6 +7,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
+import net from "node:net";
 import path from "node:path";
 
 export const SCREEN = { width: 1280, height: 800 };
@@ -126,11 +127,152 @@ const firstLine = (text) =>
     .map((l) => l.trim())
     .find(Boolean) ?? "";
 
+function targetLocalPort(body) {
+  if (!body || typeof body !== "object") return 0;
+  if (body.action === "forward") {
+    const p = Number(body.port);
+    return Number.isInteger(p) && p >= 1 && p <= 65535 ? p : 0;
+  }
+  if (body.action === "open_url" && typeof body.url === "string") {
+    try {
+      const u = new URL(body.url);
+      if (["localhost", "127.0.0.1", "0.0.0.0"].includes(u.hostname))
+        return Number(u.port) || (u.protocol === "https:" ? 443 : 80);
+    } catch {}
+  }
+  return 0;
+}
+
+function probeHostPort(port, timeoutMs = 400) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host: "127.0.0.1", port });
+    const done = (ok) => {
+      sock.destroy();
+      resolve(ok);
+    };
+    sock.setTimeout(timeoutMs, () => done(false));
+    sock.once("connect", () => done(true));
+    sock.once("error", () => done(false));
+  });
+}
+
 export function createComputerManager({ run = defaultRun, root, fetchImpl = fetch } = {}) {
   // Transient phases ADE itself drives (building/starting/error); "running"
   // and "stopped" are always read back from Docker.
   const phases = new Map();
   const pending = new Map();
+  const tunnels = (globalThis.__adeReverseTunnels ??= new Map());
+
+  function stopTunnels(projectId) {
+    const byPort = tunnels.get(projectId);
+    if (!byPort) return;
+    tunnels.delete(projectId);
+    for (const entry of byPort.values()) entry.stop();
+  }
+
+  function ensureReverseTunnel(projectId, info, port) {
+    let byPort = tunnels.get(projectId);
+    if (!byPort) {
+      byPort = new Map();
+      tunnels.set(projectId, byPort);
+    }
+    const existing = byPort.get(port);
+    if (existing && existing.controlPort === info.controlPort && existing.token === info.controlToken)
+      return;
+    existing?.stop();
+
+    let active = true;
+    const sockets = new Set();
+    let idleCount = 0;
+    const POOL_SIZE = 4;
+
+    const replenish = () => {
+      while (active && idleCount < POOL_SIZE) {
+        idleCount += 1;
+        openWarm();
+      }
+    };
+
+    const openWarm = () => {
+      let claimed = false;
+      let buf = Buffer.alloc(0);
+      const tunnelSock = net.connect({ host: "127.0.0.1", port: info.controlPort });
+      sockets.add(tunnelSock);
+
+      const releaseIdle = (retryDelay = 0) => {
+        if (!claimed) {
+          claimed = true;
+          idleCount = Math.max(0, idleCount - 1);
+          if (active) {
+            if (retryDelay > 0) setTimeout(replenish, retryDelay).unref?.();
+            else replenish();
+          }
+        }
+      };
+
+      tunnelSock.once("connect", () => {
+        tunnelSock.write(
+          `POST /tunnel/${port} HTTP/1.1\r\nHost: 127.0.0.1\r\nx-ade-token: ${info.controlToken}\r\nContent-Length: 0\r\n\r\n`,
+        );
+      });
+
+      const onData = (chunk) => {
+        buf = Buffer.concat([buf, chunk]);
+        const end = buf.indexOf("\r\n\r\n");
+        if (end === -1) return;
+        tunnelSock.off("data", onData);
+        const head = buf.subarray(0, end).toString("latin1");
+        const rest = buf.subarray(end + 4);
+        const status = Number(/^HTTP\/1\.[01]\s+(\d+)/.exec(head)?.[1] ?? 0);
+        if (status !== 200) {
+          tunnelSock.destroy();
+          releaseIdle(status === 204 ? 0 : 1000);
+          return;
+        }
+        releaseIdle(0);
+        tunnelSock.pause();
+        const devSock = net.connect({ host: "127.0.0.1", port });
+        sockets.add(devSock);
+        devSock.once("connect", () => {
+          if (rest.length > 0) devSock.write(rest);
+          tunnelSock.pipe(devSock);
+          devSock.pipe(tunnelSock);
+          tunnelSock.resume();
+        });
+        const cleanupPair = () => {
+          sockets.delete(devSock);
+          sockets.delete(tunnelSock);
+          devSock.destroy();
+          tunnelSock.destroy();
+        };
+        devSock.once("error", cleanupPair);
+        devSock.once("close", cleanupPair);
+        tunnelSock.once("error", cleanupPair);
+        tunnelSock.once("close", cleanupPair);
+      };
+
+      tunnelSock.on("data", onData);
+      tunnelSock.once("error", () => {
+        sockets.delete(tunnelSock);
+        releaseIdle(1000);
+      });
+      tunnelSock.once("close", () => {
+        sockets.delete(tunnelSock);
+        releaseIdle(200);
+      });
+    };
+
+    byPort.set(port, {
+      controlPort: info.controlPort,
+      token: info.controlToken,
+      stop() {
+        active = false;
+        for (const s of sockets) s.destroy();
+        sockets.clear();
+      },
+    });
+    replenish();
+  }
 
   async function docker() {
     const result = await run("docker", ["version", "--format", "{{.Server.Version}}"], {
@@ -264,6 +406,7 @@ export function createComputerManager({ run = defaultRun, root, fetchImpl = fetc
 
   async function stop(projectId) {
     phases.delete(projectId);
+    stopTunnels(projectId);
     const result = await run("docker", ["rm", "-f", containerName(projectId)], { timeout: 30000 });
     return { removed: result.code === 0 };
   }
@@ -276,10 +419,16 @@ export function createComputerManager({ run = defaultRun, root, fetchImpl = fetc
       info = await inspect(projectId);
     }
     if (!info?.running) throw new Error("The computer is not running.");
+    let requestBody = body ?? {};
+    const port = targetLocalPort(requestBody);
+    if (port && (await probeHostPort(port))) {
+      ensureReverseTunnel(projectId, info, port);
+      requestBody = { ...requestBody, host_reachable: true };
+    }
     const response = await fetchImpl(`http://127.0.0.1:${info.controlPort}/action`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-ade-token": info.controlToken },
-      body: JSON.stringify(body ?? {}),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(60000),
     });
     const payload = await response.json().catch(() => ({ error: "invalid response" }));

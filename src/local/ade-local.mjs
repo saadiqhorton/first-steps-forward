@@ -49,6 +49,8 @@ const computers = createComputerManager();
 // start lazily on first use.
 const controls = createControlRegistry();
 const coded = (code, message) => Object.assign(new Error(message), { code });
+void globalThis.__adeBrowserStream?.close?.().catch?.(() => {});
+void globalThis.__adeBrowserHub?.closeAll?.().catch?.(() => {});
 const browserHub = createBrowserHub({
   async getCdpEndpoint(projectId) {
     const computer = await computers.status(projectId);
@@ -72,15 +74,28 @@ const browserHub = createBrowserHub({
       throw coded("invalid_url", payload.error ?? `Could not forward port ${port}.`);
   },
 });
+globalThis.__adeBrowserHub = browserHub;
 // Address headers of the latest trusted loopback API request (see handle()).
 // The stream's Origin check runs the same originAllowed rule against them.
 let lastApiHeaders = null;
+let sharedUpgradeAttached = false;
 const browserStream = createBrowserStreamServer({
   hub: browserHub,
   controls,
-  originAllowed: (origin) =>
-    lastApiHeaders !== null && originAllowed({ headers: { ...lastApiHeaders, origin } }),
+  originAllowed: (origin) => {
+    if (lastApiHeaders !== null && originAllowed({ headers: { ...lastApiHeaders, origin } }))
+      return true;
+    if (!origin) return true;
+    try {
+      const parsed = new URL(origin);
+      const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+      if (new Set(["127.0.0.1", "localhost", "::1"]).has(host)) return true;
+      if (!EXPOSE_HOST() && !EXPOSE_TOKEN() && isPrivateIpAddress(host)) return true;
+    } catch {}
+    return false;
+  },
 });
+globalThis.__adeBrowserStream = browserStream;
 const BROWSER_ERROR_STATUS = {
   human_control: 409,
   dialog_pending: 409,
@@ -606,7 +621,7 @@ async function startDevServer(proc, project) {
   proc.port = await allocatePort();
   listenedProcs.delete(proc.id);
   const launch = {
-    args: [...baseLaunchArgs(proc.args), ...devServerArgs(framework, proc.port)],
+    args: [...baseLaunchArgs(proc.args), ...devServerArgs(framework, proc.port, proc.bin)],
     // Unknown scripts: --port plus PORT and HOST in the environment. HOST is
     // best effort (some servers ignore it and bind wider) — the listen probe
     // then still gates reporting "running", but it connects to 127.0.0.1 and
@@ -1312,14 +1327,16 @@ export function detectFramework(pkg, devScript = "") {
   if (deps.vite || /\bvite\b/.test(devScript)) return "vite";
   return "unknown";
 }
-export function devServerArgs(framework, port) {
+export function devServerArgs(framework, port, manager = "npm") {
   const flags =
     framework === "next"
       ? ["-H", "127.0.0.1", "-p"]
       : framework === "vite"
         ? ["--host", "127.0.0.1", "--port"]
         : ["--port"];
-  return ["--", ...flags, String(port)];
+  // npm run requires `--` to forward flags to the script; pnpm/yarn/bun pass
+  // `--` literally into the script argv, which makes vite/next ignore --port.
+  return manager === "npm" ? ["--", ...flags, String(port)] : [...flags, String(port)];
 }
 async function detectNonNodeHint(projectPath) {
   try {
@@ -1543,8 +1560,37 @@ function isLoopbackAddress(address) {
     normalized === "::1" || normalized === "127.0.0.1" || /^127(?:\.\d{1,3}){3}$/.test(normalized)
   );
 }
+function isPrivateIpAddress(address) {
+  if (!address) return false;
+  const normalized = address
+    .toLowerCase()
+    .replace(/^::ffff:/, "")
+    .replace(/%.*$/, "");
+  return (
+    /^10(?:\.\d{1,3}){3}$/.test(normalized) ||
+    /^192\.168(?:\.\d{1,3}){2}$/.test(normalized) ||
+    /^172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}$/.test(normalized) ||
+    /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2}$/.test(normalized) ||
+    /^(?:fc|fd)[0-9a-f]{2}:/.test(normalized) ||
+    /^fe[89ab][0-9a-f]:/.test(normalized)
+  );
+}
 const hostnameOf = (hostHeader) =>
   hostHeader ? new URL(`http://${hostHeader}`).hostname.toLowerCase().replace(/^\[|\]$/g, "") : "";
+function isTrustedLocalOrLanPeer(req) {
+  const host = hostnameOf(req.headers.host);
+  const remote = req.socket?.remoteAddress;
+  if (new Set(["127.0.0.1", "localhost", "::1"]).has(host))
+    return isLoopbackAddress(remote) && originAllowed(req);
+  if (
+    !EXPOSE_HOST() &&
+    !EXPOSE_TOKEN() &&
+    isPrivateIpAddress(host) &&
+    (isLoopbackAddress(remote) || isPrivateIpAddress(remote))
+  )
+    return originAllowed(req);
+  return false;
+}
 function tokenAccepted(req) {
   const expected = EXPOSE_TOKEN();
   if (!expected) return false;
@@ -1586,10 +1632,9 @@ function originAllowed(req) {
 function localRequest(req) {
   const host = hostnameOf(req.headers.host);
   // Loopback peers (the UI on this machine, agent CLIs, dev-control curls)
-  // keep the strict original rules: loopback Host name, loopback peer,
-  // same-origin Origin.
-  if (new Set(["127.0.0.1", "localhost", "::1"]).has(host))
-    return isLoopbackAddress(req.socket?.remoteAddress) && originAllowed(req);
+  // and direct private-LAN peers (when no explicit ADE_HOST/ADE_TOKEN gate is
+  // configured) keep same-origin Origin checks.
+  if (isTrustedLocalOrLanPeer(req)) return true;
   // A loopback reverse proxy (`tailscale serve`) forwards with a preserved,
   // non-loopback Host and X-Forwarded-Proto; the proxy itself connects from
   // loopback and its remote clients are gated by the proxy.
@@ -1639,11 +1684,7 @@ async function handle(req, res) {
     parts[0] === "agents" &&
     parts.length === 3 &&
     ["install", "update", "harness"].includes(parts[2]);
-  if (
-    (["terminal", "editor"].includes(parts[0]) || harnessRoute) &&
-    (!isLoopbackAddress(req.socket?.remoteAddress) ||
-      !["127.0.0.1", "localhost", "::1"].includes(hostnameOf(req.headers.host)))
-  )
+  if ((["terminal", "editor"].includes(parts[0]) || harnessRoute) && !isTrustedLocalOrLanPeer(req))
     return json(res, 403, { error: "Host tools are available only on this machine." });
   // Remember the real base URL of this serving instance for the agent-facing
   // dev-control curls. Only LOCAL requests count (the agent CLIs run on this
@@ -1652,17 +1693,26 @@ async function handle(req, res) {
   // the token, and the exempt POST /api/auth path must not either (its peer
   // is by definition not yet authorized; a forged loopback Host header on a
   // remote peer fails localRequest's peer check).
-  if (
-    localRequest(req) &&
-    req.headers.host &&
-    ["127.0.0.1", "localhost", "::1"].includes(hostnameOf(req.headers.host))
-  ) {
-    lastApiBaseUrl = `http://${req.headers.host}`;
-    lastApiHeaders = {
-      host: req.headers.host,
-      "x-forwarded-proto": req.headers["x-forwarded-proto"],
-      "x-forwarded-host": req.headers["x-forwarded-host"],
-    };
+  if (localRequest(req) && req.headers.host) {
+    const reqHost = hostnameOf(req.headers.host);
+    if (["127.0.0.1", "localhost", "::1"].includes(reqHost)) {
+      lastApiBaseUrl = `http://${req.headers.host}`;
+      lastApiHeaders = {
+        host: req.headers.host,
+        "x-forwarded-proto": req.headers["x-forwarded-proto"],
+        "x-forwarded-host": req.headers["x-forwarded-host"],
+      };
+    } else if (isTrustedLocalOrLanPeer(req)) {
+      if (!lastApiBaseUrl) {
+        const reqPort = new URL(`http://${req.headers.host}`).port;
+        lastApiBaseUrl = `http://127.0.0.1${reqPort ? `:${reqPort}` : ""}`;
+      }
+      lastApiHeaders = {
+        host: req.headers.host,
+        "x-forwarded-proto": req.headers["x-forwarded-proto"],
+        "x-forwarded-host": req.headers["x-forwarded-host"],
+      };
+    }
   }
   try {
     if (parts[0] === "terminal") {
@@ -2285,8 +2335,31 @@ async function handle(req, res) {
     if (parts[0] === "projects" && parts[2] === "computer") {
       const project = state.projects.find((x) => x.id === parts[1]);
       if (!project) return json(res, 404, { error: "Project not found." });
-      if (req.method === "GET" && parts.length === 3)
-        return json(res, 200, await computers.status(project.id));
+      if (req.method === "GET" && parts.length === 3) {
+        const status = await computers.status(project.id);
+        const reqHost = hostnameOf(req.headers.host);
+        if (
+          sharedUpgradeAttached &&
+          req.headers.host &&
+          isPrivateIpAddress(reqHost) &&
+          status.viewerUrl
+        ) {
+          const rewrite = (raw) => {
+            const u = new URL(raw);
+            u.host = req.headers.host;
+            u.pathname = `/websockify/${encodeURIComponent(project.id)}`;
+            return u.toString();
+          };
+          return json(res, 200, {
+            ...status,
+            viewerUrl: rewrite(status.viewerUrl),
+            ...(status.controlViewerUrl
+              ? { controlViewerUrl: rewrite(status.controlViewerUrl) }
+              : {}),
+          });
+        }
+        return json(res, 200, status);
+      }
       if (req.method === "POST" && parts[3] === "start") {
         // Returns at once; the UI polls status through building/starting.
         computers.start(project.id).catch(() => {});
@@ -2366,9 +2439,16 @@ async function handle(req, res) {
           });
         }
         await browserStream.start();
+        const streamUrl = new URL(browserStream.url(project.id));
+        const reqHost = hostnameOf(req.headers.host);
+        if (sharedUpgradeAttached && req.headers.host) {
+          streamUrl.host = req.headers.host;
+        } else if (isPrivateIpAddress(reqHost)) {
+          streamUrl.hostname = reqHost;
+        }
         return json(res, 200, {
           available: true,
-          streamUrl: browserStream.url(project.id),
+          streamUrl: streamUrl.toString(),
           control,
         });
       }
@@ -2876,15 +2956,70 @@ export async function handleLocalApi(request) {
     headers: response.headers,
   });
 }
+function attachComputerUpgrades(httpServer) {
+  if (!httpServer || typeof httpServer.on !== "function") return;
+  sharedUpgradeAttached = true;
+  if (httpServer.__adeUpgradeListener) {
+    httpServer.off("upgrade", httpServer.__adeUpgradeListener);
+  }
+  const onUpgrade = (req, socket, head) => {
+    const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    if (pathname === "/preview-stream") {
+      browserStream.handleUpgrade(req, socket, head);
+      return;
+    }
+    const vncMatch = /^\/websockify\/([^/?#]+)$/.exec(pathname);
+    if (!vncMatch) return;
+    const projectId = decodeURIComponent(vncMatch[1]);
+    void (async () => {
+      try {
+        const status = await computers.status(projectId);
+        const vncPort = status.viewerUrl ? Number(new URL(status.viewerUrl).port) : 0;
+        if (!vncPort) {
+          socket.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        const upstream = net.connect({ host: "127.0.0.1", port: vncPort });
+        upstream.once("connect", () => {
+          const lines = [`GET /websockify HTTP/${req.httpVersion ?? "1.1"}`];
+          for (let i = 0; i < (req.rawHeaders?.length ?? 0); i += 2) {
+            lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+          }
+          lines.push("", "");
+          upstream.write(lines.join("\r\n"));
+          if (head?.length) upstream.write(head);
+          socket.pipe(upstream);
+          upstream.pipe(socket);
+        });
+        const closeBoth = () => {
+          upstream.destroy();
+          socket.destroy();
+        };
+        upstream.once("error", closeBoth);
+        upstream.once("close", closeBoth);
+        socket.once("error", closeBoth);
+        socket.once("close", closeBoth);
+      } catch {
+        socket.destroy();
+      }
+    })();
+  };
+  httpServer.__adeUpgradeListener = onUpgrade;
+  httpServer.on("upgrade", onUpgrade);
+}
+
 export function adeLocalApi() {
   return {
     name: "ade-loopback-local-api",
     configureServer(server) {
+      attachComputerUpgrades(server.httpServer);
       server.middlewares.use("/api", (req, res) => {
         handle(req, res).catch((e) => json(res, 500, { error: e.message }));
       });
     },
     configurePreviewServer(server) {
+      attachComputerUpgrades(server.httpServer);
       server.middlewares.use("/api", (req, res) => {
         handle(req, res).catch((e) => json(res, 500, { error: e.message }));
       });

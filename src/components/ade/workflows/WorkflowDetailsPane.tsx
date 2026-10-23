@@ -3,6 +3,7 @@ import { Check, Clipboard, FilePenLine, Play, Sparkles, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import type { Workflow } from "@/lib/ade/types";
 import { warnUser } from "@/components/ade/NoticeDialog";
+import { copyText, isInsecureOrigin } from "@/lib/ade/clipboard";
 import { workflowAccent } from "./workflowFilters.mjs";
 
 const COPY_RESET_MS = 2000;
@@ -45,12 +46,14 @@ export function WorkflowDetailsPane({
   }, [copied]);
 
   const copyPrompt = async () => {
-    try {
-      await navigator.clipboard.writeText(workflow.prompt);
+    if (await copyText(workflow.prompt)) {
       setCopied(true);
-    } catch {
-      void warnUser("Could not copy the prompt. Select the text and copy it manually.");
+      return;
     }
+    const reason = isInsecureOrigin()
+      ? " Your browser only allows clipboard writes on secure origins, so open the ADE at 127.0.0.1 or over HTTPS."
+      : "";
+    void warnUser(`Could not copy the prompt. Select the text and copy it manually.${reason}`);
   };
 
   return (

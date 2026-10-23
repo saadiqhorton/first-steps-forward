@@ -472,7 +472,8 @@ class BrowserSession {
       this.#activate(page);
     });
     for (const page of this.#context.pages()) this.#watch(page);
-    let initial = this.#usable().at(-1);
+    const usable = this.#usable();
+    let initial = usable.find((p) => p.url() && p.url() !== "about:blank") ?? usable.at(-1);
     if (!initial) initial = await this.#context.newPage();
     this.#watch(initial);
     this.#activate(initial);
@@ -629,25 +630,22 @@ class BrowserSession {
   }
 
   /**
-   * Sets the CSS viewport on the active page, at RENDER_SCALE device pixels. Emits "viewport".
+   * Syncs the CSS viewport from the active page's real window inside the agent
+   * computer (1280x800 Xvfb display) so the full page fits without 2x cropping.
    * @returns {Promise<{ width: number, height: number }>}
    */
-  async resize({ width, height }) {
-    this.#viewport = clampViewport({ width, height });
-    this.#resized = true;
-    if (this.#active) await this.#applyViewport(this.#active);
+  async resize(_size) {
+    if (this.#active) {
+      await this.#clearViewportOverride(this.#active);
+      await this.#syncViewport(this.#active);
+    }
     this.#emit("viewport", this.viewport());
     return this.viewport();
   }
 
-  async #applyViewport(page) {
-    const cdp = await this.#control(page);
-    await cdp.send("Emulation.setDeviceMetricsOverride", {
-      width: this.#viewport.width,
-      height: this.#viewport.height,
-      deviceScaleFactor: RENDER_SCALE,
-      mobile: false,
-    });
+  async #clearViewportOverride(page) {
+    const cdp = await this.#control(page).catch(() => null);
+    await cdp?.send("Emulation.clearDeviceMetricsOverride").catch(noop);
   }
 
   /** Navigates the active page (http and https only). */
@@ -1072,6 +1070,13 @@ class BrowserSession {
   }
 
   async #refreshNav() {
+    if (this.#active?.url() === "about:blank") {
+      const nonBlank = this.#usable().find((p) => p.url() && p.url() !== "about:blank");
+      if (nonBlank && nonBlank !== this.#active) {
+        this.#activate(nonBlank);
+        return;
+      }
+    }
     const page = this.#active;
     if (!page || this.#closed) return;
     const seq = ++this.#navSeq;
@@ -1104,11 +1109,7 @@ class BrowserSession {
     this.#loading = false;
     if (previous) this.#releaseHeldInput(previous);
     for (const stream of this.#screencasts) void stream.retarget(page);
-    if (this.#resized) {
-      void this.#applyViewport(page).catch(noop);
-    } else {
-      void this.#syncViewport(page);
-    }
+    void this.#clearViewportOverride(page).then(() => this.#syncViewport(page));
     void this.#refreshNav();
   }
 

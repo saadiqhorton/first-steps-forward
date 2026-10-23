@@ -191,8 +191,9 @@ export function formatJsonLogEvent(event) {
     if (!text.trim()) return null;
     return { tone: "info", title: "Agent wrote a reply", body: truncate(text, 160), raw: "" };
   }
-  if (type === "tool_use" || type === "tool_call" || type === "tool") {
+  if (type === "tool_use" || type === "tool_call" || type === "tool" || type === "tool_execution_start") {
     const tool =
+      asText(event.toolName) ||
       asText(event.tool) ||
       asText(event.name) ||
       asText(part && "tool" in part ? part.tool : "") ||
@@ -211,8 +212,20 @@ export function formatJsonLogEvent(event) {
       raw: "",
     };
   }
-  if (type === "tool_result" || type === "tool_output") {
-    const body = humanBody(event.output ?? event.result ?? event.content ?? event.part);
+  if (type === "tool_result" || type === "tool_output" || type === "tool_execution_end") {
+    const resultPayload =
+      event.result && typeof event.result === "object" && Array.isArray(event.result.content)
+        ? event.result.content.find((c) => c && typeof c === "object" && typeof c.text === "string")?.text
+        : undefined;
+    const body = humanBody(resultPayload ?? event.output ?? event.result ?? event.content ?? event.part);
+    if (event.isError === true) {
+      return {
+        tone: "error",
+        title: `${asText(event.toolName) || "Tool"} failed`,
+        ...(body ? { body } : {}),
+        raw: "",
+      };
+    }
     return {
       tone: "output",
       title: "Tool finished",
@@ -220,6 +233,17 @@ export function formatJsonLogEvent(event) {
       raw: "",
     };
   }
+  if (type === "turn_start") return { tone: "info", title: "Turn started", raw: "" };
+  if (type === "turn_end") return { tone: "info", title: "Turn completed", raw: "" };
+  if (type === "agent_start" || type === "session") return { tone: "info", title: "Session started", raw: "" };
+  if (
+    type === "message_start" ||
+    type === "message_update" ||
+    type === "message_end" ||
+    type === "agent_end" ||
+    type === "agent_settled"
+  )
+    return null;
   if (type === "error") {
     const message = truncate(
       asText(
@@ -367,21 +391,38 @@ function phraseForActivity(event) {
     return null;
   }
 
-  if (type === "tool_use" || type === "tool_call" || type === "tool") {
-    const tool = asText(record.tool || record.name || "tool").toLowerCase();
+  if (type === "tool_use" || type === "tool_call" || type === "tool" || type === "tool_execution_start") {
+    const tool = asText(record.toolName || record.tool || record.name || "tool").toLowerCase();
     const input = unwrapToolPayload(record.input ?? record.args ?? record.arguments ?? record.part);
     const fields = input && typeof input === "object" ? input : {};
     const filePath = asText(fields.filePath ?? fields.filepath ?? fields.path ?? fields.file);
+    if (/^dev_server_/.test(tool)) return "Checking the preview";
+    if (/^(computer_|browser_)/.test(tool)) return "Looking at the page";
     if (/(write|edit|patch|create)/.test(tool))
       return filePhrase(filePath ? [{ path: filePath }] : []);
-    if (/(read|grep|search|glob|ls|list)/.test(tool)) return "Reading the project";
+    if (/(read|grep|search|glob|ls|list|find)/.test(tool)) return "Reading the project";
     if (/(bash|shell|exec|command)/.test(tool))
       return commandPhrase(asText(fields.command ?? fields.cmd ?? input));
     return "Working";
   }
-  if (type === "tool_result" || type === "tool_output" || type === "text")
+  if (type === "message_update") {
+    const delta =
+      record.assistantMessageEvent && typeof record.assistantMessageEvent === "object"
+        ? asText(record.assistantMessageEvent.type)
+        : "";
+    if (delta.startsWith("thinking")) return "Thinking";
+    if (delta.startsWith("text")) return "Writing a reply";
+    return null;
+  }
+  if (type === "tool_result" || type === "tool_output" || type === "tool_execution_end" || type === "text")
     return "Still working on the next step";
-  if (type === "turn.started" || type === "thread.started" || type === "step_start")
+  if (
+    type === "turn.started" ||
+    type === "thread.started" ||
+    type === "step_start" ||
+    type === "turn_start" ||
+    type === "agent_start"
+  )
     return "Starting";
   return null;
 }

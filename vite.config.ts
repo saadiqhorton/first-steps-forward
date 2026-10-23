@@ -9,8 +9,8 @@ export default defineConfig({
     // ADE's normal local port. 8080 (the preset default) is commonly taken by
     // other local services (e.g. a llama.cpp server) and failing to start is
     // worse than a fixed well-known port; override with --port for a one-off.
-    server: { host: "127.0.0.1", port: 3100, strictPort: true },
-    preview: { host: "127.0.0.1", port: 3100, strictPort: true },
+    server: { host: "0.0.0.0", port: 3100, strictPort: true },
+    preview: { host: "0.0.0.0", port: 3100, strictPort: true },
   },
   nitro: { preset: "node-server" },
   tanstackStart: {

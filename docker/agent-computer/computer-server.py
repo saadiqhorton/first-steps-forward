@@ -13,6 +13,7 @@ import ctypes
 import hmac
 import json
 import os
+import queue
 import socket
 import struct
 import subprocess
@@ -249,6 +250,7 @@ def screenshot():
 
 # ---- localhost forwarding to the host's dev server --------------------------
 forwards = {}
+tunnel_waiters = {}
 
 
 def port_open(host, port, timeout=1.5):
@@ -290,15 +292,19 @@ def bridge(client, port, host=HOST_ALIAS):
     upstream.close()
 
 
-def ensure_forward(port):
+def ensure_forward(port, host_reachable=False):
     """Make localhost:PORT inside the computer reach the host's localhost:PORT.
 
     The browser keeps a `localhost` Host header, so dev servers with host
     checks (Vite allowedHosts, Next) behave exactly as on the host.
+    On Linux engines where the host dev server binds 127.0.0.1 (or a firewall
+    blocks docker0 -> host), ADE supplies a reverse tunnel over :7000.
     """
+    waiters = tunnel_waiters.setdefault(port, queue.Queue())
     if port in forwards or port_open("127.0.0.1", port, 0.3):
         return
-    if not port_open(HOST_ALIAS, port):
+    direct = port_open(HOST_ALIAS, port, 0.4)
+    if not direct and not host_reachable:
         raise ActionError(
             f"Nothing is reachable on the host at port {port}. Start the project's dev server "
             "(dev_server_start) and use the URL it reports."
@@ -313,10 +319,16 @@ def ensure_forward(port):
     listener.listen(64)
     forwards[port] = listener
 
+    def handle_client(client):
+        if port_open(HOST_ALIAS, port, 0.2):
+            bridge(client, port, HOST_ALIAS)
+        else:
+            waiters.put(client)
+
     def accept_loop():
         while True:
             client, _ = listener.accept()
-            threading.Thread(target=bridge, args=(client, port), daemon=True).start()
+            threading.Thread(target=handle_client, args=(client,), daemon=True).start()
 
     threading.Thread(target=accept_loop, daemon=True).start()
 
@@ -337,13 +349,13 @@ def start_cdp_bridge():
     threading.Thread(target=serve_cdp_bridge, args=(listener,), daemon=True).start()
 
 
-def open_url(url):
+def open_url(url, host_reachable=False):
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ActionError("only http(s) URLs can be opened")
     if parsed.hostname in ("localhost", "127.0.0.1", "0.0.0.0"):
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        ensure_forward(port)
+        ensure_forward(port, host_reachable=host_reachable)
         if parsed.hostname != "localhost":
             url = parsed._replace(netloc=f"localhost:{port}").geturl()
     # A second launch with the same profile opens a tab in the running browser
@@ -411,7 +423,7 @@ def perform(body):
             click(SCROLL[direction])
             time.sleep(0.03)
     elif action == "open_url":
-        open_url(str(body.get("url", "")))
+        open_url(str(body.get("url", "")), host_reachable=bool(body.get("host_reachable")))
         time.sleep(1.5)
     elif action == "wait":
         time.sleep(max(0.0, min(float(body.get("seconds", 1)), 10.0)))
@@ -424,7 +436,7 @@ def perform(body):
             raise ActionError("port must be an integer")
         if not 1 <= port <= 65535:
             raise ActionError("port must be between 1 and 65535")
-        ensure_forward(port)
+        ensure_forward(port, host_reachable=bool(body.get("host_reachable")))
         return {"ok": True}
     else:
         raise ActionError(f"unknown action: {action}")
@@ -467,6 +479,28 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
+        if self.path.startswith("/tunnel/"):
+            self.close_connection = True
+            try:
+                port = int(self.path.split("/")[2])
+            except (IndexError, ValueError):
+                return self.reply(400, {"error": "invalid port"})
+            waiters = tunnel_waiters.setdefault(port, queue.Queue())
+            try:
+                client = waiters.get(timeout=25)
+            except queue.Empty:
+                return self.reply(204, {})
+            try:
+                self.connection.sendall(b"HTTP/1.1 200 OK\r\n\r\n")
+            except OSError:
+                waiters.put(client)
+                return
+            back = threading.Thread(target=pump, args=(self.connection, client), daemon=True)
+            back.start()
+            pump(client, self.connection)
+            back.join()
+            client.close()
+            return
         if self.path != "/action":
             return self.reply(404, {"error": "not found"})
         try:
