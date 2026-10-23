@@ -12,9 +12,6 @@ import type {
 /** Where the browser preview is shown: docked in the right pane, floating, or hidden. */
 export type BrowserPlace = "dock" | "float" | "hidden";
 
-/** Which view the Computer tab shows. */
-export type BrowserView = "browser" | "desktop";
-
 /** Free position of the floating player, relative to the main content area. */
 export interface BrowserMiniPlayerState {
   readonly width: number | null;
@@ -38,8 +35,6 @@ export interface BrowserPreviewValue {
   readonly canvas: HTMLCanvasElement | null;
   readonly place: BrowserPlace;
   readonly setPlace: (place: BrowserPlace) => void;
-  readonly view: BrowserView;
-  readonly setView: (view: BrowserView) => void;
   readonly mini: BrowserMiniPlayerState;
   readonly setMini: (next: BrowserMiniPlayerState) => void;
   readonly attachCanvas: (canvas: HTMLCanvasElement) => void;
@@ -48,8 +43,13 @@ export interface BrowserPreviewValue {
   readonly requestViewportSize: (size: BrowserStreamViewport) => void;
   /** Sends a client message over the stream. False when it was not sent. */
   readonly send: (message: ClientMessage) => boolean;
-  /** Take or hand back control of the shared agent computer. Errors are kept in actionError. */
+  /** Take or hand back control of the shared agent browser. Errors are kept in actionError. */
   readonly changeControl: (action: "take" | "release") => Promise<boolean>;
+  /**
+   * Uploads `files` and answers the page's open file picker with them, taking control first if
+   * needed. No files closes the picker. Errors are kept in actionError.
+   */
+  readonly answerFileChooser: (chooserId: string, files: readonly File[]) => Promise<boolean>;
   readonly actionError: string | null;
   readonly reconnect: () => void;
 }

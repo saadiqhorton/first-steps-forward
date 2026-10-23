@@ -7,9 +7,9 @@ import {
   maskValues,
   modifiersOf,
   mouseEventParams,
-  isLoopbackUrl,
   normalizeBrowserUrl,
   wheelEventParams,
+  xdotoolChords,
 } from "./browser-page.mjs";
 
 test("normalizeBrowserUrl adds https to bare hosts and http to loopback", () => {
@@ -135,13 +135,24 @@ test("normalizeBrowserUrl rejects bad input with code invalid_url", () => {
   }
 });
 
-test("isLoopbackUrl matches localhost, *.localhost, 127.0.0.1 and [::1] only", () => {
-  assert.equal(isLoopbackUrl("http://localhost:3000/"), true);
-  assert.equal(isLoopbackUrl("http://app.localhost/x"), true);
-  assert.equal(isLoopbackUrl("http://127.0.0.1:8080"), true);
-  assert.equal(isLoopbackUrl("http://[::1]:5173/"), true);
-  assert.equal(isLoopbackUrl("https://example.com/"), false);
-  assert.equal(isLoopbackUrl("https://localhost.example.com/"), false);
-  assert.equal(isLoopbackUrl("http://10.0.0.5/"), false);
-  assert.equal(isLoopbackUrl("not a url"), false);
+test("xdotoolChords maps xdotool key names to Playwright chords, in order", () => {
+  assert.deepEqual(xdotoolChords("Return"), ["Enter"]);
+  assert.deepEqual(xdotoolChords("Tab Tab Return"), ["Tab", "Tab", "Enter"]);
+  assert.deepEqual(xdotoolChords(["BackSpace", "Escape"]), ["Backspace", "Escape"]);
+  assert.deepEqual(xdotoolChords("ctrl+a"), ["Control+KeyA"]);
+  assert.deepEqual(xdotoolChords("ctrl+shift+r"), ["Control+Shift+KeyR"]);
+  assert.deepEqual(xdotoolChords("shift+Tab super+1"), ["Shift+Tab", "Meta+Digit1"]);
+  assert.deepEqual(xdotoolChords("Prior Next Up space"), [
+    "PageUp",
+    "PageDown",
+    "ArrowUp",
+    "Space",
+  ]);
+  assert.deepEqual(xdotoolChords("F5 a ! + minus"), ["F5", "a", "!", "+", "-"]);
+});
+
+test("xdotoolChords refuses empty input and unknown key names", () => {
+  assert.throws(() => xdotoolChords(""), /keys is required/);
+  assert.throws(() => xdotoolChords([]), /keys is required/);
+  assert.throws(() => xdotoolChords("ctrl+Hyperdrive"), /Unknown key: Hyperdrive/);
 });

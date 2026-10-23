@@ -117,19 +117,18 @@ export interface ProjectDocument {
   modifiedAt: number;
   size: number;
 }
-/** A project's agent computer (Docker desktop the agent drives, user watches). */
+/** A project's agent computer: headless Chrome on this machine that the agent drives, user watches. */
 export interface AgentComputer {
   projectId: string;
-  status: "unavailable" | "stopped" | "building" | "starting" | "running" | "error";
+  status: "unavailable" | "stopped" | "installing" | "starting" | "running" | "error";
   detail?: string;
-  /** Tail of the image build output while building / after a failed build. */
-  log?: string[];
+  /** Download progress while ADE installs its headless browser (once per machine). */
+  progress?: { downloadedBytes: number; totalBytes: number; unpacking: boolean };
+  /** A host command that fixes the error, e.g. `npm run browser:setup`. */
+  setupCommand?: string;
   screen: { width: number; height: number };
-  startedAt?: number | null;
-  /** noVNC URLs (loopback only): watch-only, and with keyboard/mouse input. */
-  viewerUrl?: string;
-  controlViewerUrl?: string;
-  /** Full noVNC page used when the user opens the desktop in a separate tab. */
+  /** "default" keeps the project's logins and storage between runs; "incognito" starts clean. */
+  profile: "default" | "incognito";
 }
 export interface AgentModelsResult {
   available: boolean;

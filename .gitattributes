@@ -1,2 +1,0 @@
-# The agent computer image runs these in Linux; CRLF would break the shebang scripts.
-docker/agent-computer/** text eol=lf

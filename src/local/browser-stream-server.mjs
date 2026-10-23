@@ -179,6 +179,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
       controller: controllerFor(state, rec.viewerId),
       generation: state.generation,
       dialog: room.dialog,
+      fileChooser: room.fileChooser,
     });
   const broadcast = (room, message) => {
     for (const rec of room.viewers) send(rec, message);
@@ -247,6 +248,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
       control: controls.for(projectId),
       viewers: new Set(),
       dialog: null,
+      fileChooser: null,
       held: new Map(),
       unsubs: [],
       closed: false,
@@ -257,6 +259,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
       (session) => {
         if (room.closed) return;
         room.session = session;
+        room.fileChooser = session.fileChooser();
         room.unsubs.push(
           session.on("nav", (nav) => broadcast(room, navMessage(nav))),
           session.on("viewport", (size) =>
@@ -273,6 +276,11 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
           ),
           session.on("dialog", (dialog) => {
             room.dialog = dialog ?? null;
+            broadcastControl(room);
+          }),
+          // The page's open file picker; the viewer in control answers it over HTTP.
+          session.on("fileChooser", (fileChooser) => {
+            room.fileChooser = fileChooser ?? null;
             broadcastControl(room);
           }),
           session.on("closed", () => {
@@ -468,8 +476,10 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
         await guarded(
           rec,
           control.human(rec.viewerId, async () => {
-            await session.input(input);
+            const result = await session.input(input);
             trackHeld(room, rec.viewerId, input);
+            // A copy or cut key's text goes to this viewer's own clipboard.
+            if (result?.copied) send(rec, { type: "clipboard", text: result.copied });
           }),
         );
       }

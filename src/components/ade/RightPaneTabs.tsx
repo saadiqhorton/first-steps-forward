@@ -1,5 +1,5 @@
 import { type ReactNode, type Ref } from "react";
-import { Activity, FileDiff, Monitor, SquareTerminal, X, type LucideIcon } from "lucide-react";
+import { Activity, FileDiff, Globe, SquareTerminal, X, type LucideIcon } from "lucide-react";
 import { GlideIndicator } from "@/components/ade/motion";
 import { type RightTab } from "@/lib/ade/navigation";
 
@@ -10,7 +10,7 @@ export const RIGHT_PANE_TABS: Array<{
 }> = [
   { id: "activity", label: "Activity", Icon: Activity },
   { id: "diff", label: "Diff", Icon: FileDiff },
-  { id: "computer", label: "Computer", Icon: Monitor },
+  { id: "computer", label: "Browser", Icon: Globe },
   { id: "terminal", label: "Terminal", Icon: SquareTerminal },
 ];
 

@@ -1,5 +1,7 @@
 # Agent Computer — design
 
+> **Superseded (2026-10-22):** ADE no longer uses Docker. The agent computer is now each project's headless Chrome on this machine, ported from T3 Code's server browser: see README § Agent browser and `docs/adr/0001-agent-browser-on-host.md`. This document records the Docker design as it was.
+
 **Status:** implemented and live-verified (Codex and OpenCode real turns on Windows; Pi extension live-tested from WSL against a Windows ADE). Updated from the original approved direction (user: "replace all the preview/port/script stuff with an agent computer the agent controls"; "keep it on our machine and free") after the first Debian+apt image proved unbuildable on the user's network.
 
 ## Goal

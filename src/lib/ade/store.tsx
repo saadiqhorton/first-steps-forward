@@ -100,8 +100,10 @@ export const agentModels = (agentId: AgentId) =>
   request<AgentModelsResult>(`/api/agents/${agentId}/models`);
 export const computerStatus = (projectId: string) =>
   request<AgentComputer>(`/api/projects/${projectId}/computer`);
-export const computerControl = (projectId: string, op: "start" | "stop") =>
+export const computerControl = (projectId: string, op: "start" | "stop" | "clear") =>
   request<AgentComputer>(`/api/projects/${projectId}/computer/${op}`, "POST");
+export const computerProfile = (projectId: string, profile: AgentComputer["profile"]) =>
+  request<AgentComputer>(`/api/projects/${projectId}/computer/profile`, "POST", { profile });
 export const harnessJob = (agentId: AgentId) =>
   request<HarnessJob>(`/api/agents/${agentId}/harness`);
 export const optionCapabilities = (agentId: AgentId, model?: string) => {

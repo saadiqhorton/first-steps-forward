@@ -2,19 +2,21 @@
 // apps/server/src/preview/ServerBrowserPage.ts, packages/shared/src/preview.ts.
 // Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
 //
-// Browser layer for the agent computer. Chromium runs inside the Docker agent computer and
-// exposes CDP on 127.0.0.1. ADE attaches with playwright-core's connectOverCDP and works on
-// the context's active page: viewer frames come from one CDP screencast per viewer, human
-// input goes straight to CDP Input.*, and agent tools use Playwright locators on aria refs.
-// Versus T3 this is a plain module: no Effect runtime, no tab broker, no desktop attach, no
-// clipboard bridge, and no anti-detection flags. The browser presents as it is.
+// Browser layer for the agent computer: each project's headless Chrome context, launched on this
+// machine by browser-contexts.mjs. ADE works on the context's active page: viewer frames come
+// from one CDP screencast per viewer, human input goes straight to CDP Input.*, browser_* tools
+// use Playwright locators on aria refs, and computer_* tools drive the page by coordinates.
+// Pages present as ordinary Chrome, copies made with the viewer's keys reach the viewer's
+// clipboard, and file pickers are answered by whoever drives the page, as in T3.
+// Versus T3 this is a plain module: no Effect runtime, no tab broker and no desktop attach.
 
-import { chromium } from "playwright-core";
+import path from "node:path";
+
+import { presentAsChrome } from "./browser-contexts.mjs";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
 const VIEWPORT_LIMITS = { minWidth: 240, maxWidth: 3840, minHeight: 240, maxHeight: 2160 };
-const CDP_CONNECT_TIMEOUT_MS = 15_000;
 // Frames and input render at 2x like T3's RENDER_SCALE, so text stays sharp in the viewer.
 const RENDER_SCALE = 2;
 // Chromium allows three unacked frames, so 100 ms pacing caps viewers near 30 fps.
@@ -32,6 +34,57 @@ const DIALOG_TEXT_LIMIT = 4_000;
 const MASK = "••••••••";
 const LOOPBACK_PREFIX = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::|\/|$)/i;
 const REF_PATTERN = /^(\d+)-((?:f\d+)?e\d+)$/;
+// computer_* actions let the page react before the screenshot, as the old desktop did.
+const COMPUTER_SETTLE_MS = 350;
+const COMPUTER_WHEEL_STEP = 100;
+const COMPUTER_MAX_WAIT_S = 10;
+
+const CLIPBOARD_TEXT_LIMIT = 1024 * 1024;
+const CLIPBOARD_WORLD = "ade-browser-clipboard";
+// Headless Chromium shares one clipboard between every context, so the copy a viewer's copy or
+// cut key makes is read from this world instead of the clipboard. Page scripts cannot see the
+// world, and only a copy made while a real key is handled counts. (T3's CLIPBOARD_SCRIPT.)
+const CLIPBOARD_SCRIPT = `(() => {
+  let keying = false;
+  let copied = "";
+  // The same Ctrl or Cmd + C or X that editingCommand sends as copy or cut.
+  addEventListener("keydown", (event) => {
+    if (!event.isTrusted || event.altKey || event.ctrlKey === event.metaKey) return;
+    const key = event.key.toLowerCase();
+    if (key !== "c" && key !== "x") return;
+    keying = true;
+    copied = "";
+    setTimeout(() => { keying = false; });
+  }, true);
+  const selection = () => {
+    let field = document.activeElement;
+    while (field?.shadowRoot?.activeElement) field = field.shadowRoot.activeElement;
+    if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && field.selectionStart !== null)
+      return field.value.slice(field.selectionStart, field.selectionEnd ?? field.selectionStart);
+    return String(document.getSelection() ?? "");
+  };
+  const record = (text) => {
+    copied = String(text ?? "").slice(0, ${CLIPBOARD_TEXT_LIMIT});
+  };
+  // Capturing at window runs before page handlers can stop the event, and before cut removes
+  // the selection.
+  const snapshot = (event) => {
+    if (keying && event.isTrusted) record(selection());
+  };
+  // Bubbling back to window picks up text a page handler set instead.
+  const replace = (event) => {
+    if (keying && event.isTrusted && event.defaultPrevented) record(event.clipboardData?.getData("text/plain"));
+  };
+  for (const type of ["copy", "cut"]) {
+    addEventListener(type, snapshot, true);
+    addEventListener(type, replace);
+  }
+  globalThis.takeCopy = () => {
+    const text = copied;
+    copied = "";
+    return text;
+  };
+})();`;
 
 const noop = () => {};
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
@@ -49,11 +102,15 @@ const asRecord = (value) => (typeof value === "object" && value !== null ? value
 const numberOr = (value, fallback = 0) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const coded = (code, message) => Object.assign(new Error(message), { code });
+// Install and launch failures keep their own code and words (browser_installing,
+// browser_libraries_missing, ...); anything else reads as the browser being unavailable.
 const cdpUnavailable = (cause) =>
-  coded(
-    "cdp_unavailable",
-    `The agent computer's browser is not reachable: ${cause instanceof Error ? cause.message : String(cause)}`,
-  );
+  cause?.code?.startsWith?.("browser_")
+    ? cause
+    : coded(
+        "cdp_unavailable",
+        `The agent browser is not available: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
 
 /**
  * Normalizes what the user or agent typed into an http(s) URL. Bare hosts get https, loopback
@@ -78,26 +135,6 @@ export function normalizeBrowserUrl(rawUrl) {
     throw coded("invalid_url", `Only http and https URLs can be opened, not ${parsed.protocol}`);
   }
   return parsed.href;
-}
-
-/**
- * True when the URL targets this machine's loopback: localhost, *.localhost, 127.0.0.1 or [::1].
- * Those addresses resolve inside the agent computer, so they need the host port forward.
- * @param {string | URL} url
- */
-export function isLoopbackUrl(url) {
-  let hostname;
-  try {
-    hostname = new URL(url).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  return (
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname === "127.0.0.1" ||
-    hostname === "[::1]"
-  );
 }
 
 /**
@@ -198,6 +235,98 @@ export function keyEventParams(message) {
       key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
     ),
   };
+}
+
+// xdotool key names (what computer_key documents) to Playwright's. Single characters pass through.
+const XDOTOOL_KEYS = {
+  ctrl: "Control",
+  control: "Control",
+  control_l: "Control",
+  control_r: "Control",
+  shift: "Shift",
+  shift_l: "Shift",
+  shift_r: "Shift",
+  alt: "Alt",
+  alt_l: "Alt",
+  alt_r: "Alt",
+  meta: "Meta",
+  super: "Meta",
+  super_l: "Meta",
+  super_r: "Meta",
+  cmd: "Meta",
+  win: "Meta",
+  enter: "Enter",
+  return: "Enter",
+  kp_enter: "Enter",
+  esc: "Escape",
+  escape: "Escape",
+  backspace: "Backspace",
+  delete: "Delete",
+  del: "Delete",
+  insert: "Insert",
+  tab: "Tab",
+  iso_left_tab: "Tab",
+  space: "Space",
+  up: "ArrowUp",
+  down: "ArrowDown",
+  left: "ArrowLeft",
+  right: "ArrowRight",
+  pageup: "PageUp",
+  page_up: "PageUp",
+  prior: "PageUp",
+  pagedown: "PageDown",
+  page_down: "PageDown",
+  next: "PageDown",
+  home: "Home",
+  end: "End",
+  minus: "-",
+  plus: "+",
+  equal: "=",
+  period: ".",
+  comma: ",",
+  slash: "/",
+  backslash: "\\",
+  semicolon: ";",
+  apostrophe: "'",
+  grave: "`",
+  bracketleft: "[",
+  bracketright: "]",
+};
+const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta"]);
+
+/**
+ * Turns computer_key's xdotool-style keys ("ctrl+l", "Tab Tab Return", ["Return"]) into
+ * Playwright chords for keyboard.press, in order.
+ * @param {string | string[]} keys
+ * @returns {string[]}
+ */
+export function xdotoolChords(keys) {
+  const combos = typeof keys === "string" ? keys.split(/\s+/).filter(Boolean) : keys;
+  if (
+    !Array.isArray(combos) ||
+    combos.length === 0 ||
+    !combos.every((k) => typeof k === "string" && k)
+  ) {
+    throw new Error('keys is required, e.g. "ctrl+l" or ["Return"]');
+  }
+  return combos.map((combo) => {
+    // A lone "+" is the plus key, not an empty chord.
+    const parts = combo === "+" ? ["+"] : combo.split("+").filter(Boolean);
+    if (parts.length === 0) throw new Error(`Empty key combo: "${combo}"`);
+    const names = parts.map((part) => {
+      const mapped = XDOTOOL_KEYS[part.toLowerCase()];
+      if (mapped) return mapped;
+      if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(part)) return part.toUpperCase();
+      if ([...part].length === 1) return part;
+      throw new Error(`Unknown key: ${part}`);
+    });
+    // With a modifier held, letters and digits press by code, so Shift+R really reads as "R".
+    const modified = names.slice(0, -1).some((name) => MODIFIER_KEYS.has(name));
+    const last = names.at(-1);
+    if (modified && /^[a-z]$/i.test(last)) names[names.length - 1] = `Key${last.toUpperCase()}`;
+    else if (modified && /^[0-9]$/.test(last)) names[names.length - 1] = `Digit${last}`;
+    return names.join("+");
+  });
 }
 
 /**
@@ -424,18 +553,17 @@ class Screencast {
 }
 
 class BrowserSession {
-  #browser;
   #context;
   #onClosed;
-  #loopbackHook;
   #active = null;
   #closed = false;
   #listeners = new Map();
   #controls = new WeakMap();
   #watched = new WeakSet();
+  /** Each watched page's preparation; navigations wait for it. */
+  #preparing = new WeakMap();
   #screencasts = new Set();
   #viewport = { ...DEFAULT_VIEWPORT };
-  #resized = false;
   #lastWheelAt = 0;
   #inputChain = Promise.resolve();
   #pressedKeys = new Map();
@@ -450,23 +578,27 @@ class BrowserSession {
   #refGeneration = 0;
   #pointerSequence = 0;
   #poll = null;
+  #mouse = { x: 0, y: 0 };
+  /** @type {{ id: string, page: import("playwright-core").Page, chooser: import("playwright-core").FileChooser, multiple: boolean, accept: string } | null} */
+  #fileChooser = null;
+  #fileChooserSeq = 0;
 
   /** @private Use createBrowserHub. */
-  constructor(browser, context, onClosed, loopbackHook) {
-    this.#browser = browser;
+  constructor(context, onClosed) {
     this.#context = context;
     this.#onClosed = onClosed;
-    this.#loopbackHook = loopbackHook;
   }
 
-  static async open({ browser, context, onClosed, loopbackHook }) {
-    const session = new BrowserSession(browser, context, onClosed, loopbackHook);
+  static async open({ context, onClosed }) {
+    const session = new BrowserSession(context, onClosed);
     await session.#init();
     return session;
   }
 
   async #init() {
-    this.#browser.on("disconnected", () => this.#finish());
+    this.#context.on("close", () => this.#finish());
+    // Pages may write the clipboard as they would in a normal tab, as T3 grants.
+    await this.#context.grantPermissions(["clipboard-write"]).catch(noop);
     this.#context.on("page", (page) => {
       this.#watch(page);
       this.#activate(page);
@@ -476,6 +608,8 @@ class BrowserSession {
     let initial = usable.find((p) => p.url() && p.url() !== "about:blank") ?? usable.at(-1);
     if (!initial) initial = await this.#context.newPage();
     this.#watch(initial);
+    // The first page presents as Chrome before anything navigates it.
+    await this.#preparing.get(initial);
     this.#activate(initial);
     this.#poll = setInterval(() => {
       if (!this.#dialog) void this.#refreshNav();
@@ -503,7 +637,7 @@ class BrowserSession {
   }
 
   /**
-   * Subscribes to "nav", "viewport", "pointer", "dialog" or "closed".
+   * Subscribes to "nav", "viewport", "pointer", "dialog", "fileChooser" or "closed".
    * @returns {() => void} unsubscribe
    */
   on(event, callback) {
@@ -529,7 +663,7 @@ class BrowserSession {
       quality: Math.min(100, Math.max(1, Math.round(numberOr(options.quality, 70)))),
     };
     // A viewer attaching re-reads the real viewport, so its first frame matches the mapping.
-    if (!this.#resized && this.#active) void this.#syncViewport(this.#active);
+    if (this.#active) void this.#syncViewport(this.#active);
     const stream = new Screencast(
       { context: () => this.#context, lastWheelAt: () => this.#lastWheelAt },
       params,
@@ -549,8 +683,10 @@ class BrowserSession {
   }
 
   /**
-   * Human input for the active page, applied in arrival order. Rejects if CDP fails.
+   * Human input for the active page, applied in arrival order. Rejects if CDP fails. A copy or
+   * cut key resolves with the text it copied, for the viewer's own clipboard.
    * @param {object} message protocol `mouse`, `wheel`, `key` or `text` message
+   * @returns {Promise<{ copied?: string } | undefined>}
    */
   input(message) {
     const run = this.#inputChain.then(() => this.#dispatch(message));
@@ -582,10 +718,18 @@ class BrowserSession {
         return;
       case "key": {
         const params = keyEventParams(message);
+        const command = params.commands?.[0];
+        const copying = params.type !== "keyUp" && (command === "copy" || command === "cut");
+        // Clears any copy a page script recorded without a real key, so only this one counts.
+        if (copying) await this.#takeCopiedText(cdp);
         await cdp.send("Input.dispatchKeyEvent", params);
         const id = String(message.code || message.key || "");
         if (message.action === "up") this.#pressedKeys.delete(id);
         else this.#pressedKeys.set(id, { key: params.key, code: params.code });
+        if (copying) {
+          const copied = await this.#takeCopiedText(cdp);
+          if (copied) return { copied };
+        }
         return;
       }
       case "text":
@@ -630,34 +774,22 @@ class BrowserSession {
   }
 
   /**
-   * Syncs the CSS viewport from the active page's real window inside the agent
-   * computer (1280x800 Xvfb display) so the full page fits without 2x cropping.
+   * Re-reads the CSS viewport. The context keeps a fixed 1280x800 page, the size computer_*
+   * coordinates refer to, and viewers scale it to fit.
    * @returns {Promise<{ width: number, height: number }>}
    */
   async resize(_size) {
-    if (this.#active) {
-      await this.#clearViewportOverride(this.#active);
-      await this.#syncViewport(this.#active);
-    }
+    if (this.#active) await this.#syncViewport(this.#active);
     this.#emit("viewport", this.viewport());
     return this.viewport();
-  }
-
-  async #clearViewportOverride(page) {
-    const cdp = await this.#control(page).catch(() => null);
-    await cdp?.send("Emulation.clearDeviceMetricsOverride").catch(noop);
   }
 
   /** Navigates the active page (http and https only). */
   async navigate(url) {
     const target = normalizeBrowserUrl(url);
-    await this.#beforeNavigate(target);
-    await this.#go(this.#page().goto(target, { waitUntil: "commit", timeout: DEFAULT_TIMEOUT_MS }));
-  }
-
-  // The hub's hook runs before a loopback navigation, so the container's port forward exists.
-  async #beforeNavigate(target) {
-    if (this.#loopbackHook && isLoopbackUrl(target)) await this.#loopbackHook(new URL(target));
+    const page = this.#page();
+    await this.#preparing.get(page);
+    await this.#go(page.goto(target, { waitUntil: "commit", timeout: DEFAULT_TIMEOUT_MS }));
   }
 
   /** @param {-1 | 1} delta */
@@ -711,7 +843,7 @@ class BrowserSession {
         return { text: this.#statusText() };
       case "navigate": {
         const url = normalizeBrowserUrl(input.url);
-        await this.#beforeNavigate(url);
+        await this.#preparing.get(page);
         await this.#go(page.goto(url, { waitUntil: "load", timeout: DEFAULT_TIMEOUT_MS }));
         return { text: await this.#settledStatus() };
       }
@@ -822,9 +954,240 @@ class BrowserSession {
       case "dialog":
         await this.dialog({ accept: input.accept === true, promptText: input.promptText });
         return { text: `${input.accept === true ? "Accepted" : "Dismissed"} the dialog.` };
+      case "upload":
+        return { text: await this.#upload(input) };
       default:
         throw coded("unknown_action", `Unknown browser action "${input?.action}".`);
     }
+  }
+
+  // T3's uploadFiles: a file input by ref, or else the file picker the page has open.
+  async #upload(input) {
+    const paths = Array.isArray(input.paths) ? input.paths.map(String) : [];
+    const relative = paths.find((file) => !path.isAbsolute(file));
+    if (relative !== undefined) throw new Error(`Upload paths must be absolute: ${relative}`);
+    if (input.ref !== undefined) {
+      await this.#locator(input.ref).setInputFiles(paths, { timeout: DEFAULT_TIMEOUT_MS });
+      return `Set ${paths.length} file(s) on ${input.ref}.`;
+    }
+    const open = this.#fileChooser;
+    if (!open) {
+      throw coded(
+        "no_file_chooser",
+        "No file picker is open. Click the page's upload control first, or pass the file input's ref.",
+      );
+    }
+    if (paths.length > 1 && !open.multiple) throw new Error("This file picker accepts one file.");
+    if (paths.length > 0) await open.chooser.setFiles(paths, { timeout: DEFAULT_TIMEOUT_MS });
+    this.#closeFileChooser(open);
+    return paths.length > 0
+      ? `Chose ${paths.length} file(s) in the file picker.`
+      : "Closed the file picker without a file.";
+  }
+
+  /**
+   * Runs one computer_* tool action by viewport coordinates, then captures the page, as the old
+   * desktop control server did. Returns { screenshot, mimeType, cursor, width, height, note? };
+   * the screenshot is left out while a JavaScript dialog blocks the page.
+   * @param {{ action: string, [key: string]: unknown }} input
+   */
+  async runComputerAction(input) {
+    const action = String(input?.action ?? "");
+    let page = this.#page();
+    if (this.#dialog && action !== "screenshot" && action !== "wait") {
+      throw coded("dialog_pending", this.#dialogNote());
+    }
+    const chooserBefore = this.#fileChooser;
+    let note = null;
+    switch (action) {
+      case "screenshot":
+        break;
+      case "click":
+      case "double_click":
+      case "right_click":
+      case "middle_click": {
+        const point = pointOf(input);
+        const button =
+          { right_click: "right", middle_click: "middle" }[action] ?? input.button ?? "left";
+        if (!["left", "middle", "right"].includes(button)) {
+          throw new Error("button must be left, middle, or right");
+        }
+        await this.#cursor(point, "click");
+        this.#mouse = point;
+        note = await this.#untilDialog(
+          page,
+          page.mouse.click(point.x, point.y, {
+            button,
+            clickCount: action === "double_click" ? 2 : 1,
+          }),
+        );
+        break;
+      }
+      case "move": {
+        const point = pointOf(input);
+        await this.#cursor(point, "move");
+        this.#mouse = point;
+        await page.mouse.move(point.x, point.y);
+        break;
+      }
+      case "drag": {
+        const from = pointOf(input);
+        const to = pointOf(input, "to_x", "to_y");
+        await this.#cursor(from, "move");
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        // Intermediate motion so apps see a real drag.
+        await page.mouse.move(to.x, to.y, { steps: 10 });
+        await page.mouse.up();
+        this.#mouse = to;
+        await this.#cursor(to, "move");
+        break;
+      }
+      case "type":
+        await page.keyboard.type(requireString(input.text, "text"));
+        break;
+      case "key":
+        for (const chord of xdotoolChords(input.keys)) {
+          await page.keyboard.press(chord);
+          await sleep(40);
+        }
+        break;
+      case "scroll": {
+        const direction = input.direction ?? "down";
+        if (!["up", "down", "left", "right"].includes(direction)) {
+          throw new Error("direction must be up, down, left, or right");
+        }
+        const amount = Math.max(1, Math.min(Math.trunc(numberOr(input.amount, 3)), 20));
+        if (input.x !== undefined || input.y !== undefined) {
+          const point = pointOf(input);
+          await this.#cursor(point, "move");
+          this.#mouse = point;
+          await page.mouse.move(point.x, point.y);
+        }
+        const step = amount * COMPUTER_WHEEL_STEP;
+        this.#lastWheelAt = Date.now();
+        await page.mouse.wheel(
+          direction === "left" ? -step : direction === "right" ? step : 0,
+          direction === "up" ? -step : direction === "down" ? step : 0,
+        );
+        break;
+      }
+      case "open_url": {
+        const url = normalizeBrowserUrl(input.url);
+        await this.#preparing.get(page);
+        await this.#go(page.goto(url, { waitUntil: "load", timeout: DEFAULT_TIMEOUT_MS }));
+        break;
+      }
+      case "wait":
+        await sleep(Math.max(0, Math.min(numberOr(input.seconds, 1), COMPUTER_MAX_WAIT_S)) * 1000);
+        break;
+      default:
+        throw coded("unknown_action", `Unknown computer action "${input?.action}".`);
+    }
+    if (action !== "screenshot" && action !== "wait" && action !== "open_url") {
+      await sleep(COMPUTER_SETTLE_MS);
+    }
+    if (this.#fileChooser && this.#fileChooser !== chooserBefore) {
+      note = "A file picker opened. Answer it with browser_upload and absolute file paths.";
+    }
+    const { width, height } = this.#viewport;
+    const result = { width, height, cursor: { ...this.#mouse }, ...(note ? { note } : {}) };
+    // Page script, and so a capture, is blocked while a dialog is open.
+    if (this.#dialog) return { ...result, note: note ?? this.#dialogNote() };
+    page = this.#page();
+    const shot = await page.screenshot({ type: "png", scale: "css", timeout: DEFAULT_TIMEOUT_MS });
+    return { ...result, screenshot: shot.toString("base64"), mimeType: "image/png" };
+  }
+
+  #dialogNote() {
+    const { type, message } = dialogState(this.#dialog.dialog);
+    return `A JavaScript ${type} dialog is open: "${message}". Call browser_dialog to accept or dismiss it.`;
+  }
+
+  /** The file picker the page has open, as viewers see it, or null. */
+  fileChooser() {
+    const open = this.#fileChooser;
+    return open ? { id: open.id, multiple: open.multiple, accept: open.accept } : null;
+  }
+
+  /**
+   * Answers the open file picker with local file paths. No paths closes it without a file.
+   * @returns {Promise<boolean>} false when `id` is not the picker that is open
+   */
+  async answerFileChooser(id, paths) {
+    const open = this.#fileChooser;
+    if (!open || open.id !== id) return false;
+    if (paths.length > 0) {
+      await open.chooser.setFiles(open.multiple ? paths : paths.slice(0, 1), {
+        timeout: DEFAULT_TIMEOUT_MS,
+      });
+    }
+    this.#closeFileChooser(open);
+    return true;
+  }
+
+  async #offerFileChooser(page, chooser) {
+    const accept =
+      (await chooser
+        .element()
+        .getAttribute("accept")
+        .catch(() => null)) ?? "";
+    if (this.#closed) return;
+    this.#fileChooser = {
+      id: `${++this.#fileChooserSeq}`,
+      page,
+      chooser,
+      multiple: chooser.isMultiple(),
+      accept: accept.slice(0, 1024),
+    };
+    this.#emit("fileChooser", this.fileChooser());
+  }
+
+  #closeFileChooser(open) {
+    if (this.#fileChooser !== open) return;
+    this.#fileChooser = null;
+    this.#emit("fileChooser", null);
+  }
+
+  /** Copy text the page's clipboard world recorded since the last call, across its frames. */
+  async #takeCopiedText(cdp) {
+    const tree = await cdp.send("Page.getFrameTree").catch(() => null);
+    if (!tree) return "";
+    const frameIds = (node) => [node.frame.id, ...(node.childFrames ?? []).flatMap(frameIds)];
+    const copies = await Promise.all(
+      frameIds(tree.frameTree).map((frameId) =>
+        cdp
+          .send("Page.createIsolatedWorld", { frameId, worldName: CLIPBOARD_WORLD })
+          .then(({ executionContextId }) =>
+            cdp.send("Runtime.evaluate", {
+              contextId: executionContextId,
+              expression: "globalThis.takeCopy?.()",
+              returnByValue: true,
+            }),
+          )
+          .then(
+            ({ result }) => (typeof result.value === "string" ? result.value : ""),
+            () => "",
+          ),
+      ),
+    );
+    return copies.find((text) => text.length > 0) ?? "";
+  }
+
+  // Every page presents as ordinary Chrome and records the viewer's copies, as T3's tabs do.
+  // Scripts for new documents run only while this session's Page domain is on.
+  async #prepare(page) {
+    const cdp = await this.#control(page).catch(() => null);
+    if (!cdp) return;
+    await presentAsChrome(cdp).catch(noop);
+    await cdp.send("Page.enable").catch(noop);
+    await cdp
+      .send("Page.addScriptToEvaluateOnNewDocument", {
+        source: CLIPBOARD_SCRIPT,
+        worldName: CLIPBOARD_WORLD,
+        runImmediately: true,
+      })
+      .catch(noop);
   }
 
   async #waitFor(input) {
@@ -982,7 +1345,7 @@ class BrowserSession {
   close() {
     if (this.#closed) return Promise.resolve();
     this.#finish();
-    return this.#browser.close().catch(noop);
+    return this.#context.close().catch(noop);
   }
 
   #finish() {
@@ -1025,6 +1388,9 @@ class BrowserSession {
     this.#watched.add(page);
     page.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(DEFAULT_TIMEOUT_MS);
+    this.#preparing.set(page, this.#prepare(page));
+    // Listening intercepts the picker; whoever drives the page answers it (T3's onFileChooser).
+    page.on("filechooser", (chooser) => void this.#offerFileChooser(page, chooser));
     const mainNavigation = (request) =>
       request.isNavigationRequest() && request.frame() === page.mainFrame();
     page.on("request", (request) => {
@@ -1109,12 +1475,12 @@ class BrowserSession {
     this.#loading = false;
     if (previous) this.#releaseHeldInput(previous);
     for (const stream of this.#screencasts) void stream.retarget(page);
-    void this.#clearViewportOverride(page).then(() => this.#syncViewport(page));
+    void this.#syncViewport(page);
     void this.#refreshNav();
   }
 
-  // Without a resize, the viewport is whatever the browser window shows (Chromium's window
-  // inside the computer's display), so read the real CSS size back from layout metrics.
+  // The context fixes the viewport, but a popup can open at its own size, so read the real CSS
+  // size back from layout metrics.
   async #syncViewport(page) {
     const size = await withTimeout(
       this.#control(page).then(async (cdp) => {
@@ -1126,7 +1492,7 @@ class BrowserSession {
       null,
     );
     if (!size || size.width <= 0 || size.height <= 0) return;
-    if (page !== this.#active || this.#resized) return;
+    if (page !== this.#active) return;
     if (size.width === this.#viewport.width && size.height === this.#viewport.height) return;
     this.#viewport = { width: size.width, height: size.height };
     this.#emit("viewport", this.viewport());
@@ -1137,6 +1503,7 @@ class BrowserSession {
       this.#dialog = null;
       this.#emit("dialog", null);
     }
+    if (this.#fileChooser?.page === page) this.#closeFileChooser(this.#fileChooser);
     if (this.#closed || page !== this.#active) return;
     this.#active = null;
     this.#refs = null;
@@ -1154,6 +1521,20 @@ class BrowserSession {
   }
 }
 
+function pointOf(input, keyX = "x", keyY = "y") {
+  const x = Number(input[keyX]);
+  const y = Number(input[keyY]);
+  if (
+    input[keyX] === undefined ||
+    input[keyY] === undefined ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y)
+  ) {
+    throw new Error(`${keyX} and ${keyY} must be numbers.`);
+  }
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
 function requireString(value, name) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`Missing ${name}.`);
   if (name === "text" && value.length > TEXT_LIMIT) {
@@ -1163,48 +1544,32 @@ function requireString(value, name) {
 }
 
 /**
- * Lazily attaches to each project's agent computer Chromium over CDP, and reattaches after the
- * browser disconnects or is relaunched.
- * @param {{
- *   getCdpEndpoint: (projectId: string) => Promise<string>,
- *   beforeNavigate?: (projectId: string, url: URL) => Promise<void>,
- * }} options
- *   `beforeNavigate` runs, and its errors propagate, before every navigation to a loopback
- *   host (localhost, *.localhost, 127.0.0.1, [::1]). ADE uses it to set up the container's
- *   localhost port forward. Other navigations do not call it.
+ * One browser session per project, opened lazily on that project's headless Chrome context and
+ * reopened after the context closes.
+ * @param {{ contextFor: (projectId: string) => Promise<import("playwright-core").BrowserContext> }} options
  */
-export function createBrowserHub({ getCdpEndpoint, beforeNavigate }) {
+export function createBrowserHub({ contextFor }) {
   /** @type {Map<string, Promise<BrowserSession>>} */
   const sessions = new Map();
+  /** Sessions that finished opening, for synchronous status checks. */
+  const open = new Map();
 
   async function connect(projectId, onClosed) {
-    let endpoint;
+    let context;
     try {
-      endpoint = await getCdpEndpoint(projectId);
+      context = await contextFor(projectId);
     } catch (cause) {
       throw cdpUnavailable(cause);
     }
-    if (!endpoint) throw cdpUnavailable(new Error("no CDP endpoint"));
-    let browser;
-    try {
-      browser = await chromium.connectOverCDP(endpoint, { timeout: CDP_CONNECT_TIMEOUT_MS });
-    } catch (cause) {
-      throw cdpUnavailable(cause);
-    }
-    const context = browser.contexts()[0];
-    if (!context) {
-      await browser.close().catch(noop);
-      throw cdpUnavailable(new Error("the browser has no default context"));
-    }
-    const loopbackHook = beforeNavigate ? (url) => beforeNavigate(projectId, url) : null;
-    return BrowserSession.open({ browser, context, onClosed, loopbackHook });
+    return BrowserSession.open({ context, onClosed });
   }
 
-  /** Drops the project's session. The computer's browser keeps running. */
+  /** Closes the project's session and its context. */
   async function close(projectId) {
     const key = String(projectId);
     const current = sessions.get(key);
     sessions.delete(key);
+    open.delete(key);
     if (!current) return;
     const session = await current.catch(() => null);
     await session?.close();
@@ -1229,14 +1594,23 @@ export function createBrowserHub({ getCdpEndpoint, beforeNavigate }) {
       }
       const entry = connect(projectId, () => {
         if (sessions.get(key) === entry) sessions.delete(key);
+        if (open.get(key)?.closed) open.delete(key);
       });
       sessions.set(key, entry);
       try {
-        return await entry;
+        const session = await entry;
+        if (sessions.get(key) === entry && !session.closed) open.set(key, session);
+        return session;
       } catch (cause) {
         if (sessions.get(key) === entry) sessions.delete(key);
         throw cause;
       }
+    },
+
+    /** The project's open session, without connecting. */
+    peek(projectId) {
+      const session = open.get(String(projectId));
+      return session && !session.closed ? session : null;
     },
 
     close,

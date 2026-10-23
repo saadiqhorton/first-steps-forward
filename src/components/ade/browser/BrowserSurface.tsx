@@ -1,8 +1,8 @@
 // Adapted from T3 Code (https://github.com/pingdotgg/t3code): apps/web/src/browser/ServerBrowserSurface.tsx.
 // Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
 
-import { useEffect, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { X } from "lucide-react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { Upload, X } from "lucide-react";
 import {
   buttonFromDomButton,
   modifierBits,
@@ -15,6 +15,7 @@ import {
 import type {
   BrowserButton,
   BrowserDialog,
+  BrowserFileChooser,
   BrowserStreamViewport,
   ClientMessage,
 } from "@/lib/ade/browser/browserStream";
@@ -94,6 +95,7 @@ export function BrowserSurface({
     streamError,
     requestViewportSize,
     changeControl,
+    answerFileChooser,
     reconnect,
   } = preview;
   const [stage, setStage] = useState<HTMLDivElement | null>(null);
@@ -124,9 +126,8 @@ export function BrowserSurface({
     return () => releaseCanvas(canvas);
   }, [canvas, attachCanvas, releaseCanvas]);
 
-  // Keep the agent computer's native desktop browser viewport (1280x800 window)
-  // and scale the frame to fit the docked/floating surface, rather than shrinking
-  // the remote page's CSS viewport down to the side-pane pixel size.
+  // Keep the agent browser's fixed 1280x800 page and scale the frame to fit the docked/floating
+  // surface, rather than shrinking the page's CSS viewport down to the side-pane pixel size.
 
   // Wheel must be non-passive so the page can scroll without the pane scrolling too.
   useEffect(() => {
@@ -345,7 +346,67 @@ export function BrowserSurface({
           dialog={dialog}
           onAnswer={(reply) => void answerDialog({ ...reply, key: dialogKey(dialog) })}
         />
+      ) : control?.fileChooser ? (
+        <FileChooserPrompt
+          key={control.fileChooser.id}
+          chooser={control.fileChooser}
+          onAnswer={(files) => void answerFileChooser(control.fileChooser!.id, files)}
+        />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A file picker the page opened. Headless Chrome has no native picker, so the files come from
+ * this machine's own picker and are sent to the page; answering takes control first.
+ */
+function FileChooserPrompt({
+  chooser,
+  onAnswer,
+}: {
+  chooser: BrowserFileChooser;
+  onAnswer: (files: File[]) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <div
+      role="dialog"
+      aria-label="Page file picker"
+      className="absolute top-1/2 left-1/2 z-[7] grid w-[min(20rem,calc(100%-1.5rem))] -translate-x-1/2 -translate-y-1/2 gap-2.5 rounded-xl bg-panel p-3 text-[12px] text-ink shadow-lg ring-1 ring-line ring-inset"
+    >
+      <p className="m-0 break-words">
+        The page wants {chooser.multiple ? "files" : "a file"}. Choose{" "}
+        {chooser.multiple ? "them" : "one"} from this computer to send to it.
+      </p>
+      <input
+        ref={input}
+        type="file"
+        hidden
+        multiple={chooser.multiple}
+        accept={chooser.accept || undefined}
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          if (files.length > 0) onAnswer(files);
+        }}
+      />
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => onAnswer([])}
+          className="btn-quiet px-3 py-1.5 text-[12px]"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => input.current?.click()}
+          className="btn-amber inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px]"
+        >
+          <Upload className="size-3.5" aria-hidden />
+          {chooser.multiple ? "Choose files" : "Choose file"}
+        </button>
+      </div>
     </div>
   );
 }

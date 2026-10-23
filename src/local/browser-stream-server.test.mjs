@@ -28,6 +28,7 @@ function fakeSession() {
     screencasts,
     nav: () => ({ ...nav }),
     viewport: () => ({ ...viewport }),
+    fileChooser: () => null,
     on(event, cb) {
       if (!listeners.has(event)) listeners.set(event, new Set());
       listeners.get(event).add(cb);
@@ -46,6 +47,9 @@ function fakeSession() {
     },
     async input(msg) {
       calls.push({ name: "input", msg });
+      // A ctrl+c reports what the page copied, like BrowserSession.input.
+      if (msg.type === "key" && msg.action === "down" && msg.key === "c" && msg.modifiers === 2)
+        return { copied: "copied text" };
     },
     async resize(size) {
       viewport = { ...size };
@@ -179,6 +183,7 @@ test("on connect sends viewport, control and nav, and starts a clamped screencas
     controller: "agent",
     generation: 0,
     dialog: null,
+    fileChooser: null,
   });
   assert.deepEqual(client.ofType("nav")[0], {
     type: "nav",
@@ -268,6 +273,30 @@ test("gates input to the owner and broadcasts control to the second viewer", asy
     "second resize",
   );
   assert.equal(session.calls.filter((call) => call.name === "input").length, 1);
+  a.ws.close();
+  b.ws.close();
+});
+
+test("a copy key sends the copied text to that viewer only, and file pickers ride on control", async (t) => {
+  const sessions = new Map();
+  const { server } = setup(t, { sessions });
+  await server.start();
+  const a = await open(streamUrl(server, "p1", "A"));
+  const b = await open(streamUrl(server, "p1", "B"));
+  await until(() => sessions.get("p1")?.screencasts.length === 2, "two screencasts");
+  const session = sessions.get("p1");
+  a.send({ type: "takeControl" });
+  await until(() => a.lastControl()?.controller === "you", "you controller");
+  a.send({ type: "key", action: "down", key: "c", code: "KeyC", modifiers: 2 });
+  await until(() => a.ofType("clipboard").length === 1, "clipboard");
+  assert.deepEqual(a.ofType("clipboard")[0], { type: "clipboard", text: "copied text" });
+  assert.equal(b.ofType("clipboard").length, 0);
+
+  session.emit("fileChooser", { id: "1", multiple: false, accept: "image/*" });
+  await until(() => b.lastControl()?.fileChooser?.id === "1", "file chooser on control");
+  assert.deepEqual(a.lastControl().fileChooser, { id: "1", multiple: false, accept: "image/*" });
+  session.emit("fileChooser", null);
+  await until(() => a.lastControl()?.fileChooser === null, "file chooser closed");
   a.ws.close();
   b.ws.close();
 });

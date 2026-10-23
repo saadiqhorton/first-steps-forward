@@ -26,7 +26,7 @@ export function codexComputerArgs(computer) {
     `${SERVER}.default_tools_approval_mode="approve"`,
     "-c",
     `${SERVER}.startup_timeout_sec=30`,
-    // The first call may build the computer image and boot it.
+    // The first call may download the browser and launch it.
     "-c",
     `${SERVER}.tool_timeout_sec=900`,
   ];

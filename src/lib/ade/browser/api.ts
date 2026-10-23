@@ -14,8 +14,6 @@ export interface BrowserStatus {
   readonly reason?: string;
   /** Loopback WebSocket URL for the stream, with the project and token already in it. */
   readonly streamUrl?: string;
-  /** The computer's container predates the browser image; it must be restarted. */
-  readonly outdated?: boolean;
   readonly control: BrowserControlState;
 }
 
@@ -54,7 +52,7 @@ async function request<T>(url: string, method = "GET", data?: unknown): Promise<
 export const getBrowserStatus = (projectId: string) =>
   request<BrowserStatus>(`/api/projects/${encodeURIComponent(projectId)}/browser`);
 
-/** Take or hand back control of the shared agent computer, as `viewer`. */
+/** Take or hand back control of the shared agent browser, as `viewer`. */
 export const postBrowserControl = (
   projectId: string,
   action: BrowserControlAction,
@@ -64,4 +62,20 @@ export const postBrowserControl = (
     `/api/projects/${encodeURIComponent(projectId)}/computer/control`,
     "POST",
     { action, viewer },
+  );
+
+/**
+ * Answers the page's open file picker with files already uploaded to /api/attachments. No
+ * attachments closes the picker without a file. Only the viewer in control may answer.
+ */
+export const postFileChooser = (
+  projectId: string,
+  chooserId: string,
+  attachmentIds: readonly string[],
+  viewer: string,
+) =>
+  request<{ answered: true }>(
+    `/api/projects/${encodeURIComponent(projectId)}/browser/file-chooser`,
+    "POST",
+    { chooserId, attachmentIds, viewer },
   );

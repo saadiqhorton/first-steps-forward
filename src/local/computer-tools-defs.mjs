@@ -1,5 +1,5 @@
-// Tool definitions and call logic ADE's agent computer exposes to coding
-// agents (Codex, OpenCode via MCP; Pi via its extension). Kept in this
+// Tool definitions and call logic ADE's agent computer (each project's headless
+// Chrome) exposes to coding agents (Codex, OpenCode via MCP; Pi via its extension). Kept in this
 // shebang-free module so Vite's SSR transform can import it — the executable
 // stdio entry lives in computer-mcp.mjs. ADE injects ADE_API (the serving
 // ADE instance's loopback base URL) and ADE_PROJECT_ID alongside it. MCP
@@ -9,7 +9,7 @@
 const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const xy = {
-  x: { type: "integer", description: "X pixel (0 = left edge of the 1280×800 screen)" },
+  x: { type: "integer", description: "X pixel (0 = left edge of the 1280×800 page)" },
   y: { type: "integer", description: "Y pixel (0 = top edge)" },
 };
 const LIVE_NOTE =
@@ -21,7 +21,7 @@ const ref = {
 const BROWSER_TOOLS = [
   {
     name: "browser_status",
-    description: `Report the computer's Chromium tab: URL, title, loading and history state. ${LIVE_NOTE}`,
+    description: `Report the agent browser's tab: URL, title, loading and history state. ${LIVE_NOTE}`,
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -135,6 +135,18 @@ const BROWSER_TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "browser_upload",
+    description: `Choose files for an upload: pass the file input's ref, or answer the file picker a click opened. Paths must be absolute files on this machine. ${LIVE_NOTE}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        paths: { type: "array", items: { type: "string" }, description: "Absolute file paths" },
+        ref,
+      },
+      required: ["paths"],
+    },
+  },
+  {
     name: "browser_dialog",
     description: `Accept or dismiss the open JavaScript dialog (alert, confirm, prompt). ${LIVE_NOTE}`,
     inputSchema: {
@@ -151,13 +163,13 @@ export const TOOLS = [
   {
     name: "computer_screenshot",
     description:
-      "Capture the agent computer's screen (1280×800). The user watches this computer live in ADE. Call this first to see the current state.",
+      "Capture the agent browser's page (1280×800). The user watches this browser live in ADE. Call this first to see the current state.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "computer_open_url",
     description:
-      "Open a URL in the computer's Chromium browser (new tab) and return a screenshot. localhost URLs reach this project's dev server on the host automatically — start it with dev_server_start and open the URL it reports.",
+      "Open a URL in the agent browser and return a screenshot. The browser runs on this machine, so localhost URLs reach this project's dev server directly — start it with dev_server_start and open the URL it reports.",
     inputSchema: {
       type: "object",
       properties: {
@@ -214,7 +226,7 @@ export const TOOLS = [
   {
     name: "computer_key",
     description:
-      'Press a key or chord (xdotool names), e.g. "Return", "Tab", "Escape", "ctrl+l", "ctrl+shift+r", "BackSpace". Several keys in order: "Tab Tab Return". Returns a screenshot.',
+      'Press a key or chord in the page (xdotool names), e.g. "Return", "Tab", "Escape", "ctrl+a", "shift+Tab", "BackSpace". Several keys in order: "Tab Tab Return". The browser has no address bar; change pages with computer_open_url. Returns a screenshot.',
     inputSchema: {
       type: "object",
       properties: { keys: { type: "string" } },
@@ -297,6 +309,7 @@ const BROWSER = {
   },
   browser_wait_for: (a) => ({ action: "wait_for", text: a.text, ref: a.ref, timeMs: a.timeMs }),
   browser_screenshot: () => ({ action: "screenshot" }),
+  browser_upload: (a) => ({ action: "upload", paths: a.paths, ref: a.ref }),
   browser_dialog: (a) => ({ action: "dialog", accept: a.accept, promptText: a.promptText }),
 };
 const DEV = {
@@ -317,7 +330,7 @@ export function createToolCaller({ api, projectId, fetchImpl = fetch }) {
       method,
       headers: body ? { "content-type": "application/json" } : {},
       ...(body ? { body: JSON.stringify(body) } : {}),
-      // First use may build the computer image (minutes) and boot it.
+      // First use may download the browser (a minute or two) and launch it.
       signal: AbortSignal.timeout(15 * 60 * 1000),
     });
     const payload = await response.json().catch(() => ({}));
@@ -337,15 +350,15 @@ export function createToolCaller({ api, projectId, fetchImpl = fetch }) {
           ACTIONS[name](args),
         );
         if (status === 409 && payload.code === "human_control") return text(payload.error, true);
-        if (status !== 200 || !payload.screenshot)
+        if (status !== 200)
           return text(`Computer action failed: ${payload.error ?? `HTTP ${status}`}`, true);
         const where = payload.cursor ? ` Mouse at (${payload.cursor.x}, ${payload.cursor.y}).` : "";
+        const done = `${name.replace("computer_", "")} done. Screen ${payload.width}×${payload.height}.${where}${payload.note ? `\n${payload.note}` : ""}`;
+        // A JavaScript dialog blocks the page, so there is no screenshot until it is answered.
+        if (!payload.screenshot) return text(done);
         return {
           content: [
-            {
-              type: "text",
-              text: `${name.replace("computer_", "")} done. Screen ${payload.width}×${payload.height}.${where}`,
-            },
+            { type: "text", text: done },
             { type: "image", data: payload.screenshot, mimeType: payload.mimeType ?? "image/png" },
           ],
         };
@@ -396,7 +409,7 @@ export async function handleMessage(message, callTool) {
       capabilities: { tools: {} },
       serverInfo: { name: "ade-computer", version: "1.0.0" },
       instructions:
-        "You have your own computer (a Linux desktop with Chromium) that the user watches live in ADE. Use it to view and manually test the project like a human QA tester.",
+        "You have your own browser (headless Chrome on the user's machine) that the user watches live in ADE. Use it to view and manually test the project like a human QA tester.",
     });
   }
   if (method === "ping") return reply({});

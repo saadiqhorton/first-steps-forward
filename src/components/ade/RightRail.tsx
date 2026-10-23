@@ -76,7 +76,7 @@ export function RightRail(props: {
                     className={`absolute top-0.5 right-0.5 size-1.5 rounded-full ${computerDotColor}`}
                     aria-hidden
                   />
-                  <span className="sr-only">computer {computerTone}</span>
+                  <span className="sr-only">browser {computerTone}</span>
                 </>
               )}
             </div>

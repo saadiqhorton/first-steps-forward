@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   getBrowserStatus,
   postBrowserControl,
+  postFileChooser,
   type BrowserControlState,
   type BrowserStatus,
 } from "@/lib/ade/browser/api";
+import { copyText } from "@/lib/ade/clipboard";
+import { uploadAttachment } from "@/lib/ade/store";
 import {
   connectBrowserStream,
   type BrowserStream,
@@ -21,7 +24,6 @@ import {
   type BrowserMiniPlayerState,
   type BrowserPlace,
   type BrowserPreviewValue,
-  type BrowserView,
 } from "./browserPreviewContext";
 
 const STATUS_POLL_MS = 2000;
@@ -34,7 +36,13 @@ const EMPTY_MINI: BrowserMiniPlayerState = { width: null, position: null };
 function controlFromState(state: BrowserControlState, viewer: string): BrowserStreamControl {
   const controller =
     state.owner === null ? "agent" : state.owner === viewer ? "you" : "another-viewer";
-  return { canOperate: true, controller, generation: state.generation, dialog: null };
+  return {
+    canOperate: true,
+    controller,
+    generation: state.generation,
+    dialog: null,
+    fileChooser: null,
+  };
 }
 
 function drawFrame(canvas: HTMLCanvasElement, bitmap: ImageBitmap | null) {
@@ -56,7 +64,6 @@ export function BrowserPreviewProvider({
   children: ReactNode;
 }) {
   const [place, setPlace] = useState<BrowserPlace>("dock");
-  const [view, setView] = useState<BrowserView>("browser");
   const [minis, setMinis] = useState<Record<string, BrowserMiniPlayerState>>({});
   // Project-tagged so a previous project's answer is never shown or connected to.
   const [statusState, setStatusState] = useState<{
@@ -92,8 +99,8 @@ export function BrowserPreviewProvider({
   const control = controlState?.projectId === projectId ? controlState.value : null;
   const mini = (projectId !== null && minis[projectId]) || EMPTY_MINI;
 
-  // The stream runs while a surface is painting (docked or floating), so the Desktop view and a
-  // hidden preview do not keep a page-screencast open.
+  // The stream runs while a surface is painting (docked or floating), so a hidden preview does not
+  // keep a page-screencast open.
   const wanted = projectId !== null && (place === "float" || canvas !== null);
   const streamUrl = wanted && status?.available ? (status.streamUrl ?? null) : null;
 
@@ -170,6 +177,8 @@ export function BrowserPreviewProvider({
       onViewport: setViewport,
       onControl: (next) => setControlState({ projectId, value: next }),
       onPointer: setPointer,
+      // The page copied text while this viewer pressed copy or cut; put it on our clipboard.
+      onClipboard: (text) => void copyText(text),
       onNav: (next) => {
         navUrlRef.current = next.url;
         setNav(next);
@@ -229,14 +238,38 @@ export function BrowserPreviewProvider({
         return true;
       } catch (error) {
         setActionError(
-          error instanceof Error
-            ? error.message
-            : "Could not change control of the agent computer.",
+          error instanceof Error ? error.message : "Could not change control of the agent browser.",
         );
         return false;
       }
     },
     [projectId],
+  );
+
+  const answerFileChooser = useCallback(
+    async (chooserId: string, files: readonly File[]) => {
+      if (!projectId) return false;
+      try {
+        const uploaded = await Promise.all(files.map((file) => uploadAttachment(file)));
+        if (control?.controller !== "you") {
+          await postBrowserControl(projectId, "take", browserViewerId());
+        }
+        await postFileChooser(
+          projectId,
+          chooserId,
+          uploaded.map((file) => file.id),
+          browserViewerId(),
+        );
+        setActionError(null);
+        return true;
+      } catch (error) {
+        setActionError(
+          error instanceof Error ? error.message : "Could not send the files to the page.",
+        );
+        return false;
+      }
+    },
+    [projectId, control?.controller],
   );
 
   const setMini = useCallback(
@@ -264,8 +297,6 @@ export function BrowserPreviewProvider({
       canvas,
       place,
       setPlace,
-      view,
-      setView,
       mini,
       setMini,
       attachCanvas,
@@ -273,6 +304,7 @@ export function BrowserPreviewProvider({
       requestViewportSize,
       send,
       changeControl,
+      answerFileChooser,
       actionError,
       reconnect,
     }),
@@ -289,7 +321,6 @@ export function BrowserPreviewProvider({
       hasFrame,
       canvas,
       place,
-      view,
       mini,
       setMini,
       attachCanvas,
@@ -297,6 +328,7 @@ export function BrowserPreviewProvider({
       requestViewportSize,
       send,
       changeControl,
+      answerFileChooser,
       actionError,
       reconnect,
     ],

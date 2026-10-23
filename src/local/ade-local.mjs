@@ -6,8 +6,12 @@ import path from "node:path";
 import { killTree, spawnCommand as spawn } from "./spawn.mjs";
 import { adapters } from "./adapters/index.mjs";
 import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
-import { adeRoot, createComputerManager, SCREEN } from "./computer.mjs";
+import { adeRoot, COMPUTER_ERROR_STATUS, createComputerManager, SCREEN } from "./computer.mjs";
 import { createBrowserHub } from "./browser-page.mjs";
+import { createBrowserInstaller } from "./browser-install.mjs";
+import { createBrowserContexts, INCOGNITO_PROFILE_ID } from "./browser-contexts.mjs";
+import { diagnoseLaunchFailure } from "./browser-host.mjs";
+import { TOOLS as COMPUTER_TOOLS } from "./computer-tools-defs.mjs";
 import { createBrowserStreamServer } from "./browser-stream-server.mjs";
 import { createControlRegistry, HumanControlError } from "./browser-control.mjs";
 import { listModels, MODEL_ID, clearModelsCache } from "./models.mjs";
@@ -42,39 +46,33 @@ const listenedProcs = new Set();
 // request's Host header; null until the first request after boot.
 let lastApiBaseUrl = null;
 const devStartClaims = new Set();
-// One agent computer (Docker desktop) per project; see computer.mjs.
-const computers = createComputerManager();
-// One control lock per project, shared by the browser stream, the noVNC view,
-// computer_* and browser_* tools. The CDP hub and the WebSocket stream server
-// start lazily on first use.
+// One agent computer (headless Chrome) per project; see computer.mjs. The installer and the
+// Playwright contexts are process-wide: when Vite loads this module a second time, both copies
+// share one Chrome instead of fighting over the same profile directory.
+const browserInstaller = (globalThis.__adeBrowserInstaller ??= createBrowserInstaller({
+  baseDir: DATA_DIR,
+}));
+const browserContexts = (globalThis.__adeBrowserContexts ??= createBrowserContexts({
+  profilesDir: path.join(DATA_DIR, "browser", "profiles"),
+  executable: () => browserInstaller.executable(),
+  diagnose: (executable, cause) => diagnoseLaunchFailure({ executable, cause }),
+}));
+// One control lock per project, shared by the browser stream, computer_* and browser_* tools.
+// The hub and the WebSocket stream server start lazily on first use.
 const controls = createControlRegistry();
-const coded = (code, message) => Object.assign(new Error(message), { code });
 void globalThis.__adeBrowserStream?.close?.().catch?.(() => {});
 void globalThis.__adeBrowserHub?.closeAll?.().catch?.(() => {});
+// Each project browses in its own persistent profile, or a throwaway context in incognito mode.
 const browserHub = createBrowserHub({
-  async getCdpEndpoint(projectId) {
-    const computer = await computers.status(projectId);
-    if (computer.status !== "running")
-      throw coded(
-        "cdp_unavailable",
-        computer.detail ?? "The agent computer is not running. Call a computer_* tool to start it.",
-      );
-    if (computer.outdated || !computer.cdpPort)
-      throw coded(
-        "cdp_unavailable",
-        "The agent computer was created before the browser preview. Restart the computer to pick up the new image.",
-      );
-    return `http://127.0.0.1:${computer.cdpPort}`;
-  },
-  // Before the browser opens localhost, make that port reachable inside the computer.
-  async beforeNavigate(projectId, url) {
-    const port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);
-    const { status, payload } = await computers.action(projectId, { action: "forward", port });
-    if (status !== 200)
-      throw coded("invalid_url", payload.error ?? `Could not forward port ${port}.`);
+  contextFor(projectId) {
+    const project = state.projects.find((x) => x.id === projectId);
+    return project?.browserProfile === INCOGNITO_PROFILE_ID
+      ? browserContexts.contextFor(INCOGNITO_PROFILE_ID, projectId)
+      : browserContexts.contextFor(projectId);
   },
 });
 globalThis.__adeBrowserHub = browserHub;
+const computers = createComputerManager({ installer: browserInstaller, hub: browserHub });
 // Address headers of the latest trusted loopback API request (see handle()).
 // The stream's Origin check runs the same originAllowed rule against them.
 let lastApiHeaders = null;
@@ -96,15 +94,6 @@ const browserStream = createBrowserStreamServer({
   },
 });
 globalThis.__adeBrowserStream = browserStream;
-const BROWSER_ERROR_STATUS = {
-  human_control: 409,
-  dialog_pending: 409,
-  stale_ref: 409,
-  cdp_unavailable: 503,
-  invalid_url: 400,
-  timeout: 504,
-  unknown_action: 400,
-};
 const OBSERVE_BROWSER_ACTIONS = new Set(["status", "snapshot", "screenshot", "wait_for"]);
 const OBSERVE_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
 const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
@@ -800,19 +789,22 @@ export function computerContext(project) {
     env: { ADE_API: api, ADE_PROJECT_ID: project.id },
   };
 }
+/** The project's agent computer status, with the browser profile it uses. */
+function computerView(project) {
+  return { ...computers.status(project.id), profile: project.browserProfile ?? "default" };
+}
 /** Manifest section telling the agent it has (or lacks) its own computer. */
 function agentComputerFor(project) {
   if (!computerContext(project))
     return {
       available: false,
-      note: "ADE's agent computer could not be connected this turn (the ADE URL is not known yet). Tell the user you could not test visually; ask them to reopen ADE and send a follow-up.",
+      note: "ADE's agent browser could not be connected this turn (the ADE URL is not known yet). Tell the user you could not test visually; ask them to reopen ADE and send a follow-up.",
     };
   return {
     available: true,
     screen: `${SCREEN.width}x${SCREEN.height}`,
-    tools:
-      "computer_screenshot, computer_open_url, computer_click, computer_double_click, computer_move, computer_drag, computer_type, computer_key, computer_scroll, computer_wait, dev_server_status, dev_server_start, dev_server_stop",
-    note: "You have your own isolated computer (Linux desktop + Chromium) that the user watches live in ADE. To view or test the project: dev_server_start, then computer_open_url with the localhost URL it reports, then use screenshots, clicks, and typing to verify behavior like a human QA tester.",
+    tools: COMPUTER_TOOLS.map((tool) => tool.name).join(", "),
+    note: "You have your own browser (headless Chrome on this machine) that the user watches live in ADE. To view or test the project: dev_server_start, then computer_open_url with the localhost URL it reports, then use browser_snapshot refs or screenshots, clicks, and typing to verify behavior like a human QA tester.",
   };
 }
 async function otherServiceStatus(project) {
@@ -866,7 +858,7 @@ export async function buildManifest(session, project) {
       "Do not revert or overwrite user changes",
       "The devServer status is ADE's observed snapshot at turn start. If it includes a running URL, use that URL instead of asking the user which frontend port to open. Do not infer that other services are running from the frontend alone.",
       "Start, stop, and inspect the dev server only with the dev_server_start/dev_server_stop/dev_server_status tools; never start a server yourself (no nohup, &, disown, or a foreground dev command) and never leave one running that ADE does not manage",
-      "After changing anything visible, verify it on your agent computer (computer_open_url, screenshots, clicks, typing) before reporting done, and say what you checked; if the computer tools fail, report the exact error instead of claiming it works",
+      "After changing anything visible, verify it in your agent browser (computer_open_url, screenshots, clicks, typing) before reporting done, and say what you checked; if the browser tools fail, report the exact error instead of claiming it works",
     ],
     relevantFiles: candidates.slice(0, 60),
     tools: agent?.tools ?? "agent's default CLI tools",
@@ -925,7 +917,7 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
       `; model: ${session.model ?? "agent default"}` +
       `; dev server at turn start: ${session.manifest.devServer}` +
       `; other services: ${session.manifest.otherServices}` +
-      `; agent computer: ${session.manifest.agentComputer.available ? `available (${session.manifest.agentComputer.screen}; tools: ${session.manifest.agentComputer.tools}). ` : "unavailable. "}${session.manifest.agentComputer.note}` +
+      `; agent browser: ${session.manifest.agentComputer.available ? `available (${session.manifest.agentComputer.screen}; tools: ${session.manifest.agentComputer.tools}). ` : "unavailable. "}${session.manifest.agentComputer.note}` +
       `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}` +
       (session.manifest.uncommittedFiles
         ? `; the user has uncommitted changes in these files: ${session.manifest.uncommittedFiles.join(", ")} — never revert, stash, commit, or overwrite them; work around them`
@@ -1969,6 +1961,10 @@ async function handle(req, res) {
         });
       for (const p of state.processes.filter((x) => x.projectId === parts[1]))
         stopChild(children.get(p.id));
+      // The project's browser and its stored profile are ADE metadata too.
+      await computers.stop(parts[1]).catch(() => {});
+      await controls.delete(parts[1]);
+      await browserContexts.clearProfile(parts[1]).catch(() => {});
       state.projects.splice(idx, 1);
       state.sessions = state.sessions.filter((s) => s.projectId !== parts[1]);
       state.processes = state.processes.filter((x) => x.projectId !== parts[1]);
@@ -2331,50 +2327,46 @@ async function handle(req, res) {
       if (!p) return json(res, 404, { error: "Session not found." });
       return json(res, 200, await getDiff(p));
     }
-    // ---- Agent computer: one Docker desktop per project (see computer.mjs) ----
+    // ---- Agent computer: each project's headless Chrome (see computer.mjs) ----
     if (parts[0] === "projects" && parts[2] === "computer") {
       const project = state.projects.find((x) => x.id === parts[1]);
       if (!project) return json(res, 404, { error: "Project not found." });
-      if (req.method === "GET" && parts.length === 3) {
-        const status = await computers.status(project.id);
-        const reqHost = hostnameOf(req.headers.host);
-        if (
-          sharedUpgradeAttached &&
-          req.headers.host &&
-          isPrivateIpAddress(reqHost) &&
-          status.viewerUrl
-        ) {
-          const rewrite = (raw) => {
-            const u = new URL(raw);
-            u.host = req.headers.host;
-            u.pathname = `/websockify/${encodeURIComponent(project.id)}`;
-            return u.toString();
-          };
-          return json(res, 200, {
-            ...status,
-            viewerUrl: rewrite(status.viewerUrl),
-            ...(status.controlViewerUrl
-              ? { controlViewerUrl: rewrite(status.controlViewerUrl) }
-              : {}),
-          });
-        }
-        return json(res, 200, status);
-      }
+      if (req.method === "GET" && parts.length === 3) return json(res, 200, computerView(project));
       if (req.method === "POST" && parts[3] === "start") {
-        // Returns at once; the UI polls status through building/starting.
+        // Returns at once; the UI polls status through installing/starting.
         computers.start(project.id).catch(() => {});
-        return json(res, 202, await computers.status(project.id));
+        return json(res, 202, computerView(project));
       }
       if (req.method === "POST" && parts[3] === "stop") {
         await computers.stop(project.id);
-        // The browser session and control lock belonged to the container that just went away.
-        await browserHub.close(project.id);
+        // The control lock belonged to the browser that just closed.
         await controls.delete(project.id);
-        return json(res, 200, await computers.status(project.id));
+        return json(res, 200, computerView(project));
+      }
+      if (req.method === "POST" && (parts[3] === "profile" || parts[3] === "clear")) {
+        // Switch between the project's persistent profile and a throwaway incognito context,
+        // or delete the persistent profile's cookies, storage and cache. Both restart the
+        // browser if it was running.
+        const input = parts[3] === "profile" ? await body(req) : {};
+        const profile = input.profile === INCOGNITO_PROFILE_ID ? INCOGNITO_PROFILE_ID : "default";
+        const changing = parts[3] === "clear" || (project.browserProfile ?? "default") !== profile;
+        if (changing) {
+          const wasRunning = computers.status(project.id).status === "running";
+          await computers.stop(project.id);
+          await controls.delete(project.id);
+          if (parts[3] === "clear") await browserContexts.clearProfile(project.id);
+          else {
+            if (profile === "default") delete project.browserProfile;
+            else project.browserProfile = profile;
+            await save();
+          }
+          if (wasRunning) computers.start(project.id).catch(() => {});
+        }
+        return json(res, 200, computerView(project));
       }
       if (req.method === "POST" && parts[3] === "action") {
-        // Agent tools (MCP server / Pi extension): starts the computer on
-        // first use, then forwards one screenshot/mouse/keyboard action.
+        // Agent tools (MCP server / Pi extension): starts the browser on first use, then runs
+        // one screenshot/mouse/keyboard action on its page.
         try {
           const input = await body(req);
           const control = controls.for(project.id);
@@ -2390,7 +2382,7 @@ async function handle(req, res) {
         }
       }
       if (req.method === "POST" && parts[3] === "control") {
-        // Take or hand back control of the computer; shared with the browser stream.
+        // Take or hand back control of the browser; shared with the browser stream.
         const input = await body(req);
         const viewer = String(input.viewer ?? "");
         if (!viewer) return json(res, 400, { error: "viewer is required." });
@@ -2402,10 +2394,8 @@ async function handle(req, res) {
               res,
               200,
               control.release(viewer, async () => {
-                // Best effort: release keys and buttons the viewer left held in Chromium.
-                try {
-                  (await browserHub.get(project.id)).releaseInput();
-                } catch {}
+                // Best effort: release keys and buttons the viewer left held in the page.
+                browserHub.peek(project.id)?.releaseInput();
               }),
             );
         } catch (error) {
@@ -2417,26 +2407,20 @@ async function handle(req, res) {
       }
       return json(res, 404, { error: "Not found." });
     }
-    // ---- Agent browser preview: live view of the computer's Chromium (see browser-page.mjs) ----
+    // ---- Agent browser preview: live view of the project's browser (see browser-page.mjs) ----
     if (parts[0] === "projects" && parts[2] === "browser") {
       const project = state.projects.find((x) => x.id === parts[1]);
       if (!project) return json(res, 404, { error: "Project not found." });
       if (req.method === "GET" && parts.length === 3) {
-        const computer = await computers.status(project.id);
+        const computer = computers.status(project.id);
         const { owner, generation } = controls.for(project.id).state();
         const control = { owner, generation };
-        if (computer.status !== "running" || !computer.cdpPort || computer.outdated) {
+        if (computer.status !== "running") {
           const reason =
-            computer.status !== "running"
-              ? (computer.detail ??
-                "The agent computer is not running. Start it to see its browser.")
-              : "The agent computer was created before the browser preview. Restart the computer to pick up the new image.";
-          return json(res, 200, {
-            available: false,
-            reason,
-            ...(computer.outdated ? { outdated: true } : {}),
-            control,
-          });
+            computer.status === "stopped"
+              ? "The agent browser is off. Start it to watch the agent work."
+              : (computer.detail ?? "The agent browser is not running yet.");
+          return json(res, 200, { available: false, reason, control });
         }
         await browserStream.start();
         const streamUrl = new URL(browserStream.url(project.id));
@@ -2465,10 +2449,43 @@ async function handle(req, res) {
           return json(res, 200, result);
         } catch (error) {
           const code = error?.code;
-          return json(res, BROWSER_ERROR_STATUS[code] ?? 500, {
+          return json(res, COMPUTER_ERROR_STATUS[code] ?? 500, {
             error: error?.message ?? String(error),
             ...(code ? { code } : {}),
           });
+        }
+      }
+      if (req.method === "POST" && parts[3] === "file-chooser") {
+        // The viewer in control answers the page's file picker with files it uploaded through
+        // /api/attachments. No attachments closes the picker without a file.
+        const input = await body(req);
+        const viewer = String(input.viewer ?? "");
+        const chooserId = String(input.chooserId ?? "");
+        if (!viewer || !chooserId)
+          return json(res, 400, { error: "viewer and chooserId are required." });
+        const session = browserHub.peek(project.id);
+        if (!session) return json(res, 409, { error: "The agent browser is not running." });
+        try {
+          const ids = Array.isArray(input.attachmentIds) ? input.attachmentIds : [];
+          const files = (await resolveAttachments(DATA_DIR, ids)).map((file) => ({
+            name: file.name,
+            mimeType: file.mime,
+            buffer: file.bytes,
+          }));
+          const answered = await controls
+            .for(project.id)
+            .human(viewer, () => session.answerFileChooser(chooserId, files));
+          if (!answered)
+            return json(res, 409, {
+              error: "That file picker is no longer open.",
+              code: "no_file_chooser",
+            });
+          return json(res, 200, { answered: true });
+        } catch (error) {
+          if (error instanceof HumanControlError)
+            return json(res, 409, { error: error.message, code: error.code });
+          if (error?.status) return json(res, error.status, { error: error.message });
+          throw error;
         }
       }
       return json(res, 404, { error: "Not found." });
@@ -2964,46 +2981,7 @@ function attachComputerUpgrades(httpServer) {
   }
   const onUpgrade = (req, socket, head) => {
     const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
-    if (pathname === "/preview-stream") {
-      browserStream.handleUpgrade(req, socket, head);
-      return;
-    }
-    const vncMatch = /^\/websockify\/([^/?#]+)$/.exec(pathname);
-    if (!vncMatch) return;
-    const projectId = decodeURIComponent(vncMatch[1]);
-    void (async () => {
-      try {
-        const status = await computers.status(projectId);
-        const vncPort = status.viewerUrl ? Number(new URL(status.viewerUrl).port) : 0;
-        if (!vncPort) {
-          socket.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
-          socket.destroy();
-          return;
-        }
-        const upstream = net.connect({ host: "127.0.0.1", port: vncPort });
-        upstream.once("connect", () => {
-          const lines = [`GET /websockify HTTP/${req.httpVersion ?? "1.1"}`];
-          for (let i = 0; i < (req.rawHeaders?.length ?? 0); i += 2) {
-            lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
-          }
-          lines.push("", "");
-          upstream.write(lines.join("\r\n"));
-          if (head?.length) upstream.write(head);
-          socket.pipe(upstream);
-          upstream.pipe(socket);
-        });
-        const closeBoth = () => {
-          upstream.destroy();
-          socket.destroy();
-        };
-        upstream.once("error", closeBoth);
-        upstream.once("close", closeBoth);
-        socket.once("error", closeBoth);
-        socket.once("close", closeBoth);
-      } catch {
-        socket.destroy();
-      }
-    })();
+    if (pathname === "/preview-stream") browserStream.handleUpgrade(req, socket, head);
   };
   httpServer.__adeUpgradeListener = onUpgrade;
   httpServer.on("upgrade", onUpgrade);

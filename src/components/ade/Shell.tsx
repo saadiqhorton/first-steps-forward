@@ -279,7 +279,7 @@ function ShellInner({
 
   // Consume `pane` / `dialog` search params once, then strip them from the URL.
   useEffect(() => {
-    // The agent computer replaced the Preview tab; keep old links working.
+    // The agent browser replaced the Preview tab; keep old links working.
     const paneRaw = search["pane"] === "preview" ? "computer" : search["pane"];
     const dialogRaw = search["dialog"];
     const obsoleteEditor = paneRaw === "editor";
@@ -512,11 +512,12 @@ function ShellInner({
             project={activeProject}
             session={activeSession}
             dock={effectiveDock}
+            active={rightTab === "computer" && !collapsedRight}
             onToneChange={setComputerTone}
           />
         ) : (
           <div className="grid flex-1 place-items-center px-5 text-center font-mono text-[11px] text-dim">
-            Add a project to give agents a computer.
+            Add a project to give agents a browser.
           </div>
         )}
       </div>

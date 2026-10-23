@@ -1,8 +1,8 @@
 // Adapted from T3 Code (https://github.com/pingdotgg/t3code): packages/client-runtime/src/preview/serverBrowserStream.ts.
 // Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
 //
-// WebSocket client for the agent computer's browser stream. Binary frames are JPEG bytes that
-// are acked immediately; JSON frames carry viewport, control, pointer, nav and error messages.
+// WebSocket client for the agent browser's stream. Binary frames are JPEG bytes that are acked
+// immediately; JSON frames carry viewport, control, pointer, nav, clipboard and error messages.
 
 export type BrowserButton = "none" | "left" | "middle" | "right";
 
@@ -12,6 +12,14 @@ export interface BrowserDialog {
   readonly type: string;
   readonly message: string;
   readonly defaultValue: string;
+}
+
+/** A file picker the page opened. The viewer in control answers it (see answerFileChooser). */
+export interface BrowserFileChooser {
+  readonly id: string;
+  readonly multiple: boolean;
+  /** The file input's `accept` attribute, for the local picker. */
+  readonly accept: string;
 }
 
 export type BrowserStreamStatus = "connecting" | "open" | "reconnecting" | "closed";
@@ -25,6 +33,7 @@ export type ServerMessage =
       readonly controller: BrowserStreamController;
       readonly generation: number;
       readonly dialog: BrowserDialog | null;
+      readonly fileChooser?: BrowserFileChooser | null;
     }
   | {
       readonly type: "pointer";
@@ -41,6 +50,8 @@ export type ServerMessage =
       readonly canGoBack: boolean;
       readonly canGoForward: boolean;
     }
+  /** Text the page copied when this viewer pressed copy or cut. */
+  | { readonly type: "clipboard"; readonly text: string }
   | { readonly type: "error"; readonly message: string };
 
 /** Messages the client sends. Coordinates are page CSS px; modifiers are a 0..15 bitmask. */
@@ -93,6 +104,7 @@ export interface BrowserStreamControl {
   readonly controller: BrowserStreamController;
   readonly generation: number;
   readonly dialog: BrowserDialog | null;
+  readonly fileChooser: BrowserFileChooser | null;
 }
 
 export interface BrowserStreamPointer {
@@ -123,6 +135,7 @@ export interface BrowserStreamOptions {
   readonly onControl: (control: BrowserStreamControl) => void;
   readonly onPointer: (pointer: BrowserStreamPointer) => void;
   readonly onNav: (nav: BrowserStreamNav) => void;
+  readonly onClipboard: (text: string) => void;
   readonly onError: (message: string) => void;
   readonly onStatus: (status: BrowserStreamStatus) => void;
 }
@@ -156,6 +169,14 @@ function isDialog(value: unknown): value is BrowserDialog | null {
   );
 }
 
+// Absent means no picker, so a server that predates file pickers still parses.
+function isFileChooser(value: unknown): value is BrowserFileChooser | null | undefined {
+  if (value === null || value === undefined) return true;
+  if (typeof value !== "object") return false;
+  const chooser = value as Record<string, unknown>;
+  return isString(chooser["id"]) && isBoolean(chooser["multiple"]) && isString(chooser["accept"]);
+}
+
 /** Validate a JSON text frame. Unknown or malformed frames are dropped. */
 export function parseServerMessage(text: string): ServerMessage | null {
   let value: unknown;
@@ -172,12 +193,13 @@ export function parseServerMessage(text: string): ServerMessage | null {
     return isNumber(width) && isNumber(height) ? { type, width, height } : null;
   }
   if (type === "control") {
-    const { canOperate, controller, generation, dialog } = message;
+    const { canOperate, controller, generation, dialog, fileChooser } = message;
     return canOperate === true &&
       isController(controller) &&
       isNumber(generation) &&
-      isDialog(dialog)
-      ? { type, canOperate: true, controller, generation, dialog }
+      isDialog(dialog) &&
+      isFileChooser(fileChooser)
+      ? { type, canOperate: true, controller, generation, dialog, fileChooser: fileChooser ?? null }
       : null;
   }
   if (type === "pointer") {
@@ -198,6 +220,10 @@ export function parseServerMessage(text: string): ServerMessage | null {
       isBoolean(canGoForward)
       ? { type, url, title, loading, canGoBack, canGoForward }
       : null;
+  }
+  if (type === "clipboard") {
+    const { text } = message;
+    return isString(text) ? { type, text } : null;
   }
   if (type === "error") {
     const { message: text } = message;
@@ -279,6 +305,7 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
           controller: message.controller,
           generation: message.generation,
           dialog: message.dialog,
+          fileChooser: message.fileChooser ?? null,
         };
         options.onControl(control);
         return;
@@ -298,6 +325,9 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
           canGoBack: message.canGoBack,
           canGoForward: message.canGoForward,
         });
+        return;
+      case "clipboard":
+        options.onClipboard(message.text);
         return;
       case "error":
         options.onError(message.message);

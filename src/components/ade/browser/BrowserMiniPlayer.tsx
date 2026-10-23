@@ -184,7 +184,6 @@ function FloatingBrowser({ dock }: { dock: RightDock }) {
 
   const dockToPane = () => {
     preview.setPlace("dock");
-    preview.setView("browser");
     shell.setRightTab("computer");
   };
 

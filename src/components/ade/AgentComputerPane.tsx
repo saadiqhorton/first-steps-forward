@@ -1,35 +1,43 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Expand, LoaderCircle, Monitor, RotateCw, Shrink } from "lucide-react";
+import { Check, Copy, Globe, LoaderCircle, RotateCw } from "lucide-react";
 import type { AgentComputer, Project, Session } from "@/lib/ade/types";
-import { computerControl, computerStatus } from "@/lib/ade/store";
-import { noVncPassword, noVncWebSocketUrl } from "@/lib/ade/noVncConnection.mjs";
-import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
+import { computerControl, computerProfile, computerStatus } from "@/lib/ade/store";
+import { copyText } from "@/lib/ade/clipboard";
 import { summarizeChecks } from "./ChecksList";
 import { BrowserChromeRow } from "./browser/BrowserChromeRow";
 import { BrowserSurface } from "./browser/BrowserSurface";
-import { useBrowserPreview, type BrowserView } from "./browser/browserPreviewContext";
+import { useBrowserPreview } from "./browser/browserPreviewContext";
 import type { RightDock, ComputerTone } from "./rightPaneTypes";
 
 const POLL_MS = 2000;
-const VIEW_OPTIONS = [
-  { value: "browser", label: "Browser" },
-  { value: "desktop", label: "Desktop" },
+const PROFILE_OPTIONS: Array<{ value: AgentComputer["profile"]; label: string; title: string }> = [
+  {
+    value: "default",
+    label: "keep logins",
+    title: "Keep this project's cookies and storage between runs",
+  },
+  { value: "incognito", label: "incognito", title: "Start clean every time the browser starts" },
 ];
 
+const megabytes = (bytes: number) => Math.round(bytes / 1_000_000);
+
 /**
- * The project's agent computer: an isolated Linux desktop the coding agent
- * drives itself (screenshots, mouse, keyboard, browser) to run and manually
- * test the project. The user watches live and can take the wheel.
+ * The project's agent browser: headless Chrome on this machine that the coding agent drives
+ * itself (screenshots, mouse, keyboard, page snapshots) to run and manually test the project.
+ * The user watches live and can take the wheel. It starts when this tab is shown.
  */
 export function AgentComputerPane({
   project,
   session,
   dock = "side",
+  active = false,
   onToneChange,
 }: {
   project: Project;
   session?: Session | undefined;
   dock?: RightDock;
+  /** The tab is on screen; a stopped browser starts once per project when it first is. */
+  active?: boolean;
   onToneChange?: (tone: ComputerTone) => void;
 }) {
   const [computer, setComputer] = useState<AgentComputer | null>(null);
@@ -38,13 +46,8 @@ export function AgentComputerPane({
   // Control is shared with the browser preview and the agent's tools, so it lives in the provider.
   const control = browser.control?.controller === "you";
   const [busy, setBusy] = useState(false);
-  const [viewerState, setViewerState] = useState<"connecting" | "connected" | "reconnecting">(
-    "connecting",
-  );
-  const [viewerError, setViewerError] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
-  const screenRef = useRef<HTMLDivElement>(null);
-  const rfbTargetRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
+  const autoStarted = useRef(new Set<string>());
   const browserFrameRef = useRef<HTMLDivElement>(null);
   const onToneChangeRef = useRef(onToneChange);
 
@@ -53,8 +56,8 @@ export function AgentComputerPane({
   }, [onToneChange]);
 
   const status = computer?.status;
-  const running = status === "running" && !!computer?.viewerUrl;
-  const preparing = status === "building" || status === "starting";
+  const running = status === "running";
+  const preparing = status === "installing" || status === "starting";
 
   const tone: ComputerTone = running
     ? "live"
@@ -84,137 +87,69 @@ export function AgentComputerPane({
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const run = async (op: "start" | "stop") => {
+  const apply = useCallback(async (next: Promise<AgentComputer>) => {
     setBusy(true);
     try {
-      setComputer(await computerControl(project.id, op));
+      setComputer(await next);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  };
-
-  // The Desktop (noVNC) view is only connected while it is the shown view.
-  const view = browser.view;
-  const src =
-    running && view === "desktop"
-      ? control
-        ? computer.controlViewerUrl
-        : computer.viewerUrl
-      : null;
-
-  useEffect(() => {
-    if (!src || !rfbTargetRef.current) return;
-    let disposed = false;
-    let reconnectTimer: number | undefined;
-    let rfb: import("@novnc/novnc").default | undefined;
-    let retries = 0;
-    const connect = async () => {
-      if (disposed || !rfbTargetRef.current) return;
-      setViewerState(retries ? "reconnecting" : "connecting");
-      try {
-        const { default: RFB } = await import("@novnc/novnc");
-        if (disposed || !rfbTargetRef.current) return;
-        const client = new RFB(rfbTargetRef.current, noVncWebSocketUrl(src), {
-          credentials: { password: noVncPassword(src) },
-        });
-        rfb = client;
-        client.viewOnly = !control;
-        client.scaleViewport = true;
-        client.clipViewport = false;
-        client.background = "#080909";
-        client.addEventListener("connect", () => {
-          if (disposed) return;
-          retries = 0;
-          setViewerState("connected");
-          setViewerError("");
-        });
-        client.addEventListener("disconnect", () => {
-          if (disposed) return;
-          retries += 1;
-          setViewerState("reconnecting");
-          setViewerError("Screen connection interrupted. Reconnecting…");
-          reconnectTimer = window.setTimeout(
-            () => void connect(),
-            Math.min(5000, 500 * 2 ** Math.min(retries, 3)),
-          );
-        });
-        client.addEventListener("securityfailure", () => {
-          if (!disposed) setViewerError("The computer rejected the screen connection.");
-        });
-      } catch (cause) {
-        if (disposed) return;
-        setViewerState("reconnecting");
-        setViewerError(
-          cause instanceof Error ? cause.message : "Could not connect to the computer screen.",
-        );
-        retries += 1;
-        reconnectTimer = window.setTimeout(
-          () => void connect(),
-          Math.min(5000, 500 * 2 ** Math.min(retries, 3)),
-        );
-      }
-    };
-    void connect();
-    return () => {
-      disposed = true;
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
-      rfb?.disconnect();
-    };
-  }, [src, control]);
-
-  useEffect(() => {
-    const update = () => setFullscreen(document.fullscreenElement === screenRef.current);
-    document.addEventListener("fullscreenchange", update);
-    return () => document.removeEventListener("fullscreenchange", update);
   }, []);
+  const run = (op: "start" | "stop" | "clear") => apply(computerControl(project.id, op));
 
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement === screenRef.current) void document.exitFullscreen();
-    else void screenRef.current?.requestFullscreen();
+  // Launching takes about a second, so opening the tab starts the browser. Only once per project:
+  // after Turn off it stays off until started again.
+  useEffect(() => {
+    if (!active || status !== "stopped" || autoStarted.current.has(project.id)) return;
+    autoStarted.current.add(project.id);
+    void apply(computerControl(project.id, "start"));
+  }, [active, status, project.id, apply]);
+
+  const copySetup = async () => {
+    if (!computer?.setupCommand) return;
+    if (await copyText(computer.setupCommand)) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    }
   };
-  const needsStatusRetry =
-    (!computer && !!error) ||
-    status === "unavailable" ||
-    (status === "running" && !computer?.viewerUrl);
+
+  const progress = computer?.progress;
+  const percent =
+    progress && progress.totalBytes > 0
+      ? Math.min(100, Math.round((progress.downloadedBytes / progress.totalBytes) * 100))
+      : 0;
+  const needsStatusRetry = (!computer && !!error) || status === "unavailable";
   const screenTitle = !computer
     ? error
-      ? "Computer status unavailable"
-      : "Connecting to project computer"
-    : running
-      ? control
-        ? "You have control"
-        : "Computer is live"
-      : status === "unavailable"
-        ? "Computer unavailable"
-        : status === "building"
-          ? "Preparing the computer"
-          : status === "starting"
-            ? "Starting the computer"
-            : status === "error"
-              ? "Computer needs attention"
-              : status === "running"
-                ? "Reconnecting to the screen"
-                : "Computer is off";
+      ? "Browser status unavailable"
+      : "Connecting to the agent browser"
+    : status === "unavailable"
+      ? "Browser unavailable"
+      : status === "installing"
+        ? "Installing the browser"
+        : status === "starting"
+          ? "Starting the browser"
+          : status === "error"
+            ? "Browser needs attention"
+            : "Browser is off";
   const screenDescription = !computer
     ? error
-      ? "ADE could not reach the local computer service. Check again to refresh its status."
-      : "Checking the local computer service for this project."
+      ? "ADE could not reach its local service. Check again to refresh the browser's status."
+      : "Checking this project's browser."
     : status === "unavailable"
-      ? (computer.detail ?? "The local Docker service is unavailable.")
+      ? (computer.detail ?? "ADE's headless browser cannot run on this system.")
       : status === "stopped"
-        ? "Start this project's computer when you want to watch the agent run and test its work."
+        ? "Start this project's browser when you want to watch the agent run and test its work."
         : status === "error"
-          ? (computer.detail ??
-            "The last start attempt did not finish. Review the setup details and try again.")
-          : status === "building"
-            ? (computer.detail ?? "Preparing the isolated desktop environment for this project.")
-            : status === "starting"
-              ? (computer.detail ??
-                "The desktop is starting. Its screen will appear here when ready.")
-              : "The desktop is running; ADE is reconnecting to its viewer.";
+          ? (computer.detail ?? "The browser did not start. Review the details and try again.")
+          : status === "installing"
+            ? progress?.unpacking
+              ? "Unpacking Chrome for Testing. This happens once."
+              : "ADE downloads its own copy of Chrome for Testing once, then reuses it for every project."
+            : (computer.detail ?? "The browser will appear here in a moment.");
   const checks = session ? summarizeChecks(session.checks) : null;
   const added = session?.changes.reduce((n, c) => n + c.added, 0) ?? 0;
   const removed = session?.changes.reduce((n, c) => n + c.removed, 0) ?? 0;
@@ -228,117 +163,117 @@ export function AgentComputerPane({
       ? "w-full flex-none pb-3 @[40rem]/computer:w-[min(26rem,45%)] @[40rem]/computer:shrink-0 @[40rem]/computer:pb-0"
       : "flex-none pb-3";
 
-  const desktopScreen =
-    running && src ? (
+  const placeholder = (
+    <div
+      className={`relative flex aspect-[16/10] flex-col rounded-xl border border-line bg-[#141716] text-center text-white shadow-sm ${dock === "side" ? "mx-3" : ""} @max-[20rem]/computer:aspect-auto`}
+    >
       <div
-        ref={screenRef}
-        className="agent-computer-screen relative aspect-[16/10] w-full flex-none overflow-hidden bg-black"
-      >
-        <div
-          ref={rfbTargetRef}
-          className="absolute inset-0 h-full w-full"
-          aria-label={`Agent computer for ${project.name}`}
-        />
-        {viewerState !== "connected" && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center p-3">
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/75 px-3 py-1.5 font-mono text-[10px] text-white/80">
-              <LoaderCircle className="size-3 animate-spin" aria-hidden />
-              {viewerError ||
-                (viewerState === "connecting" ? "Connecting to screen" : "Reconnecting to screen")}
-            </span>
+        className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[radial-gradient(ellipse_at_center,rgba(218,174,92,0.10),transparent_58%)]"
+        aria-hidden
+      />
+      <div className="flex-1 grid place-items-center px-5 py-6 @max-[20rem]/computer:px-4 @max-[20rem]/computer:py-5">
+        <div className="relative w-full max-w-sm">
+          <div className="mx-auto mb-4 grid size-14 @max-[20rem]/computer:size-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-amber">
+            {preparing || (!computer && !error) ? (
+              <LoaderCircle
+                className="size-6 @max-[20rem]/computer:size-5 animate-spin"
+                aria-hidden
+              />
+            ) : (
+              <Globe
+                className="size-6 @max-[20rem]/computer:size-5"
+                strokeWidth={1.5}
+                aria-hidden
+              />
+            )}
           </div>
-        )}
-        <button
-          type="button"
-          onClick={toggleFullscreen}
-          aria-label={fullscreen ? "Exit full screen" : "Full screen"}
-          title={fullscreen ? "Exit full screen" : "Full screen"}
-          className="absolute right-3 top-3 z-20 grid size-8 place-items-center rounded-md border border-white/15 bg-black/65 text-white/80 opacity-70 hover:opacity-100 focus:opacity-100"
-        >
-          {fullscreen ? (
-            <Shrink className="size-4" aria-hidden />
-          ) : (
-            <Expand className="size-4" aria-hidden />
+          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/45 @max-[20rem]/computer:hidden">
+            {project.name} · local browser
+          </div>
+          <h2 className="mt-2 text-lg font-medium tracking-tight">{screenTitle}</h2>
+          <p className="mx-auto mt-2 max-w-xs text-[12px] leading-relaxed text-white/65 @max-[20rem]/computer:line-clamp-3">
+            {screenDescription}
+          </p>
+          {status === "installing" && progress && (
+            <div className="mx-auto mt-4 max-w-xs">
+              <div
+                className="h-1.5 overflow-hidden rounded-full bg-white/10"
+                role="progressbar"
+                aria-label="Browser download"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={percent}
+              >
+                <div
+                  className={`h-full rounded-full bg-amber transition-[width] duration-500 ${progress.unpacking ? "animate-pulse-soft" : ""}`}
+                  style={{ width: `${progress.unpacking ? 100 : percent}%` }}
+                />
+              </div>
+              <div className="mt-2 font-mono text-[10px] text-white/45">
+                {progress.unpacking
+                  ? "unpacking"
+                  : `${megabytes(progress.downloadedBytes)} of ${megabytes(progress.totalBytes)} MB`}
+              </div>
+            </div>
           )}
-        </button>
-      </div>
-    ) : (
-      <div
-        className={`relative flex aspect-[16/10] flex-col rounded-xl border border-line bg-[#141716] text-center text-white shadow-sm ${dock === "side" ? "mx-3" : ""} @max-[20rem]/computer:aspect-auto`}
-      >
-        <div
-          className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[radial-gradient(ellipse_at_center,rgba(218,174,92,0.10),transparent_58%)]"
-          aria-hidden
-        />
-        <div className="flex-1 grid place-items-center px-5 py-6 @max-[20rem]/computer:px-4 @max-[20rem]/computer:py-5">
-          <div className="relative max-w-sm">
-            <div className="mx-auto mb-4 grid size-14 @max-[20rem]/computer:size-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-amber">
-              {preparing || (!computer && !error) ? (
-                <LoaderCircle
-                  className="size-6 @max-[20rem]/computer:size-5 animate-spin"
-                  aria-hidden
-                />
-              ) : (
-                <Monitor
-                  className="size-6 @max-[20rem]/computer:size-5"
-                  strokeWidth={1.5}
-                  aria-hidden
-                />
-              )}
-            </div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/45 @max-[20rem]/computer:hidden">
-              {project.name} · local desktop
-            </div>
-            <h2 className="mt-2 text-lg font-medium tracking-tight">{screenTitle}</h2>
-            <p className="mx-auto mt-2 max-w-xs text-[12px] leading-relaxed text-white/65 @max-[20rem]/computer:line-clamp-3">
-              {screenDescription}
-            </p>
-            {(status === "stopped" || status === "error") && (
+          {computer?.setupCommand && (
+            <div className="mx-auto mt-4 flex max-w-xs items-center gap-2 rounded-lg border border-white/10 bg-black/30 py-1.5 pr-1.5 pl-3 text-left">
+              <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/85">
+                {computer.setupCommand}
+              </code>
               <button
                 type="button"
-                onClick={() => void run("start")}
-                disabled={busy}
-                className="btn-amber mt-5 inline-flex items-center justify-center gap-2 px-4 py-2 text-[12px] disabled:opacity-50 @max-[20rem]/computer:w-full"
+                onClick={() => void copySetup()}
+                aria-label="Copy setup command"
+                title="Copy"
+                className="grid size-7 shrink-0 place-items-center rounded-md text-white/60 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-amber"
               >
-                {busy ? (
-                  <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+                {copied ? (
+                  <Check className="size-3.5" aria-hidden />
                 ) : (
-                  <Monitor className="size-3.5" aria-hidden />
+                  <Copy className="size-3.5" aria-hidden />
                 )}
-                {status === "error" ? "Try starting again" : "Start computer"}
               </button>
-            )}
-            {needsStatusRetry && (
-              <button
-                type="button"
-                onClick={() => void refresh()}
-                disabled={busy}
-                className="btn-quiet mt-5 inline-flex items-center justify-center gap-2 px-4 py-2 text-[12px] text-white disabled:opacity-50 @max-[20rem]/computer:w-full"
-              >
-                <RotateCw className="size-3.5" aria-hidden />
-                Check again
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center justify-between border-t border-white/10 px-4 py-2 font-mono text-[10px] text-white/45 gap-3">
-          <span className="truncate">
-            {computer?.screen
-              ? `${computer.screen.width} × ${computer.screen.height}`
-              : "project workspace"}
-          </span>
-          <span className="shrink-0">
-            {running
-              ? control
-                ? "control enabled"
-                : "view only"
-              : preparing
-                ? "setting up"
-                : "ready when you are"}
-          </span>
+            </div>
+          )}
+          {(status === "stopped" || status === "error") && (
+            <button
+              type="button"
+              onClick={() => void run("start")}
+              disabled={busy}
+              className="btn-amber mt-5 inline-flex items-center justify-center gap-2 px-4 py-2 text-[12px] disabled:opacity-50 @max-[20rem]/computer:w-full"
+            >
+              {busy ? (
+                <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+              ) : (
+                <Globe className="size-3.5" aria-hidden />
+              )}
+              {status === "error" ? "Try starting again" : "Start browser"}
+            </button>
+          )}
+          {needsStatusRetry && (
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={busy}
+              className="btn-quiet mt-5 inline-flex items-center justify-center gap-2 px-4 py-2 text-[12px] text-white disabled:opacity-50 @max-[20rem]/computer:w-full"
+            >
+              <RotateCw className="size-3.5" aria-hidden />
+              Check again
+            </button>
+          )}
         </div>
       </div>
-    );
+      <div className="flex items-center justify-between border-t border-white/10 px-4 py-2 font-mono text-[10px] text-white/45 gap-3">
+        <span className="truncate">
+          {computer?.screen
+            ? `${computer.screen.width} × ${computer.screen.height}`
+            : "project workspace"}
+        </span>
+        <span className="shrink-0">{preparing ? "setting up" : "ready when you are"}</span>
+      </div>
+    </div>
+  );
 
   const browserScreen =
     browser.place !== "dock" ? (
@@ -360,7 +295,7 @@ export function AgentComputerPane({
       </div>
     ) : !browser.status.available ? (
       <div className="mx-3 rounded-xl border border-line bg-surface-muted p-4 text-[12px] leading-snug text-dim">
-        {browser.status.reason ?? "The browser is not available on this computer yet."}
+        {browser.status.reason ?? "The browser is not available yet."}
       </div>
     ) : (
       <div ref={browserFrameRef} className="flex flex-col">
@@ -369,24 +304,7 @@ export function AgentComputerPane({
       </div>
     );
 
-  const screen = running && view === "browser" ? browserScreen : desktopScreen;
-
-  const media = running ? (
-    <div className="flex flex-col">
-      <div className="px-3 pt-3 pb-2">
-        <SegmentedControl
-          className="w-full max-w-none"
-          label="Computer view"
-          value={view}
-          onValueChange={(next) => browser.setView(next as BrowserView)}
-          options={VIEW_OPTIONS}
-        />
-      </div>
-      {screen}
-    </div>
-  ) : (
-    screen
-  );
+  const media = running ? <div className="flex flex-col pt-3">{browserScreen}</div> : placeholder;
 
   const info = (
     <>
@@ -394,9 +312,9 @@ export function AgentComputerPane({
         <p className="mt-1 text-[12px] leading-snug text-dim">
           {running
             ? control
-              ? "Your mouse and keyboard reach the agent's computer. Hand it back when you're done so you don't collide with the agent."
+              ? "Your mouse and keyboard reach the agent's browser. Hand it back when you're done so you don't collide with the agent."
               : "The agent starts the app, opens it here, and tests it like a person would. Watch live, or take control to help."
-            : "The task stays beside the computer. When the agent starts it, its real desktop and browser appear here."}
+            : "The task stays beside the browser. When the agent opens the app, it appears here."}
         </p>
         {error && (
           <p role="alert" className="mt-2 text-[12px] leading-snug text-danger">
@@ -408,16 +326,6 @@ export function AgentComputerPane({
             {browser.actionError}
           </p>
         )}
-        {computer?.log?.length ? (
-          <details className="mt-3 rounded-lg border border-line bg-surface-muted/50 px-3 py-2">
-            <summary className="cursor-pointer text-[11px] font-medium text-dim">
-              Setup details
-            </summary>
-            <pre className="mt-2 max-h-28 overflow-auto font-mono text-[10px] leading-snug whitespace-pre-wrap text-dim">
-              {computer.log.slice(-8).join("\n")}
-            </pre>
-          </details>
-        ) : null}
         {running && (
           <div className="mt-2 flex flex-wrap gap-2">
             <button
@@ -428,15 +336,6 @@ export function AgentComputerPane({
             >
               {control ? "Hand back" : "Take control"}
             </button>
-            {view === "desktop" && (
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                className="btn-quiet px-3 py-1.5 text-[12px]"
-              >
-                Full screen
-              </button>
-            )}
             <button
               type="button"
               onClick={() => void run("stop")}
@@ -456,6 +355,44 @@ export function AgentComputerPane({
               {session ? "this task" : "project"}
             </span>
           </div>
+          {computer && status !== "unavailable" && (
+            <div className="flex items-center justify-between gap-3 px-3 py-2 font-mono text-[10px] text-dim">
+              <span className="min-w-0 truncate">Browser profile</span>
+              <span
+                className="flex shrink-0 items-center gap-1"
+                role="group"
+                aria-label="Browser profile"
+              >
+                {PROFILE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={computer.profile === option.value}
+                    title={option.title}
+                    disabled={busy}
+                    onClick={() => void apply(computerProfile(project.id, option.value))}
+                    className={`rounded px-1.5 py-0.5 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-amber ${computer.profile === option.value ? "bg-surface-muted text-ink ring-1 ring-line ring-inset" : "hover:text-ink"}`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+                {computer.profile === "default" && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <button
+                      type="button"
+                      onClick={() => void run("clear")}
+                      disabled={busy}
+                      title="Sign out everywhere: clear this project's cookies, storage and cache"
+                      className="rounded px-1.5 py-0.5 hover:text-danger disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-amber"
+                    >
+                      clear
+                    </button>
+                  </>
+                )}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between gap-3 px-3 py-2 font-mono text-[10px] text-dim">
             <span className="min-w-0 truncate">Checks</span>
             <span className={`shrink-0 ${checks?.verified ? "text-teal" : ""}`}>
@@ -478,11 +415,11 @@ export function AgentComputerPane({
   return (
     <aside
       className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto bg-panel @container/computer"
-      aria-label="Agent computer"
+      aria-label="Agent browser"
     >
       <div className="flex min-h-11 items-center justify-between border-b border-line px-4 py-2 gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-medium">Agent computer</div>
+          <div className="text-sm font-medium">Agent browser</div>
           <div className="mt-0.5 truncate text-[11px] text-dim">{project.name}</div>
         </div>
         <span

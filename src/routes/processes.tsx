@@ -9,7 +9,7 @@ export const Route = createFileRoute("/processes")({
       { title: "Processes — ADE" },
       {
         name: "description",
-        content: "Watch the agent run and test each project on its own computer.",
+        content: "Watch the agent run and test each project in its own browser.",
       },
       { property: "og:title", content: "Processes — ADE" },
       { property: "og:description", content: "Every local process, named by project and purpose." },

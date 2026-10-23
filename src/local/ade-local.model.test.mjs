@@ -791,7 +791,14 @@ test("manifest gives every agent its computer: tools, real ADE URL, and verify-v
   assert.equal(manifest.devControl, undefined);
   assert.equal(manifest.agentComputer.available, true);
   assert.equal(manifest.agentComputer.screen, "1280x800");
-  for (const tool of ["computer_screenshot", "computer_open_url", "dev_server_start"])
+  // The list comes from the tool definitions, so the browser_* tools are offered too.
+  for (const tool of [
+    "computer_screenshot",
+    "computer_open_url",
+    "dev_server_start",
+    "browser_snapshot",
+    "browser_upload",
+  ])
     assert.ok(manifest.agentComputer.tools.includes(tool), `manifest lists ${tool}`);
   const ctx = computerContext(project);
   assert.deepEqual(ctx.env, { ADE_API: "http://127.0.0.1:3000", ADE_PROJECT_ID: project.id });
@@ -802,7 +809,7 @@ test("manifest gives every agent its computer: tools, real ADE URL, and verify-v
   // and visible changes must be checked on the computer before "done".
   const dev = manifest.constraints.find((c) => c.includes("dev_server_start"));
   assert.ok(dev && dev.includes("never start a server yourself"));
-  assert.ok(manifest.constraints.some((c) => c.includes("verify it on your agent computer")));
+  assert.ok(manifest.constraints.some((c) => c.includes("verify it in your agent browser")));
 
   // Pi gets the same computer (as a Pi extension), not a "use the UI" fallback.
   const piManifest = await buildManifest({ request: "preview it", agentId: "pi" }, project);
