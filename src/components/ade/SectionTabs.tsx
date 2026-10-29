@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { GlideIndicator } from "@/components/ade/motion";
 import { documentsQuery, entriesQuery, workflowsQuery } from "@/lib/ade/queries";
-import { needsYou, useAde } from "@/lib/ade/store";
+import { useAde } from "@/lib/ade/store";
+import { needsAttention } from "@/lib/ade/viewed";
 
 type Section = "conversations" | "files" | "workflows";
 
@@ -44,8 +45,7 @@ export function SectionTabs() {
   if (!projectId || !state.projects.some((p) => p.id === projectId)) return null;
 
   const needsInput = state.sessions.filter(
-    (s) =>
-      s.projectId === projectId && (s.status === "ready" || s.status === "blocked" || needsYou(s)),
+    (s) => s.projectId === projectId && needsAttention(s),
   ).length;
 
   const linkClass = (active: boolean) =>

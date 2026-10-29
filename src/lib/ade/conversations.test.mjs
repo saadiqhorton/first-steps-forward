@@ -35,12 +35,13 @@ test("isUnread: falls back to createdAt when never viewed", () => {
   assert.equal(isUnread(untouched, {}), false);
 });
 
-test("filterSessions: needs = ready|blocked", () => {
+test("filterSessions: needs = ready|blocked|waiting on a permission answer", () => {
   const sessions = [
     session({ id: "1", status: "ready", updatedAt: 3 }),
     session({ id: "2", status: "blocked", updatedAt: 2 }),
     session({ id: "3", status: "working", updatedAt: 4 }),
     session({ id: "4", status: "complete", updatedAt: 5 }),
+    session({ id: "5", status: "working", updatedAt: 1, pendingPermissions: [{ id: "q" }] }),
   ];
   const out = filterSessions(sessions, {
     filter: "needs",
@@ -50,7 +51,7 @@ test("filterSessions: needs = ready|blocked", () => {
   });
   assert.deepEqual(
     out.map((s) => s.id),
-    ["1", "2"],
+    ["1", "2", "5"],
   );
 });
 

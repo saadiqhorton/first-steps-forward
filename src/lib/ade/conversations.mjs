@@ -17,6 +17,19 @@ export function isUnread(session, viewed) {
 }
 
 /**
+ * Whether a session is waiting on the user: ready to review, blocked, or
+ * paused on a permission request while its turn runs.
+ * @param {{ status: string, pendingPermissions?: unknown[] }} session
+ */
+export function needsAttention(session) {
+  return (
+    session.status === "ready" ||
+    session.status === "blocked" ||
+    (session.pendingPermissions?.length ?? 0) > 0
+  );
+}
+
+/**
  * @param {{ status: string }} session
  * @param {boolean} showCompleted
  */
@@ -26,13 +39,13 @@ function passesCompleted(session, showCompleted) {
 }
 
 /**
- * @param {{ status: string, id: string, updatedAt: number, createdAt: number }} session
+ * @param {{ status: string, id: string, updatedAt: number, createdAt: number, pendingPermissions?: unknown[] }} session
  * @param {ConversationFilter} filter
  * @param {Record<string, number>} viewed
  */
 function passesFilter(session, filter, viewed) {
   if (filter === "all") return true;
-  if (filter === "needs") return session.status === "ready" || session.status === "blocked";
+  if (filter === "needs") return needsAttention(session);
   if (filter === "working") return session.status === "working" || session.status === "verifying";
   if (filter === "unread") return isUnread(session, viewed);
   return true;

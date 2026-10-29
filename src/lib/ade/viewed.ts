@@ -1,6 +1,10 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { Session } from "@/lib/ade/types";
-import { filterSessions as filterSessionsJs, isUnread as isUnreadJs } from "./conversations.mjs";
+import {
+  filterSessions as filterSessionsJs,
+  isUnread as isUnreadJs,
+  needsAttention as needsAttentionJs,
+} from "./conversations.mjs";
 
 export const VIEWED_KEY = "ade-session-viewed";
 
@@ -8,6 +12,11 @@ export type ConversationFilter = "all" | "needs" | "working" | "unread";
 
 export function isUnread(session: Session, viewed: Record<string, number>): boolean {
   return isUnreadJs(session, viewed);
+}
+
+/** Ready to review, blocked, or waiting on a permission answer. */
+export function needsAttention(session: Session): boolean {
+  return needsAttentionJs(session);
 }
 
 export function filterSessions(

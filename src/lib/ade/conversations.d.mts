@@ -9,6 +9,11 @@ export function isUnread(
   viewed: Record<string, number>,
 ): boolean;
 
+export function needsAttention(session: {
+  status: string;
+  pendingPermissions?: unknown[];
+}): boolean;
+
 export function filterSessions<
   S extends {
     id: string;
@@ -18,6 +23,7 @@ export function filterSessions<
     request?: string;
     summary?: string;
     messages?: Array<{ text?: string }>;
+    pendingPermissions?: unknown[];
   },
 >(
   sessions: S[],
