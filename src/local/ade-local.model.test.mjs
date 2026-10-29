@@ -7,6 +7,8 @@ import path from "node:path";
 // Point the service at a throwaway HOME *before* importing it, so load()/save()
 // touch only the temp workspace and no CLI is ever spawned by these tests.
 const home = mkdtempSync(path.join(os.tmpdir(), "ade-home-"));
+// On exit, not in test.after(): ADE's last workspace save can land after the tests end.
+process.once("exit", () => rmSync(home, { recursive: true, force: true }));
 mkdirSync(path.join(home, ".ade"), { mode: 0o700 });
 const workspaceFile = path.join(home, ".ade", "workspace.json");
 const seedSession = (id, status) => ({

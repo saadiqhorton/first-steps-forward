@@ -334,4 +334,5 @@ test("documents endpoint lists fixture Markdown files", async () => {
   assert.equal(res.json.documents[0].name, "guide.md");
 });
 
-test.after(() => rmSync(home, { recursive: true, force: true }));
+// On exit, not in test.after(): ADE's last workspace save can land after the tests end.
+process.once("exit", () => rmSync(home, { recursive: true, force: true }));

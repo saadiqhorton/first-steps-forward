@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { crc32 } from "node:zlib";
@@ -57,8 +57,14 @@ const shellArchive = () =>
     { name: "chrome-headless-shell-linux64/resources.pak", data: Buffer.from("pak") },
   ]);
 
+const baseDirs = [];
+process.once("exit", () => {
+  for (const dir of baseDirs) rmSync(dir, { recursive: true, force: true });
+});
+
 function setup(archive, { sha256, bytes, body } = {}) {
   const baseDir = mkdtempSync(path.join(os.tmpdir(), "ade-browser-install-"));
+  baseDirs.push(baseDir);
   const release = {
     version: "1.0.0",
     platform: "linux64",

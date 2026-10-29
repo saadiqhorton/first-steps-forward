@@ -265,4 +265,5 @@ test("host terminal rejects non-loopback peers even when the API is otherwise ex
   assert.equal(rebound.status, 403);
 });
 
-test.after(() => rmSync(home, { recursive: true, force: true }));
+// On exit, not in test.after(): ADE's last workspace save can land after the tests end.
+process.once("exit", () => rmSync(home, { recursive: true, force: true }));

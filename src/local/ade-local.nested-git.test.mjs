@@ -99,4 +99,5 @@ test("a nested Git repository supplies changes and repairs an empty completed-se
   ]);
 });
 
-test.after(() => rmSync(home, { recursive: true, force: true }));
+// On exit, not in test.after(): ADE's last workspace save can land after the tests end.
+process.once("exit", () => rmSync(home, { recursive: true, force: true }));

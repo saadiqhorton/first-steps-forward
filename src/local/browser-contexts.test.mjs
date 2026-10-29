@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -51,8 +51,14 @@ function fakeLauncher({ failLaunch } = {}) {
   };
 }
 
+const profilesDirs = [];
+process.once("exit", () => {
+  for (const dir of profilesDirs) rmSync(dir, { recursive: true, force: true });
+});
+
 function setup(options = {}) {
   const profilesDir = mkdtempSync(path.join(os.tmpdir(), "ade-browser-profiles-"));
+  profilesDirs.push(profilesDir);
   const launcher = fakeLauncher(options);
   const contexts = createBrowserContexts({
     profilesDir,

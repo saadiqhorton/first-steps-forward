@@ -124,6 +124,7 @@ test("editor rejects traversal, external symlinks, binary files, and remote peer
 
 test("listDocuments returns recent Markdown files and skips ignored paths", async () => {
   const docsRoot = mkdtempSync(path.join(os.tmpdir(), "ade-docs-"));
+  const outsideMd = path.join(os.tmpdir(), `ade-outside-${Date.now()}.md`);
   try {
     mkdirSync(path.join(docsRoot, "docs", "nested"), { recursive: true });
     mkdirSync(path.join(docsRoot, "node_modules", "pkg"), { recursive: true });
@@ -145,7 +146,6 @@ test("listDocuments returns recent Markdown files and skips ignored paths", asyn
     writeFileSync(path.join(docsRoot, "build", "out.md"), "# build\n");
     writeFileSync(path.join(docsRoot, ".tanstack", "route.md"), "# tanstack\n");
 
-    const outsideMd = path.join(os.tmpdir(), `ade-outside-${Date.now()}.md`);
     writeFileSync(outsideMd, "# outside\n");
     symlinkSync(outsideMd, path.join(docsRoot, "outside.md"));
 
@@ -176,6 +176,7 @@ test("listDocuments returns recent Markdown files and skips ignored paths", asyn
     );
   } finally {
     rmSync(docsRoot, { recursive: true, force: true });
+    rmSync(outsideMd, { force: true });
   }
 });
 
@@ -218,4 +219,5 @@ test("editor creates and deletes files inside the project", async () => {
   assert.equal(readFileSync(outside, "utf8"), "outside\n");
 });
 
-test.after(() => rmSync(home, { recursive: true, force: true }));
+// On exit, not in test.after(): ADE's last workspace save can land after the tests end.
+process.once("exit", () => rmSync(home, { recursive: true, force: true }));

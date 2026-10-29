@@ -178,6 +178,5 @@ test("follow-up message attaches metadata", async () => {
   await callJson(`/api/sessions/${created.json.id}/stop`, {});
 });
 
-test.after(() => {
-  rmSync(home, { recursive: true, force: true });
-});
+// On exit, not in test.after(): ADE's last workspace save can land after the tests end.
+process.once("exit", () => rmSync(home, { recursive: true, force: true }));
