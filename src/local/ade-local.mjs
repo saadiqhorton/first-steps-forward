@@ -30,6 +30,14 @@ import {
 import { listWorkflows, upsertWorkflow, deleteWorkflow as removeWorkflow } from "./workflows.mjs";
 import { reconcileWorkspaceMessages, saveWorkspace } from "./workspace-persistence.mjs";
 import {
+  SourceError,
+  cloneRepository,
+  createProjectFolder,
+  expandUserPath,
+  makeDirectory,
+  parseRepoSource,
+} from "./project-sources.mjs";
+import {
   decodeBase64,
   formatAttachmentPrompt,
   readAttachment,
@@ -229,13 +237,19 @@ const run = (bin, args, opts = {}) =>
   new Promise((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts.cwd,
-      env: process.env,
+      env: opts.env ? { ...process.env, ...opts.env } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
     });
     let stdout = "",
-      stderr = "";
-    const timer = opts.timeout ? setTimeout(() => child.kill("SIGTERM"), opts.timeout) : null;
+      stderr = "",
+      timedOut = false;
+    const timer = opts.timeout
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+        }, opts.timeout)
+      : null;
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
     child.on("error", (e) => {
@@ -244,7 +258,7 @@ const run = (bin, args, opts = {}) =>
     });
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout, stderr });
+      resolve({ code: code ?? 1, stdout, stderr, timedOut });
     });
   });
 async function executable(bin) {
@@ -1840,6 +1854,30 @@ function localRequest(req) {
   const bindHost = EXPOSE_HOST().toLowerCase();
   return bindHost === "0.0.0.0" || bindHost === "::" || host === bindHost;
 }
+// Registers an existing directory as a project and answers the request. Shared
+// by "add a folder", "clone a repository" and "create a folder".
+async function registerProject(res, real, name) {
+  if (state.projects.some((p) => p.path === real))
+    return json(res, 409, { error: "This project is already added." });
+  const project = {
+    id: id(),
+    name: String(name || path.basename(real)),
+    path: real,
+    branch: "",
+    ahead: 0,
+    uncommittedFiles: [],
+    defaultAgent: "codex",
+    addedAt: now(),
+  };
+  await projectInfo(project);
+  state.projects.push(project);
+  // Same detection path as the bootstrap re-scan: an unreadable or
+  // malformed package.json records a distinct note instead of silently
+  // reporting no dev script.
+  const { proc } = await refreshDevProcess(project);
+  await save();
+  return json(res, 201, { project, process: proc });
+}
 async function handle(req, res) {
   const url = new URL(req.url, "http://127.0.0.1");
   const parts = url.pathname
@@ -2045,10 +2083,7 @@ async function handle(req, res) {
       // loopback/origin guards as every other route; never exposes file
       // contents, only directory names one level at a time.
       const query = new URL(req.url, "http://127.0.0.1").searchParams;
-      const requested = query.get("path") || os.homedir();
-      const expanded = requested.startsWith("~")
-        ? path.join(os.homedir(), requested.slice(1))
-        : path.resolve(requested);
+      const expanded = expandUserPath(query.get("path") || os.homedir(), os.homedir());
       let real;
       try {
         real = await fs.realpath(expanded);
@@ -2103,36 +2138,48 @@ async function handle(req, res) {
           "No supported native folder picker was found. Enter the absolute local folder path instead.",
       });
     }
+    if (req.method === "POST" && parts[0] === "mkdir" && parts.length === 1) {
+      // Lets the folder picker make the destination folder it is about to use.
+      const data = await body(req);
+      const created = await makeDirectory({
+        parent: data.parent,
+        name: data.name,
+        home: os.homedir(),
+      });
+      return json(res, 201, { path: created });
+    }
     if (req.method === "POST" && parts[0] === "projects" && parts.length === 1) {
       const data = await body(req);
       const requested = String(data.path ?? "").trim();
       if (!requested) return json(res, 400, { error: "Choose a local folder path." });
-      const expanded = requested.startsWith("~")
-        ? path.join(os.homedir(), requested.slice(1))
-        : path.resolve(requested);
-      const real = await fs.realpath(expanded);
+      const real = await fs.realpath(expandUserPath(requested, os.homedir()));
       const stat = await fs.stat(real);
       if (!stat.isDirectory()) return json(res, 400, { error: "That path is not a directory." });
-      if (state.projects.some((p) => p.path === real))
-        return json(res, 409, { error: "This project is already added." });
-      const project = {
-        id: id(),
-        name: String(data.name || path.basename(real)),
-        path: real,
-        branch: "",
-        ahead: 0,
-        uncommittedFiles: [],
-        defaultAgent: "codex",
-        addedAt: now(),
-      };
-      await projectInfo(project);
-      state.projects.push(project);
-      // Same detection path as the bootstrap re-scan: an unreadable or
-      // malformed package.json records a distinct note instead of silently
-      // reporting no dev script.
-      const { proc } = await refreshDevProcess(project);
-      await save();
-      return json(res, 201, { project, process: proc });
+      return registerProject(res, real, data.name);
+    }
+    if (req.method === "POST" && parts[0] === "projects" && parts[1] === "clone") {
+      const data = await body(req);
+      const source = parseRepoSource(data.url);
+      if (!source.ok) return json(res, 400, { error: source.error });
+      const created = await cloneRepository({
+        run,
+        url: source.url,
+        parent: data.parent,
+        name: data.name?.trim?.() || source.name,
+        home: os.homedir(),
+      });
+      return registerProject(res, await fs.realpath(created), data.name || source.name);
+    }
+    if (req.method === "POST" && parts[0] === "projects" && parts[1] === "create") {
+      const data = await body(req);
+      const created = await createProjectFolder({
+        run,
+        parent: data.parent,
+        name: data.name,
+        git: data.git !== false,
+        home: os.homedir(),
+      });
+      return registerProject(res, await fs.realpath(created), data.name);
     }
     if (req.method === "POST" && parts[0] === "projects" && parts[2] === "default-agent") {
       const project = state.projects.find((p) => p.id === parts[1]);
@@ -3117,6 +3164,7 @@ async function handle(req, res) {
       return json(res, 200, { agents: await agentStatus() });
     return json(res, 404, { error: "Not found." });
   } catch (error) {
+    if (error instanceof SourceError) return json(res, error.status, { error: error.message });
     return json(res, 500, { error: error?.message ?? String(error) });
   }
 }

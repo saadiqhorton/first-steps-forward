@@ -6,6 +6,9 @@ import { useCallback, useEffect, useState } from "react";
  * (GET /api/browse — directory names only, never file contents) and calls
  * onPick with the folder the user chooses.
  *
+ * "New folder" makes one (POST /api/mkdir) in the folder being viewed, so a
+ * clone or new project can be given a fresh destination without leaving here.
+ *
  * Rendered as an in-dialog panel (not a nested overlay). Nesting a second
  * Radix Dialog on top of Add Project left the wider parent chrome and its
  * scrollbar visible around the picker, which looked broken and clipped the
@@ -24,6 +27,10 @@ export function FolderBrowser({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [nameError, setNameError] = useState("");
+  const [making, setMaking] = useState(false);
 
   const load = useCallback(
     async (target?: string, hidden = showHidden) => {
@@ -52,16 +59,47 @@ export function FolderBrowser({
     void load();
   }, [load]);
 
+  const stopNaming = useCallback(() => {
+    setNaming(false);
+    setNewName("");
+    setNameError("");
+  }, []);
+
+  const makeFolder = async () => {
+    const name = newName.trim();
+    if (!name || making) return;
+    setMaking(true);
+    setNameError("");
+    try {
+      const response = await fetch("/api/mkdir", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ parent: current, name }),
+      });
+      const value = await response.json();
+      if (!response.ok)
+        throw new Error(value.error ?? `Could not create the folder (${response.status})`);
+      stopNaming();
+      await load(value.path);
+    } catch (e) {
+      setNameError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMaking(false);
+    }
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        // Escape first dismisses the name field, then the picker itself.
+        if (naming) stopNaming();
+        else onClose();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, [onClose, naming, stopNaming]);
 
   return (
     <div className="flex w-full flex-col px-6 pb-6 pt-6 pr-12" aria-label="Choose a project folder">
@@ -81,6 +119,14 @@ export function FolderBrowser({
         >
           ↑ Up one level
         </button>
+        <button
+          type="button"
+          disabled={!current || loading || !!error}
+          onClick={() => setNaming(true)}
+          className="btn-quiet px-3 py-1.5 text-[12px]"
+        >
+          New folder
+        </button>
         <label className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-dim">
           <input
             type="checkbox"
@@ -94,6 +140,35 @@ export function FolderBrowser({
           Hidden folders
         </label>
       </div>
+
+      {naming && (
+        <form
+          className="mt-2 shrink-0"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void makeFolder();
+          }}
+        >
+          <div className="flex gap-2">
+            <input
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              aria-label="New folder name"
+              placeholder="New folder name"
+              className="min-w-0 flex-1 rounded-md border border-line bg-panel px-3 py-1.5 font-mono text-[12.5px] placeholder:text-dim/70"
+            />
+            <button
+              type="submit"
+              disabled={!newName.trim() || making}
+              className="btn-amber shrink-0 px-3 py-1.5 text-[12px]"
+            >
+              {making ? "Creating…" : "Create"}
+            </button>
+          </div>
+          {nameError && <p className="mt-1.5 text-[11px] text-danger">{nameError}</p>}
+        </form>
+      )}
 
       {/* Explicit max-height keeps Use/Cancel visible; flex-1 alone can push
           the footer past the parent dialog's max-height and clip it. */}

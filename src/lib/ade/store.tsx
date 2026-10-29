@@ -5,7 +5,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type Dispatch,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 import type {
   AdeState,
@@ -40,6 +42,10 @@ type Api = {
   state: AdeState;
   selectProject: (id: string) => void;
   addProject: (name: string, path: string) => Promise<Project>;
+  /** Clone a Git repository into `parent/<name>` and add it. `name` defaults to the repo name. */
+  cloneProject: (url: string, parent: string, name?: string) => Promise<Project>;
+  /** Make `parent/<name>` (optionally a Git repository) and add it. */
+  createProject: (name: string, parent: string, git: boolean) => Promise<Project>;
   removeProject: (id: string) => Promise<void>;
   startTask: (o: {
     projectId: string;
@@ -159,6 +165,17 @@ export const listDocuments = async (projectId: string) => {
   return data.documents;
 };
 
+// Every way of adding a project ends the same: refresh, then focus it.
+async function adoptProject(
+  data: { project: Project },
+  refresh: () => Promise<void>,
+  setState: Dispatch<SetStateAction<AdeState>>,
+) {
+  await refresh();
+  setState((s) => ({ ...s, activeProjectId: data.project.id }));
+  return data.project;
+}
+
 export function AdeProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AdeState>(empty);
   // One in-flight complete() per session; a second click joins the first
@@ -204,12 +221,32 @@ export function AdeProvider({ children }: { children: ReactNode }) {
       state,
       refresh,
       selectProject: (id) => setState((s) => ({ ...s, activeProjectId: id })),
-      addProject: async (name, path) => {
-        const data = await request<{ project: Project }>("/api/projects", "POST", { name, path });
-        await refresh();
-        setState((s) => ({ ...s, activeProjectId: data.project.id }));
-        return data.project;
-      },
+      addProject: async (name, path) =>
+        adoptProject(
+          await request<{ project: Project }>("/api/projects", "POST", { name, path }),
+          refresh,
+          setState,
+        ),
+      cloneProject: async (url, parent, name) =>
+        adoptProject(
+          await request<{ project: Project }>("/api/projects/clone", "POST", {
+            url,
+            parent,
+            name,
+          }),
+          refresh,
+          setState,
+        ),
+      createProject: async (name, parent, git) =>
+        adoptProject(
+          await request<{ project: Project }>("/api/projects/create", "POST", {
+            name,
+            parent,
+            git,
+          }),
+          refresh,
+          setState,
+        ),
       removeProject: async (id) => {
         await request(`/api/projects/${id}/remove`, "POST");
         await refresh();
