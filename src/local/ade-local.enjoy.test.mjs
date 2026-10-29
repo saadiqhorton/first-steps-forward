@@ -1,11 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const home = mkdtempSync(path.join(os.tmpdir(), "ade-enjoy-"));
 mkdirSync(path.join(home, ".ade"), { mode: 0o700 });
+// Scripted agent CLIs on PATH, so no test ever runs a real agent.
+const FAKE = fileURLToPath(new URL("./cli-fake-agent.test-helper.mjs", import.meta.url));
+const binDir = path.join(home, "bin");
+mkdirSync(binDir);
+for (const name of ["codex", "opencode", "pi"]) {
+  writeFileSync(
+    path.join(binDir, name),
+    `#!/bin/sh\nexec "${process.execPath}" "${FAKE}" ${name} "$@"\n`,
+  );
+  chmodSync(path.join(binDir, name), 0o755);
+}
+const invocations = path.join(home, "invocations.ndjson");
+writeFileSync(invocations, "");
 const workspaceFile = path.join(home, ".ade", "workspace.json");
 const projectDir = path.join(home, "proj");
 mkdirSync(projectDir);
@@ -137,10 +159,10 @@ process.env.HOME = home;
 // os.homedir() reads USERPROFILE on Windows, not HOME; without this the
 // tests would write into the real ~/.ade workspace.
 process.env.USERPROFILE = home;
+process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
+process.env.FAKE_CLI_LOG = invocations;
 
-const { handleLocalApi, agentCommand, _setAgentsForTest, _setSessionStatusForTest } =
-  await import("./ade-local.mjs");
-
+const { handleLocalApi, _setAgentsForTest, _getSessionForTest } = await import("./ade-local.mjs");
 const apiRequest = (urlPath, body, remoteAddress = "::ffff:127.0.0.1") => ({
   url: `http://127.0.0.1:3000${urlPath}`,
   method: body === undefined ? "GET" : "POST",
@@ -152,19 +174,37 @@ const call = async (urlPath, body, remoteAddress) => {
   const res = await handleLocalApi(apiRequest(urlPath, body, remoteAddress));
   return { status: res.status, json: await res.json() };
 };
+async function waitFor(check, what) {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const value = check();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for ${what}`);
+}
+const settled = (id) => {
+  const s = _getSessionForTest(id);
+  return s && !s.pid && ["ready", "blocked", "stopped"].includes(s.status) ? s : null;
+};
+const turnArgs = (agent) =>
+  readFileSync(invocations, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((inv) => inv.agent === agent && (inv.args[0] === "exec" || inv.args.includes("-p")))
+    .map((inv) => inv.args);
 
 // Pin seeded agents so background CLI probes cannot race the route assertions.
-// load() marks interrupted working sessions as stopped — restore the ones the
-// harness busy test needs.
 _setAgentsForTest(seedAgents);
-_setSessionStatusForTest("s-working", "working");
-_setSessionStatusForTest("s-oc-working", "working");
+
+test("boot recovery stops the seeded interrupted sessions", () => {
+  assert.equal(_getSessionForTest("s-working").status, "stopped");
+  assert.equal(_getSessionForTest("s-oc-working").status, "stopped");
+});
 
 test("session created with options stores them and maps flags onto the CLI argv", async () => {
   _setAgentsForTest(seedAgents);
-  // Clear project-busy working sessions so creation is allowed.
-  _setSessionStatusForTest("s-working", "ready");
-  _setSessionStatusForTest("s-oc-working", "ready");
   const created = await call("/api/sessions", {
     projectId: "p1",
     agentId: "codex",
@@ -180,24 +220,17 @@ test("session created with options stores them and maps flags onto the CLI argv"
   assert.equal(created.json.speed, "fast");
   assert.equal(created.json.permission, "plan");
   assert.equal(created.json.model, "gpt-5.5");
-
-  const project = { path: projectDir };
-  const [, args] = agentCommand(created.json, project, "prompt text", false);
+  await waitFor(() => settled(created.json.id), "the turn");
+  const [args] = turnArgs("codex");
   assert.ok(args.includes("-m"));
   assert.ok(args.includes("gpt-5.5"));
   assert.ok(args.includes('model_reasoning_effort="high"'));
   assert.ok(args.includes('service_tier="fast"'));
   assert.ok(args.includes("read-only"));
-  // Stop the spawned turn so later tests aren't blocked.
-  await call(`/api/sessions/${created.json.id}/stop`, {});
-  _setSessionStatusForTest("s-working", "working");
-  _setSessionStatusForTest("s-oc-working", "working");
 });
 
 test("session creation rejects an invalid effort with 400", async () => {
   _setAgentsForTest(seedAgents);
-  _setSessionStatusForTest("s-working", "ready");
-  _setSessionStatusForTest("s-oc-working", "ready");
   const res = await call("/api/sessions", {
     projectId: "p1",
     agentId: "codex",
@@ -207,8 +240,6 @@ test("session creation rejects an invalid effort with 400", async () => {
   });
   assert.equal(res.status, 400);
   assert.match(res.json.error, /effort/i);
-  _setSessionStatusForTest("s-working", "working");
-  _setSessionStatusForTest("s-oc-working", "working");
 });
 
 test("options endpoint refuses completed sessions with 409", async () => {
@@ -248,11 +279,9 @@ test("agent capabilities endpoint returns optionCapabilities for a model", async
 
 test("harness update is 409 when the agent was installed outside npm", async () => {
   _setAgentsForTest(seedAgents);
-  _setSessionStatusForTest("s-working", "ready");
   const res = await call("/api/agents/codex/update", {});
   assert.equal(res.status, 409);
   assert.match(res.json.error, /Installed outside npm at \/opt\/codex\/bin\/codex/);
-  _setSessionStatusForTest("s-working", "working");
 });
 
 test("harness routes refuse non-loopback peers with 403", async () => {
@@ -268,12 +297,28 @@ test("harness routes refuse non-loopback peers with 403", async () => {
   }
 });
 
-test("harness install is 409 while that agent has a working/verifying session", async () => {
+test("harness update is 409 while that agent has a working session", async () => {
   _setAgentsForTest(seedAgents);
-  _setSessionStatusForTest("s-oc-working", "working");
-  const res = await call("/api/agents/opencode/install", {});
-  assert.equal(res.status, 409);
-  assert.match(res.json.error, /running|working|verifying|task/i);
+  const gate = path.join(home, "gate-harness");
+  process.env.FAKE_CLI_SCENARIO = "gate";
+  process.env.FAKE_CLI_GATE = gate;
+  try {
+    const created = await call("/api/sessions", {
+      projectId: "p1",
+      agentId: "pi",
+      request: "keep working for a while",
+    });
+    assert.equal(created.status, 201);
+    await waitFor(() => turnArgs("pi").length, "the pi turn to start");
+    const res = await call("/api/agents/pi/update", {});
+    assert.equal(res.status, 409);
+    assert.match(res.json.error, /running|working|verifying|task/i);
+    await call(`/api/sessions/${created.json.id}/stop`, {});
+    await waitFor(() => settled(created.json.id), "the stop");
+  } finally {
+    writeFileSync(gate, "");
+    delete process.env.FAKE_CLI_SCENARIO;
+  }
 });
 
 test("workflows CRUD round-trip persists to the workspace file", async () => {

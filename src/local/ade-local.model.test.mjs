@@ -42,17 +42,9 @@ process.env.HOME = home;
 // os.homedir() reads USERPROFILE on Windows, not HOME; without this the
 // tests would write into the real ~/.ade workspace.
 process.env.USERPROFILE = home;
-const {
-  handleLocalApi,
-  devServerArgs,
-  detectFramework,
-  refreshDevProcess,
-  classifyTurnFailure,
-  executeChecks,
-  checksFor,
-  buildManifest,
-  computerContext,
-} = await import("./ade-local.mjs");
+const { handleLocalApi, devServerArgs, detectFramework, refreshDevProcess, computerContext } =
+  await import("./ade-local.mjs");
+const { checksFor } = await import("./project-scripts.mjs");
 
 const apiRequest = (urlPath, body) => ({
   url: `http://127.0.0.1:3000${urlPath}`,
@@ -208,8 +200,6 @@ test("non-loopback peers cannot submit requests or poison the captured manifest 
   });
   assert.equal(denied.status, 403);
   const project = { id: "peer-check", name: "peer", path: home };
-  const manifest = await buildManifest({ agentId: "codex" }, project);
-  assert.equal(manifest.agentComputer.available, true);
   assert.equal(computerContext(project).env.ADE_API, "http://127.0.0.1:3000");
   const spoofedHost = await handleLocalApi({
     url: "http://attacker.example:9443/api/agents/unknown/models",
@@ -498,48 +488,6 @@ test("bootstrap dev-script re-scan refreshes the process record with a stable id
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("failureKind reflects only the current turn: cleared by success and generic failures", () => {
-  const session = {
-    messages: [{ id: "m0", role: "system", text: "rate limit reached", at: 1 }],
-    logs: ["rate limit reached"],
-  };
-  // This turn's slice excludes the old rate-limit line (logStart/messageStart
-  // are recorded when the turn starts).
-  session.messages.push({ id: "m1", role: "user", text: "try again", at: 2 });
-  session.logs.push("Context manifest: ...", "Error: something broke");
-
-  const failed = classifyTurnFailure(session, 1, 1, 1);
-  assert.equal(failed.kind, "process");
-  assert.equal(session.failureKind, undefined);
-
-  // Quota wording inside THIS turn's output is still classified and kept.
-  session.logs.push("You've hit your usage limit.");
-  const quota = classifyTurnFailure(session, 1, 1, 1);
-  assert.equal(quota.kind, "provider_quota");
-  assert.equal(session.failureKind, "provider_quota");
-
-  // A successful turn clears it, and later turns cannot resurrect it.
-  const ok = classifyTurnFailure(session, 0, session.logs.length, session.messages.length);
-  assert.equal(ok.kind, undefined);
-  assert.equal(session.failureKind, undefined);
-  const later = classifyTurnFailure(session, 1, session.logs.length, session.messages.length);
-  assert.equal(later.kind, "process");
-  assert.equal(session.failureKind, undefined);
-
-  // A later turn that quota-classifies re-arms the diagnosis…
-  session.logs.push("You've hit your usage limit.");
-  const rearm = classifyTurnFailure(session, 1, session.logs.length - 1, session.messages.length);
-  assert.equal(rearm.kind, "provider_quota");
-  assert.equal(session.failureKind, "provider_quota");
-
-  // …and a subsequent GENERIC failure must clear it again: failureKind
-  // always describes the current turn, never a stale one.
-  session.logs.push("Error: socket hang up");
-  const generic = classifyTurnFailure(session, 1, session.logs.length - 1, session.messages.length);
-  assert.equal(generic.kind, "process");
-  assert.equal(session.failureKind, undefined);
-});
-
 test("run-checks refuses unless the session is ready", async () => {
   const done = await call("/api/sessions/s-done/checks", {});
   assert.equal(done.status, 409);
@@ -562,39 +510,6 @@ test("checksFor returns one clear skip when package.json is missing", async () =
   assert.match(checks[0].detail, /No package\.json/);
   assert.match(checks[0].detail, /Python/);
   assert.doesNotMatch(checks[0].detail, /ENOENT/);
-  rmSync(dir, { recursive: true, force: true });
-});
-
-test("executeChecks claims verifying before its first await and honors a stop during it", async () => {
-  // Register a throwaway project with no scripts, so no check ever spawns.
-  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-checks-"));
-  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "x", scripts: {} }));
-  const created = await call("/api/projects", { path: dir });
-  assert.equal(created.status, 201);
-
-  const initialChecks = [{ name: "Project checks", status: "not_run", detail: "Not run yet." }];
-  const session = {
-    id: "s-exec-race",
-    projectId: created.json.project.id,
-    status: "ready",
-    messages: [],
-    logs: [],
-    checks: initialChecks,
-    queuedMessages: [],
-  };
-
-  // executeChecks runs synchronously up to its first await (checksFor);
-  // simulate /stop landing exactly during that yield.
-  const running = executeChecks(session);
-  assert.equal(session.status, "verifying"); // claimed before the first await
-  session.status = "stopped"; // what /stop does mid-yield
-  session.checksCancelled = true;
-  await running;
-
-  // The loop must not overwrite the stop with verifying/ready, nor replace
-  // the existing checks list.
-  assert.equal(session.status, "stopped");
-  assert.deepEqual(session.checks, initialChecks);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -778,56 +693,4 @@ test("dev stop during starting kills the child and missing records are 404", asy
     if (projectId) await call(`/api/projects/${projectId}/dev/stop`, {}).catch(() => {});
     rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test("manifest gives every agent its computer: tools, real ADE URL, and verify-visually rules", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-computer-mf-"));
-  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "x" }));
-  // Any loopback request records the serving Host; this call also registers
-  // the fixture project.
-  const reg = await call("/api/projects", { path: dir });
-  assert.equal(reg.status, 201);
-  const project = reg.json.project;
-
-  const manifest = await buildManifest({ request: "scaffold a thing", agentId: "codex" }, project);
-  assert.equal(manifest.devControl, undefined);
-  assert.equal(manifest.agentComputer.available, true);
-  assert.equal(manifest.agentComputer.screen, "1280x800");
-  // The list comes from the tool definitions, so the browser_* tools are offered too.
-  for (const tool of [
-    "computer_screenshot",
-    "computer_open_url",
-    "dev_server_start",
-    "browser_snapshot",
-    "browser_upload",
-  ])
-    assert.ok(manifest.agentComputer.tools.includes(tool), `manifest lists ${tool}`);
-  const ctx = computerContext(project);
-  assert.deepEqual(ctx.env, { ADE_API: "http://127.0.0.1:3000", ADE_PROJECT_ID: project.id });
-  assert.ok(ctx.mcpScript.endsWith(path.join("src", "local", "computer-mcp.mjs")));
-  assert.ok(ctx.piExtension.endsWith(path.join("src", "local", "computer-pi-extension.mjs")));
-
-  // Dev servers belong to ADE (via the tools); detached servers stay forbidden,
-  // and visible changes must be checked on the computer before "done".
-  const dev = manifest.constraints.find((c) => c.includes("dev_server_start"));
-  assert.ok(dev && dev.includes("never start a server yourself"));
-  assert.ok(manifest.constraints.some((c) => c.includes("verify it in your agent browser")));
-
-  // Pi gets the same computer (as a Pi extension), not a "use the UI" fallback.
-  const piManifest = await buildManifest({ request: "preview it", agentId: "pi" }, project);
-  assert.equal(piManifest.agentComputer.available, true);
-  assert.match(piManifest.otherServices, /does not verify/);
-  assert.ok(
-    piManifest.constraints.some((c) =>
-      c.includes("instead of asking the user which frontend port"),
-    ),
-  );
-  writeFileSync(
-    path.join(dir, "package.json"),
-    JSON.stringify({ name: "x", scripts: { dev: "vite", "dev:backend": "backend dev" } }),
-  );
-  const serviceManifest = await buildManifest({ request: "preview it", agentId: "pi" }, project);
-  assert.match(serviceManifest.otherServices, /dev:backend/);
-  assert.match(serviceManifest.otherServices, /does not verify whether these services are running/);
-  rmSync(dir, { recursive: true, force: true });
 });

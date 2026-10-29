@@ -3,12 +3,19 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { killTree, spawnCommand as spawn } from "./spawn.mjs";
+import {
+  findOnPath as which,
+  processRunsIn as processMatches,
+  runCommand as run,
+  spawnCommand as spawn,
+  stopProcess as stopChild,
+} from "./spawn.mjs";
 import { adapters } from "./adapters/index.mjs";
-import { acpComputerServers } from "./adapters/computer-tools.mjs";
-import { listAcpModels, runAcpTurn } from "./acp.mjs";
-import { acpBridge } from "./acp-bridge.mjs";
-import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
+import { acpLaunch } from "./adapters/kit.mjs";
+import { listAcpModels } from "./acp.mjs";
+import { getDiff, projectInfo } from "./project-git.mjs";
+import { checksFor, packageManager } from "./project-scripts.mjs";
+import { addLog, addMessage, createSessionTurns, TurnRefused } from "./session-turns.mjs";
 import { adeRoot, COMPUTER_ERROR_STATUS, createComputerManager, SCREEN } from "./computer.mjs";
 import { createBrowserHub } from "./browser-page.mjs";
 import { createBrowserInstaller } from "./browser-install.mjs";
@@ -17,7 +24,7 @@ import { diagnoseLaunchFailure } from "./browser-host.mjs";
 import { TOOLS as COMPUTER_TOOLS } from "./computer-tools-defs.mjs";
 import { createBrowserStreamServer } from "./browser-stream-server.mjs";
 import { createControlRegistry, HumanControlError } from "./browser-control.mjs";
-import { listModels, MODEL_ID, clearModelsCache, rememberAcpModels } from "./models.mjs";
+import { listModels, MODEL_ID, clearModelsCache } from "./models.mjs";
 import { optionCapabilities, validateOptions } from "./capabilities.mjs";
 import {
   HARNESS,
@@ -39,7 +46,6 @@ import {
 } from "./project-sources.mjs";
 import {
   decodeBase64,
-  formatAttachmentPrompt,
   readAttachment,
   resolveAttachments,
   saveAttachment,
@@ -84,6 +90,18 @@ const browserHub = createBrowserHub({
 });
 globalThis.__adeBrowserHub = browserHub;
 const computers = createComputerManager({ installer: browserInstaller, hub: browserHub });
+// Every session's turns and checks, and the only writer of a session's status.
+const turns = createSessionTurns({
+  state,
+  save,
+  adapters,
+  dataDir: DATA_DIR,
+  turnContext: (project) => ({
+    computer: computerContext(project),
+    devServer: devServerStatus(project),
+    agentBrowser: agentComputerFor(project),
+  }),
+});
 // Address headers of the latest trusted loopback API request (see handle()).
 // The stream's Origin check runs the same originAllowed rule against them.
 let lastApiHeaders = null;
@@ -155,33 +173,7 @@ async function load() {
       if (!running) delete p.pid;
       p.output = p.output ?? [];
     }
-    for (const s of state.sessions) {
-      const active = ["working", "verifying"].includes(s.status);
-      const project = state.projects.find((item) => item.id === s.projectId);
-      if (s.pid && project && (await processMatches(s.pid, project.path))) stopChild(s.pid);
-      if (active) {
-        s.status = "stopped";
-        addMessage(
-          s,
-          "system",
-          "ADE restarted and stopped the interrupted CLI process. Any project edits made before it stopped are kept.",
-        );
-        changed = true;
-      }
-      if (s.pid) {
-        delete s.pid;
-        changed = true;
-      }
-      if (s.steerNow) {
-        delete s.steerNow;
-        changed = true;
-      }
-      // A permission request dies with the agent process that asked it.
-      if (s.pendingPermissions) {
-        delete s.pendingPermissions;
-        changed = true;
-      }
-    }
+    if (await turns.recover()) changed = true;
     // Older ADE versions queried Git only at the selected folder. Recover a
     // completed task's missing count when a nested repo's changed files still
     // have timestamps inside that task's run. Never attribute later edits.
@@ -214,64 +206,9 @@ async function load() {
     if (changed) await save();
   } catch {}
 }
-async function processMatches(pid, projectPath) {
-  if (!Number.isInteger(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    if (process.platform === "linux")
-      return (await fs.realpath(`/proc/${pid}/cwd`)) === projectPath;
-    if (process.platform === "darwin") {
-      const result = await run("lsof", ["-Fn", "-a", "-p", String(pid), "-d", "cwd"], {
-        timeout: 3000,
-      });
-      const cwd = result.stdout
-        .split(/\r?\n/)
-        .find((line) => line.startsWith("n"))
-        ?.slice(1);
-      return cwd ? (await fs.realpath(cwd)) === projectPath : false;
-    }
-  } catch {}
-  return false;
-}
-const run = (bin, args, opts = {}) =>
-  new Promise((resolve) => {
-    const child = spawn(bin, args, {
-      cwd: opts.cwd,
-      env: opts.env ? { ...process.env, ...opts.env } : process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-    });
-    let stdout = "",
-      stderr = "",
-      timedOut = false;
-    const timer = opts.timeout
-      ? setTimeout(() => {
-          timedOut = true;
-          child.kill("SIGTERM");
-        }, opts.timeout)
-      : null;
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
-    child.on("error", (e) => {
-      if (timer) clearTimeout(timer);
-      resolve({ code: 127, stdout, stderr: `${stderr}${e.message}` });
-    });
-    child.on("close", (code) => {
-      if (timer) clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout, stderr, timedOut });
-    });
-  });
 async function executable(bin) {
   const res = await run(bin, ["--version"], { timeout: 5000 });
   return res.code === 0 ? (res.stdout || res.stderr).trim().split(/\r?\n/)[0].slice(0, 100) : null;
-}
-async function which(bin) {
-  const res = await run(process.platform === "win32" ? "where" : "which", [bin], {
-    timeout: 3000,
-  });
-  if (res.code !== 0) return null;
-  const line = (res.stdout || "").trim().split(/\r?\n/)[0]?.trim();
-  return line || null;
 }
 async function npmRoot() {
   const res = await run("npm", ["root", "-g"], { timeout: 5000 });
@@ -372,7 +309,7 @@ async function bootstrapAgents() {
   } catch {}
   if (cached?.agents) {
     // Caches written before agentStatus copied the adapter tools string lack
-    // it: backfill from the adapter so buildManifest resolves the real tool
+    // it: backfill from the adapter so the context manifest names the real tool
     // set immediately, while the background probe refreshes the rest.
     state.agents = cached.agents.map((agent) => {
       const entry = HARNESS[agent.id];
@@ -437,134 +374,6 @@ function refreshBootstrapInBackground() {
     });
 }
 const safeProject = (p) => ({ ...p });
-async function gitAt(directory, args) {
-  return run("git", ["-C", directory, ...args], { timeout: 10000 });
-}
-// Users can select a workspace folder whose actual repository is one level
-// down (for example project/code/.git). Keep paths relative to the selected
-// folder so the UI, manifests, and diff views all refer to the same files.
-async function gitRepositories(project) {
-  const root = await gitAt(project.path, ["rev-parse", "--show-toplevel"]);
-  if (root.code === 0) return [{ directory: project.path, prefix: "" }];
-  let entries;
-  try {
-    entries = await fs.readdir(project.path, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const repositories = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const directory = path.join(project.path, entry.name);
-    try {
-      await fs.stat(path.join(directory, ".git"));
-    } catch {
-      continue;
-    }
-    const found = await gitAt(directory, ["rev-parse", "--show-toplevel"]);
-    if (found.code === 0 && path.resolve(found.stdout.trim()) === path.resolve(directory))
-      repositories.push({ directory, prefix: `${entry.name}/` });
-  }
-  return repositories;
-}
-async function projectInfo(project) {
-  try {
-    await fs.stat(project.path);
-    project.missing = false;
-  } catch {
-    project.missing = true;
-    project.branch = "folder missing";
-    project.uncommittedFiles = [];
-    project.ahead = 0;
-    return safeProject(project);
-  }
-  const repositories = await gitRepositories(project);
-  const changedFiles = [];
-  const branches = [];
-  let ahead = 0;
-  for (const repo of repositories) {
-    const branchRes = await gitAt(repo.directory, ["branch", "--show-current"]);
-    const statusRes = await gitAt(repo.directory, ["status", "--porcelain=v1", "-uall"]);
-    const aheadRes = await gitAt(repo.directory, ["rev-list", "--count", "@{upstream}..HEAD"]);
-    branches.push(branchRes.code === 0 ? branchRes.stdout.trim() || "(detached)" : "unknown");
-    changedFiles.push(
-      ...statusRes.stdout
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map((line) => `${repo.prefix}${line.slice(3)}`),
-    );
-    if (aheadRes.code === 0) ahead += Number(aheadRes.stdout.trim()) || 0;
-  }
-  project.branch =
-    branches.length === 0
-      ? "not a git repository"
-      : branches.length === 1
-        ? branches[0]
-        : `${branches.length} repositories`;
-  project.uncommittedFiles = [...new Set(changedFiles)];
-  project.ahead = ahead;
-  return safeProject(project);
-}
-async function getDiff(project) {
-  const repositories = await gitRepositories(project);
-  const diffs = [];
-  const files = [];
-  const changes = [];
-  for (const repo of repositories) {
-    const tracked = await gitAt(repo.directory, ["diff", "HEAD", "--no-ext-diff", "--unified=3"]);
-    const names = await gitAt(repo.directory, ["status", "--porcelain=v1", "-uall"]);
-    const diff = tracked.stdout;
-    diffs.push(diff);
-    let current;
-    for (const line of diff.split(/\r?\n/)) {
-      if (line.startsWith("diff --git ")) {
-        const filePath =
-          line.match(/ (?:b|w)\/(.*)$/)?.[1] ??
-          line.slice("diff --git ".length).split(/\s+/).at(-1);
-        current = { path: `${repo.prefix}${filePath}`, added: 0, removed: 0, hunk: [] };
-        changes.push(current);
-      } else if (current && line.startsWith("@@")) current.hunk.push(line);
-      else if (current && (line.startsWith("+") || line.startsWith("-") || line.startsWith(" "))) {
-        current.hunk.push(line);
-        if (line.startsWith("+") && !line.startsWith("+++")) current.added++;
-        if (line.startsWith("-") && !line.startsWith("---")) current.removed++;
-      }
-    }
-    for (const line of names.stdout.split(/\r?\n/).filter(Boolean)) {
-      const file = { status: line.slice(0, 2).trim(), path: `${repo.prefix}${line.slice(3)}` };
-      files.push(file);
-      if (changes.some((change) => change.path === file.path)) continue;
-      const absolute = path.resolve(project.path, file.path);
-      const rel = path.relative(project.path, absolute);
-      let hunk = [
-        `${file.status || "??"} · diff unavailable (binary, oversized, or unreadable file)`,
-      ];
-      let added = 0;
-      if (
-        file.status === "??" &&
-        rel &&
-        !rel.startsWith(`..${path.sep}`) &&
-        !path.isAbsolute(rel)
-      ) {
-        try {
-          const stat = await fs.lstat(absolute);
-          if (stat.isFile() && stat.size <= 262144) {
-            const content = await fs.readFile(absolute);
-            if (!content.includes(0)) {
-              const lines = content.toString("utf8").split(/\r?\n/);
-              added = lines.filter(
-                (line, index) => index < lines.length - 1 || line.length > 0,
-              ).length;
-              hunk = ["@@ added file @@", ...lines.map((line) => `+${line}`)];
-            }
-          }
-        } catch {}
-      }
-      changes.push({ path: file.path, added, removed: 0, hunk });
-    }
-  }
-  return { diff: diffs.join("\n"), files, changes };
-}
 async function allocatePort() {
   // Ask the OS for an ephemeral port, but do not return it until nothing
   // answers there: WSL's mirrored networking (verified) keeps a just-closed
@@ -675,74 +484,6 @@ const devView = (proc) => ({
   port: proc.status === "running" ? proc.port : 0,
   command: proc.command,
 });
-function addLog(session, text) {
-  session.logs = [...(session.logs ?? []), text].slice(-500);
-  session.updatedAt = now();
-}
-function addMessage(session, role, text, extra = {}) {
-  if (!text.trim()) return;
-  const last = session.messages.at(-1);
-  if (role === "agent" && last?.role === "agent" && now() - last.at < 1200) {
-    last.text += text;
-    last.at = now();
-  } else session.messages.push({ id: id(), role, text, at: now(), ...extra });
-  session.updatedAt = now();
-}
-
-function attachmentMeta(files) {
-  return files.length
-    ? {
-        attachments: files.map(({ id, name, mime, size, kind }) => ({
-          id,
-          name,
-          mime,
-          size,
-          kind,
-        })),
-      }
-    : {};
-}
-
-function adapterAttachments(files) {
-  return files.map(({ absPath, mime, kind, name }) => ({
-    path: absPath,
-    mime,
-    kind,
-    name,
-  }));
-}
-function parseAgentOutput(session, line) {
-  addLog(session, line);
-  const update = adapters[session.agentId].parse(line, session);
-  if (update.text) addMessage(session, "agent", update.text);
-  if (update.error) addMessage(session, "system", update.error);
-  return update;
-}
-/**
- * Classify one agent turn from its own output slice only: history before
- * logStart/messageStart belongs to earlier turns, so an old line (e.g. an
- * earlier "rate limit") can never re-classify this turn. A successful turn
- * clears any stale failureKind so it cannot haunt later failures either.
- */
-export function classifyTurnFailure(session, code, logStart, messageStart) {
-  const texts = [
-    ...session.messages
-      .slice(messageStart)
-      .filter((m) => m.role === "system")
-      .map((m) => m.text),
-    ...session.logs.slice(logStart),
-  ];
-  if (code === 0) {
-    delete session.failureKind;
-    return { kind: undefined, texts };
-  }
-  const kind = classifyFailure(texts);
-  // failureKind must describe the CURRENT turn only: a generic process
-  // failure clears any quota/model diagnosis left by an earlier turn.
-  if (kind === "process") delete session.failureKind;
-  else session.failureKind = kind;
-  return { kind, texts };
-}
 /** Resolve and validate effort/speed/permission against the model's capability row. */
 async function resolveSessionOptions(agentId, modelId, options) {
   const listed = await listAgentModels(agentId);
@@ -760,117 +501,9 @@ function syncOptionFields(session, value, cleared) {
   }
 }
 
-/** ACP permission requests waiting on the user: request id → resolve. */
-const permissionWaiters = new Map();
-/** Answer every open request "cancelled" (the turn is ending) and clear them. */
-function dropPermissions(session) {
-  for (const request of session.pendingPermissions ?? []) {
-    permissionWaiters.get(request.id)?.({ outcome: "cancelled" });
-    permissionWaiters.delete(request.id);
-  }
-  delete session.pendingPermissions;
-}
-/**
- * Drive one ACP turn (see acp.mjs) on the spawned agent, then end the agent:
- * close stdin, and SIGTERM its group if it lingers. Never rejects. Settles
- * with { ok, sawText }; a failure's own error is already a system message.
- */
-function runAcpSession(session, project, child, prompt, attachments, continuing) {
-  const adapter = adapters[session.agentId];
-  const version = state.agents.find((a) => a.id === session.agentId)?.version ?? "";
-  const computer = computerContext(project);
-  let sawText = false;
-  const end = () => {
-    child.stdin?.end();
-    const timer = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) stopChild(child);
-    }, 3000);
-    timer.unref?.();
-    child.once("close", () => clearTimeout(timer));
-  };
-  return runAcpTurn({
-    child,
-    name: adapter.name,
-    cwd: project.path,
-    prompt,
-    images: attachments.filter((a) => a.kind === "image"),
-    resumeId: continuing ? session.agentSessionId : undefined,
-    permission: session.permission ?? "build",
-    modes: adapter.modes,
-    model: session.model,
-    defaultModel: session.acpDefaultModel,
-    mcpServers: acpComputerServers(computer),
-    sessionMeta: adapter.sessionMeta?.({ computer: !!computer }),
-    on: {
-      sessionId: (value) => {
-        session.agentSessionId = value;
-      },
-      defaultModel: (value) => {
-        session.acpDefaultModel = value;
-      },
-      text: (text) => {
-        addMessage(session, "agent", text);
-        if (text.trim()) sawText = true;
-      },
-      log: (line) => addLog(session, line),
-      notice: (text) => addMessage(session, "system", text),
-      models: (models) => void rememberAcpModels(DATA_DIR, adapter.id, version, models),
-      permission: (request) =>
-        new Promise((resolve) => {
-          const entry = { id: id(), at: now(), ...request };
-          session.pendingPermissions = [...(session.pendingPermissions ?? []), entry];
-          permissionWaiters.set(entry.id, resolve);
-          addLog(
-            session,
-            JSON.stringify({ type: "permission", decision: "asked", title: request.title }),
-          );
-          void save();
-        }),
-    },
-  }).then(
-    ({ stopReason, declinedModeSwitch }) => {
-      end();
-      // Plan's own decline of "leave plan mode" ends Claude's turn as
-      // cancelled; the plan was delivered, so that is a finished turn.
-      const cancelled = stopReason === "cancelled" && !declinedModeSwitch;
-      if (stopReason === "max_tokens" || stopReason === "max_turn_requests")
-        addMessage(
-          session,
-          "system",
-          `${adapter.name} stopped early: it reached its ${stopReason === "max_tokens" ? "output token" : "tool request"} limit for one turn. Send a follow-up to let it continue.`,
-        );
-      if (stopReason === "refusal")
-        addMessage(session, "system", `${adapter.name} refused to continue this request.`);
-      if (cancelled)
-        addMessage(session, "system", `${adapter.name} cancelled the turn before finishing.`);
-      return { ok: stopReason !== "refusal" && !cancelled, sawText };
-    },
-    (error) => {
-      end();
-      // A stop or "send now" kills the agent on purpose, and a spawn failure
-      // is reported by runAgent's own error handler: neither is news here.
-      if (child.pid && session.status !== "stopped" && !session.steerNow)
-        addMessage(session, "system", error.message);
-      return { ok: false, sawText };
-    },
-  );
-}
-/**
- * What an ACP adapter's command() needs beyond the session: its bridge's
- * [bin, args] (set up on first use, announced through onInstall) and the
- * user's own CLI on PATH.
- */
-async function acpLaunch(adapter, onInstall) {
-  if (!adapter.bridge) return {};
-  const executable = await which(adapter.bin);
-  if (!executable)
-    throw new Error(`${adapter.name} is not on PATH (\`${adapter.bin}\`). ${adapter.installHint}.`);
-  const bridge = await acpBridge(adapter.bridge, { dataDir: DATA_DIR, which, run, onInstall });
-  return { bridge, executable };
-}
 /** An ACP agent's models, from a session it opens and is never prompted in. */
 async function probeAcpModels(adapter) {
-  const [bin, args, env] = adapter.command(await acpLaunch(adapter));
+  const [bin, args, env] = adapter.command(await acpLaunch(adapter, { dataDir: DATA_DIR }));
   await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
   const child = spawn(bin, args, {
     cwd: DATA_DIR,
@@ -907,24 +540,6 @@ function listAgentModels(agentId) {
     ...(adapter?.protocol === "acp" && agent?.installed && agent.signedIn
       ? { probeAcp: () => probeAcpModels(adapter) }
       : {}),
-  });
-}
-export function agentCommand(session, project, prompt, continuing, attachments = [], launch = {}) {
-  const adapter = adapters[session.agentId];
-  return adapter.command({
-    ...launch,
-    projectPath: project.path,
-    prompt,
-    session,
-    continuing,
-    dataDir: DATA_DIR,
-    providers: state.agents.find((a) => a.id === session.agentId)?.providers,
-    model: session.model,
-    effort: session.effort,
-    speed: session.speed,
-    permission: session.permission,
-    attachments,
-    computer: computerContext(project),
   });
 }
 /**
@@ -982,374 +597,6 @@ function agentComputerFor(project) {
     tools: COMPUTER_TOOLS.map((tool) => tool.name).join(", "),
     note: "You have your own browser (headless Chrome on this machine) that the user watches live in ADE. To view or test the project: dev_server_start, then computer_open_url with the localhost URL it reports, then use browser_snapshot refs or screenshots, clicks, and typing to verify behavior like a human QA tester.",
   };
-}
-async function otherServiceStatus(project) {
-  try {
-    const pkg = JSON.parse(await fs.readFile(path.join(project.path, "package.json"), "utf8"));
-    const scripts = Object.keys(pkg.scripts ?? {}).filter((name) =>
-      /^(dev[:_-]|(?:backend|api|server)(?:[:_-]|$))/.test(name),
-    );
-    return scripts.length
-      ? `Additional package scripts: ${scripts.slice(0, 8).join(", ")}. ADE does not verify whether these services are running.`
-      : "ADE does not verify other project services or backends; a running frontend preview does not prove they are running.";
-  } catch {
-    return "Other project services are unknown; ADE could not read package.json.";
-  }
-}
-export async function buildManifest(session, project) {
-  const agent = state.agents.find((a) => a.id === session.agentId);
-  const repositories = await gitRepositories(project);
-  const files = (
-    await Promise.all(
-      repositories.map(async (repo) => {
-        const tracked = await gitAt(repo.directory, ["ls-files", "-co", "--exclude-standard"]);
-        return tracked.stdout
-          .split(/\r?\n/)
-          .filter(Boolean)
-          .map((file) => `${repo.prefix}${file}`);
-      }),
-    )
-  )
-    .flat()
-    .slice(0, 400);
-  const candidates = files.filter((file) =>
-    /(readme|package\.json|src|app|lib|components|routes|pages|server|api|test|spec)/i.test(file),
-  );
-  return {
-    createdAt: now(),
-    project: { id: project.id, name: project.name, path: project.path, branch: project.branch },
-    task: session.request,
-    ...(session.criteria ? { acceptanceCriteria: session.criteria } : {}),
-    agent: {
-      id: session.agentId,
-      account: agent?.account ?? null,
-      model: session.model ?? "agent default",
-    },
-    devServer: devServerStatus(project),
-    agentComputer: agentComputerFor(project),
-    otherServices: await otherServiceStatus(project),
-    constraints: [
-      "Work only within the project directory",
-      "No deployments, publishing, or external/shared-system changes without the user",
-      "Do not revert or overwrite user changes",
-      "The devServer status is ADE's observed snapshot at turn start. If it includes a running URL, use that URL instead of asking the user which frontend port to open. Do not infer that other services are running from the frontend alone.",
-      "Start, stop, and inspect the dev server only with the dev_server_start/dev_server_stop/dev_server_status tools; never start a server yourself (no nohup, &, disown, or a foreground dev command) and never leave one running that ADE does not manage",
-      "After changing anything visible, verify it in your agent browser (computer_open_url, screenshots, clicks, typing) before reporting done, and say what you checked; if the browser tools fail, report the exact error instead of claiming it works",
-    ],
-    relevantFiles: candidates.slice(0, 60),
-    tools: agent?.tools ?? "agent's default CLI tools",
-    dirtyWorktree: (project.uncommittedFiles ?? []).length > 0,
-    ...(project.uncommittedFiles?.length
-      ? { uncommittedFiles: project.uncommittedFiles.slice(0, 40) }
-      : {}),
-  };
-}
-async function runAgent(session, prompt, continuing = false, attachments = []) {
-  const project = state.projects.find((p) => p.id === session.projectId);
-  if (!project) {
-    releaseTurn(session);
-    return;
-  }
-  const meta = state.agents.find((a) => a.id === session.agentId);
-  if (!meta?.installed || !meta.signedIn) {
-    session.status = "blocked";
-    addMessage(
-      session,
-      "system",
-      `${meta?.name ?? session.agentId} is not available or not authenticated. Check the Agents page.`,
-    );
-    releaseTurn(session);
-    await save();
-    return;
-  }
-  // Mark where this turn's output starts so failure classification only ever
-  // sees the current turn, never earlier history.
-  const turnLogStart = session.logs.length;
-  const turnMessageStart = session.messages.length;
-  let bin = "";
-  let args = [];
-  let extraEnv = {};
-  let turnPrompt = "";
-  const acp = adapters[session.agentId].protocol === "acp";
-  try {
-    session.status = "working";
-    await save();
-    await projectInfo(project);
-    delete session.changeCountUnavailable;
-    // Refresh the preserved-changes baseline at the start of every turn so it
-    // reflects the tree as it is right now (the user may edit between turns).
-    if (project.uncommittedFiles.length) {
-      const baseline = await getDiff(project);
-      session.baselineFiles = baseline.files.map((f) => f.path);
-    } else {
-      delete session.baselineFiles;
-    }
-    session.manifest = await buildManifest(session, project);
-    addLog(
-      session,
-      `Context manifest: ${session.manifest.relevantFiles.length} candidate files, tools: ${session.manifest.tools}`,
-    );
-    const manifestLine =
-      `Context manifest: project ${project.name} (${project.branch}); task: ${session.request}` +
-      (session.criteria ? `; acceptance criteria: ${session.criteria}` : "") +
-      `; model: ${session.model ?? "agent default"}` +
-      `; dev server at turn start: ${session.manifest.devServer}` +
-      `; other services: ${session.manifest.otherServices}` +
-      `; agent browser: ${session.manifest.agentComputer.available ? `available (${session.manifest.agentComputer.screen}; tools: ${session.manifest.agentComputer.tools}). ` : "unavailable. "}${session.manifest.agentComputer.note}` +
-      `; constraints: ${session.manifest.constraints.join("; ")}; candidate files: ${session.manifest.relevantFiles.join(", ") || "(none listed)"}` +
-      (session.manifest.uncommittedFiles
-        ? `; the user has uncommitted changes in these files: ${session.manifest.uncommittedFiles.join(", ")} — never revert, stash, commit, or overwrite them; work around them`
-        : "");
-    const safetyPreamble =
-      "Safety instructions: Work only in this project. Do not deploy, publish, send external communications, modify shared or production systems, or delete data. If such an action is necessary, stop and ask the user instead. Preserve existing files unless the requested code change requires editing them. ";
-    turnPrompt = `${safetyPreamble}${manifestLine}\n\nTask: ${prompt}`;
-    const command = agentCommand(
-      session,
-      project,
-      turnPrompt,
-      continuing,
-      attachments,
-      acp
-        ? await acpLaunch(adapters[session.agentId], () => {
-            const { name, bin, bridge } = adapters[session.agentId];
-            addMessage(
-              session,
-              "system",
-              `Setting up ${name} for ADE, once: installing its ACP bridge (${bridge.pkg}@${bridge.version}) under ~/.ade/acp. Your own \`${bin}\` stays the one that runs.`,
-            );
-            void save();
-          })
-        : {},
-    );
-    bin = command[0];
-    args = command[1];
-    // Optional third element: per-turn environment (agent-computer wiring).
-    extraEnv = command[2] ?? {};
-    if (session.agentId === "pi")
-      await fs.mkdir(path.join(DATA_DIR, "sessions"), { recursive: true, mode: 0o700 });
-    // The user may have stopped the session while the manifest was being
-    // built: honor that instead of spawning a CLI nobody is waiting for.
-    if (session.status === "stopped" || session.status === "complete") {
-      releaseTurn(session);
-      addLog(session, "Turn not started: the session was stopped before the CLI launched.");
-      await save();
-      return;
-    }
-  } catch (error) {
-    // Any pre-spawn failure must free the claimTurn placeholder, or the
-    // session would queue follow-ups forever with no live child to drain them.
-    releaseTurn(session);
-    if (!["stopped", "complete"].includes(session.status)) session.status = "blocked";
-    addMessage(session, "system", `ADE could not start this turn: ${error.message}`);
-    await save().catch(() => {});
-    return;
-  }
-  const child = spawn(bin, args, {
-    cwd: project.path,
-    env: { ...process.env, ...extraEnv },
-    // An ACP agent takes the whole turn as JSON-RPC over stdin/stdout.
-    stdio: [acp ? "pipe" : "ignore", "pipe", "pipe"],
-    shell: false,
-    detached: process.platform !== "win32",
-  });
-  session.pid = child.pid;
-  // Register the child and its handlers with no await in between: an await
-  // here would let a very fast exit fire close before anyone is listening,
-  // leaving a dead child in `children` that /messages would queue behind.
-  children.set(session.id, child);
-  let stdoutBuffer = "",
-    stderrBuffer = "";
-  // Some CLIs (Pi print mode) exit 0 even when the provider rejected the
-  // turn, so an adapter's own settled-event failure is recorded here for
-  // this turn only. sawAgentText tracks real output from this turn's own
-  // events, which message positions cannot (consecutive agent messages merge).
-  let turnFailed = false;
-  let sawAgentText = false;
-  const consume = (data, isErr = false) => {
-    if (isErr) {
-      const text = data.toString();
-      stderrBuffer += text;
-      const lines = text.split(/\r?\n/).filter(Boolean);
-      session.logs = [...session.logs, ...lines].slice(-500);
-      for (const line of lines) {
-        const permission = line.match(/permission requested: (.*?); auto-rejecting/i);
-        if (permission)
-          addMessage(
-            session,
-            "system",
-            `OpenCode requested permission for ${permission[1]}; its non-interactive CLI rejected the request. ADE did not approve or run that action.`,
-          );
-      }
-      session.updatedAt = now();
-      return;
-    }
-    stdoutBuffer += data.toString();
-    const lines = stdoutBuffer.split(/\r?\n/);
-    stdoutBuffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const update = parseAgentOutput(session, line);
-      if (update?.failsTurn) turnFailed = true;
-      if (update?.text?.trim()) sawAgentText = true;
-    }
-  };
-  // ADE ends an ACP agent itself once the turn settles, so its exit code says
-  // nothing about the turn: the close handler takes the ACP outcome instead.
-  const acpTurn = acp
-    ? runAcpSession(session, project, child, turnPrompt, attachments, continuing)
-    : null;
-  if (!acp) child.stdout.on("data", (d) => consume(d));
-  child.stderr.on("data", (d) => consume(d, true));
-  child.on("error", async (error) => {
-    children.delete(session.id);
-    delete session.pid;
-    session.status = "blocked";
-    addMessage(session, "system", `${bin} failed to start: ${error.message}`);
-    await save();
-  });
-  child.on("close", async (exitCode, exitSignal) => {
-    let code = exitCode;
-    let signal = exitSignal;
-    if (acpTurn) {
-      const outcome = await acpTurn;
-      dropPermissions(session);
-      code = outcome.ok ? 0 : 1;
-      signal = null;
-      if (!outcome.ok) turnFailed = true;
-      if (outcome.sawText) sawAgentText = true;
-    }
-    if (stdoutBuffer.trim()) {
-      const update = parseAgentOutput(session, stdoutBuffer);
-      if (update?.failsTurn) turnFailed = true;
-      if (update?.text?.trim()) sawAgentText = true;
-    }
-    children.delete(session.id);
-    delete session.pid;
-    // Refresh the live diff on every exit path and flag files that were
-    // already dirty before this turn as pre-existing (the user's), so the
-    // diff view separates their work from the agent's.
-    const flagBaseline = (changes) => {
-      const baseline = new Set(session.baselineFiles ?? []);
-      return changes.map((c) => (baseline.has(c.path) ? { ...c, preExisting: true } : c));
-    };
-    if (session.steerNow && !["stopped", "complete"].includes(session.status)) {
-      const prompt = session.steerNow;
-      delete session.steerNow;
-      session.changes = flagBaseline((await getDiff(project)).changes);
-      if (!claimTurn(session)) {
-        (session.queuedMessages ??= []).push(prompt);
-        await save();
-        return;
-      }
-      session.status = "working";
-      await save();
-      return runAgent(session, prompt, true, []);
-    }
-    if (session.status === "stopped") {
-      session.changes = flagBaseline((await getDiff(project)).changes);
-      await save();
-      return;
-    }
-    const queue = session.queuedMessages ?? [];
-    session.queuedMessages = [];
-    if (queue.length) {
-      // The slot was freed by the children.delete above with no await in
-      // between; re-claim synchronously so /messages queues instead of
-      // racing this drain with a second spawn.
-      claimTurn(session);
-      await save();
-      // Queued turns only carry the path appendix in text; native CLI flags apply
-      // to the immediately spawned turn, not to drained queue entries.
-      return runAgent(session, queue.join("\n\n"), true, []);
-    }
-    // A CLI that exits 0 after its own settled error (Pi print mode) still
-    // failed: never report "ready to review" for a turn that produced nothing.
-    // OpenCode does the same thing on an uncaught provider/model rejection —
-    // exit 0, empty stdout, stack trace on stderr — so a zero exit with no
-    // agent output and real error wording is also a failed turn.
-    let effectiveCode = turnFailed && code === 0 ? 1 : code;
-    let turnSlice = classifyTurnFailure(session, effectiveCode, turnLogStart, turnMessageStart);
-    if (effectiveCode === 0 && !sawAgentText && classifyFailure(turnSlice.texts) !== "process") {
-      effectiveCode = 1;
-      turnSlice = classifyTurnFailure(session, effectiveCode, turnLogStart, turnMessageStart);
-    }
-    session.status = effectiveCode === 0 ? "ready" : "blocked";
-    // Classify from this turn's own output slice only; a successful turn
-    // also clears any stale failureKind left by an earlier failure.
-    const { kind: failureKind, texts: failureTexts } = turnSlice;
-    if (effectiveCode === 0 && !sawAgentText)
-      addMessage(
-        session,
-        "system",
-        "The CLI exited successfully but did not emit a parseable response. Review the Logs tab for its raw output.",
-      );
-    if (effectiveCode !== 0) {
-      const modelNote = session.model ? ` The selected model was "${session.model}".` : "";
-      const suggestion = failureKind === "model_not_found" ? modelSuggestion(failureTexts) : "";
-      addMessage(
-        session,
-        "system",
-        failureKind === "provider_quota"
-          ? `Provider quota or rate limit reached — no work was performed.${retryHint(failureTexts) ? ` ${retryHint(failureTexts)}.` : ""} Your task is kept; nothing in the project was changed. Retry later or switch agents.`
-          : failureKind === "model_not_found"
-            ? `The agent rejected the selected model — no work was performed.${modelNote}${suggestion ? ` ${suggestion}` : ""} Pick a different model with Change model, or clear it to use the agent's configured default, then send a follow-up. Nothing in the project was changed; your task is kept.`
-            : failureKind === "provider_unavailable"
-              ? `The agent reported that its provider is unavailable — no work was performed.${modelNote} Check this CLI's own provider setup (Agents page); ADE does not manage provider credentials. Nothing in the project was changed.`
-              : failureKind === "auth_expired"
-                ? `The agent's sign-in or credentials were refused — no work was performed. Re-authenticate with this CLI's own sign-in flow from the Agents page, then retry. Nothing in the project was changed; your task is kept.`
-                : failureKind === "context_overflow"
-                  ? `The conversation exceeded the model's context window and the turn stopped. Shorten or summarize your follow-up (or start a fresh session for a narrower task); a larger-context model may also help — use Change model. Any project edits made before the failure were left in place.`
-                  : acpTurn
-                    ? `${meta.name} did not finish this turn; its own error is shown above and in Logs. Any project edits it made before stopping are kept. Your task is kept — retry, switch model, or switch agents.`
-                    : turnFailed
-                      ? `The agent reported that this turn failed and produced no result; nothing was applied. The CLI's own error is shown above and in Logs. Your task is kept — retry, switch model, or switch agents.`
-                      : `Agent process exited with ${signal ?? `code ${code}`}. Existing project changes were left in place. See Logs for details.`,
-      );
-    }
-    session.summary = session.messages.filter((m) => m.role === "agent").at(-1)?.text;
-    session.updatedAt = now();
-    session.changes = flagBaseline((await getDiff(project)).changes);
-    session.checks = [
-      {
-        name: "Project checks",
-        status: "not_run",
-        detail: "ADE did not run checks automatically.",
-      },
-    ];
-    await save();
-  });
-  await save();
-}
-function stopChild(child) {
-  const pid = typeof child === "number" ? child : child?.pid;
-  if (!pid) return;
-  try {
-    if (process.platform !== "win32") process.kill(-pid, "SIGTERM");
-    else if (killTree(pid)) return;
-    else if (typeof child === "number") process.kill(pid, "SIGTERM");
-    else child.kill("SIGTERM");
-  } catch {
-    try {
-      if (typeof child === "number") process.kill(pid, "SIGTERM");
-      else child.kill("SIGTERM");
-    } catch {}
-  }
-}
-/**
- * Claim a session's single CLI-turn slot. The check-and-set is synchronous
- * by contract: no await may sit between a children.has() check and
- * claimTurn(), which is what makes "check then spawn" atomic — a close
- * handler draining the queue can never double-spawn against a route.
- * The placeholder holds the slot from the claim until the real child is
- * registered (or the turn is abandoned).
- */
-function claimTurn(session) {
-  if (children.has(session.id)) return false;
-  children.set(session.id, { placeholder: true });
-  return true;
-}
-function releaseTurn(session) {
-  if (children.get(session.id)?.placeholder) children.delete(session.id);
 }
 /**
  * Strip dev-server flags an earlier start may have left in the stored base
@@ -1411,25 +658,6 @@ function spawnProcess(proc, project, launch = {}) {
     save().catch(() => {});
   });
   return proc;
-}
-async function packageManager(project, pkg = {}) {
-  const declared = String(pkg.packageManager ?? "").split("@")[0];
-  if (["npm", "pnpm", "yarn", "bun"].includes(declared)) return declared;
-  for (const [lock, manager] of [
-    ["pnpm-lock.yaml", "pnpm"],
-    ["yarn.lock", "yarn"],
-    ["bun.lock", "bun"],
-    ["bun.lockb", "bun"],
-  ]) {
-    if (
-      await fs
-        .access(path.join(project.path, lock))
-        .then(() => true)
-        .catch(() => false)
-    )
-      return manager;
-  }
-  return "npm";
 }
 /**
  * Read package.json fresh on every call (never cached): detect the dev
@@ -1537,188 +765,6 @@ export function devServerArgs(framework, port, manager = "npm") {
   // npm run requires `--` to forward flags to the script; pnpm/yarn/bun pass
   // `--` literally into the script argv, which makes vite/next ignore --port.
   return manager === "npm" ? ["--", ...flags, String(port)] : [...flags, String(port)];
-}
-async function detectNonNodeHint(projectPath) {
-  try {
-    const names = await fs.readdir(projectPath);
-    const set = new Set(names);
-    if (
-      set.has("pyproject.toml") ||
-      set.has("requirements.txt") ||
-      set.has("Pipfile") ||
-      set.has("setup.py") ||
-      names.some((n) => n.endsWith(".py"))
-    )
-      return " This looks like a Python project.";
-    if (set.has("Cargo.toml")) return " This looks like a Rust project.";
-    if (set.has("go.mod")) return " This looks like a Go project.";
-    if (set.has("Gemfile")) return " This looks like a Ruby project.";
-  } catch {
-    /* ignore */
-  }
-  return "";
-}
-
-export async function checksFor(project) {
-  const categories = [
-    { name: "Typecheck", scripts: ["typecheck", "type-check", "check"] },
-    { name: "Lint", scripts: ["lint"] },
-    { name: "Unit tests", scripts: ["test"] },
-    { name: "End-to-end", scripts: ["test:e2e", "e2e"] },
-    { name: "Build", scripts: ["build"] },
-  ];
-  try {
-    const pkg = JSON.parse(await fs.readFile(path.join(project.path, "package.json"), "utf8"));
-    const scripts = pkg.scripts ?? {};
-    const manager = await packageManager(project, pkg);
-    return categories.map((category) => {
-      const script = category.scripts.find((name) => scripts[name]);
-      return script
-        ? {
-            name: category.name,
-            script,
-            command: `${manager} run ${script}`,
-            status: "not_run",
-            detail: "Not run",
-          }
-        : {
-            name: category.name,
-            status: "skipped",
-            detail: `No ${category.scripts.join(" or ")} script configured.`,
-          };
-    });
-  } catch (error) {
-    const missing =
-      error?.code === "ENOENT" || /ENOENT|no such file or directory/i.test(String(error?.message));
-    if (missing) {
-      const hint = await detectNonNodeHint(project.path);
-      return [
-        {
-          name: "Project checks",
-          status: "skipped",
-          detail:
-            "No package.json here. ADE’s check runner only detects npm scripts (typecheck, lint, test, e2e, build)." +
-            hint +
-            " Run language-specific checks yourself for now, or add a package.json with those scripts.",
-        },
-      ];
-    }
-    return [
-      {
-        name: "Project checks",
-        status: "skipped",
-        detail: `package.json could not be read or parsed (${error.message}); no scripts detected.`,
-      },
-    ];
-  }
-}
-export async function executeChecks(session) {
-  // Claim the verifying state before the first await: a /stop handled while
-  // checksFor yields must not be overwritten by this loop afterwards.
-  session.status = "verifying";
-  session.checksCancelled = false;
-  const project = state.projects.find((p) => p.id === session.projectId);
-  if (!project) {
-    // Defensive: the route only admits ready sessions, so restore that state
-    // rather than wedging the session in verifying with no loop running.
-    session.status = "ready";
-    return;
-  }
-  const checks = await checksFor(project);
-  // Re-check immediately after the yield: if /stop (or completion) landed
-  // while checksFor was reading, abandon before touching any check state.
-  if (session.status !== "verifying" || session.checksCancelled) {
-    session.updatedAt = now();
-    if (session.steerNow && !["stopped", "complete"].includes(session.status)) {
-      const prompt = session.steerNow;
-      delete session.steerNow;
-      if (!claimTurn(session)) {
-        (session.queuedMessages ??= []).push(prompt);
-        await save();
-        return;
-      }
-      session.status = "working";
-      await save();
-      runAgent(session, prompt, true, []);
-      return;
-    }
-    await save();
-    return;
-  }
-  session.checks = checks.filter((check) => !check.script);
-  const pkg = JSON.parse(
-    await fs.readFile(path.join(project.path, "package.json"), "utf8").catch(() => "{}"),
-  );
-  const manager = await packageManager(project, pkg);
-  for (const check of checks.filter((item) => item.script)) {
-    // Checks have no tracked child to kill, so cancellation is a flag tested
-    // between steps: /stop must not be overwritten by this loop finishing.
-    if (session.checksCancelled || ["stopped", "complete"].includes(session.status)) break;
-    const actualCmd = `${manager} run ${check.script}`;
-    const r = await run(manager, ["run", check.script], { cwd: project.path, timeout: 120000 });
-    const output = (r.stdout + r.stderr).trim().slice(-4000);
-    session.checks.push({
-      name: check.name,
-      status: r.code === 0 ? "passed" : "failed",
-      detail: `${actualCmd} · exit ${r.code}\n${output}`,
-    });
-    session.logs.push(`$ ${actualCmd}\n${output}`);
-    await save();
-  }
-  session.updatedAt = now();
-  // Never write over a stopped or completed session, whatever the loop did.
-  if (session.checksCancelled || ["stopped", "complete"].includes(session.status)) {
-    if (session.steerNow && !["stopped", "complete"].includes(session.status)) {
-      const prompt = session.steerNow;
-      delete session.steerNow;
-      if (!claimTurn(session)) {
-        (session.queuedMessages ??= []).push(prompt);
-        await save();
-        return;
-      }
-      session.status = "working";
-      await save();
-      runAgent(session, prompt, true, []);
-      return;
-    }
-    await save();
-    return;
-  }
-  if (session.steerNow) {
-    const prompt = session.steerNow;
-    delete session.steerNow;
-    if (!claimTurn(session)) {
-      (session.queuedMessages ??= []).push(prompt);
-      await save();
-      return;
-    }
-    session.status = "working";
-    await save();
-    runAgent(session, prompt, true, []);
-    return;
-  }
-  const queue = session.queuedMessages ?? [];
-  if (children.has(session.id)) {
-    // A turn is (still) live: report what is actually true instead of
-    // claiming ready; its close handler owns the queue.
-    session.status = "working";
-    await save();
-    return;
-  }
-  if (queue.length) {
-    // Drain follow-ups that arrived during verifying: claim the turn slot
-    // synchronously before the await, so a second /messages queues instead
-    // of racing this drain with another spawn.
-    claimTurn(session);
-    session.queuedMessages = [];
-    session.status = "working";
-    await save();
-    runAgent(session, queue.join("\n\n"), true, []);
-    return;
-  }
-  // verifying -> ready only when no child is running.
-  session.status = "ready";
-  await save();
 }
 // A browser disconnect ends the response before it is written. Waiting reads
 // listen for that so a closed tab does not hold a PTY poll open.
@@ -2194,7 +1240,7 @@ async function handle(req, res) {
       const idx = state.projects.findIndex((p) => p.id === parts[1]);
       if (idx === -1) return json(res, 404, { error: "Project not found." });
       const busy =
-        state.sessions.some((s) => s.projectId === parts[1] && children.has(s.id)) ||
+        state.sessions.some((s) => s.projectId === parts[1] && turns.isBusy(s)) ||
         state.processes.some((x) => x.projectId === parts[1] && children.has(x.id));
       if (busy)
         return json(res, 409, {
@@ -2294,15 +1340,6 @@ async function handle(req, res) {
       // pre-existing in the diff view so the user can tell their edits from
       // the agent's.
       const baseline = project.uncommittedFiles.length ? await getDiff(project) : null;
-      if (
-        state.sessions.some(
-          (s) => s.projectId === project.id && ["working", "verifying"].includes(s.status),
-        )
-      )
-        return json(res, 409, {
-          error:
-            "Another agent task is still running in this project. Wait until it stops before starting another.",
-        });
       const attachmentIds = Array.isArray(data.attachmentIds) ? data.attachmentIds : [];
       let files = [];
       try {
@@ -2311,285 +1348,74 @@ async function handle(req, res) {
         if (error?.status) return json(res, error.status, { error: error.message });
         throw error;
       }
-      const userVisibleText =
-        request + (data.criteria ? `\n\nAcceptance criteria: ${data.criteria}` : "");
-      const prompt = `${userVisibleText}${formatAttachmentPrompt(files)}`;
-      const s = {
-        id: id(),
-        projectId: project.id,
+      const text = request + (data.criteria ? `\n\nAcceptance criteria: ${data.criteria}` : "");
+      const session = await turns.start({
+        project,
         agentId: agent.id,
-        createdBy: agent.id,
         request,
         criteria: String(data.criteria ?? ""),
-        status: "working",
-        messages: [
-          {
-            id: id(),
-            role: "user",
-            text: userVisibleText,
-            at: now(),
-            ...attachmentMeta(files),
-          },
-        ],
-        changes: baseline ? baseline.changes.map((c) => ({ ...c, preExisting: true })) : [],
-        ...(baseline ? { baselineFiles: baseline.files.map((f) => f.path) } : {}),
-        checks: [{ name: "Project checks", status: "not_run", detail: "Not run yet." }],
-        logs: [],
-        createdAt: now(),
-        updatedAt: now(),
-        queuedMessages: [],
-        ...(model ? { model } : {}),
-        ...optionCheck.value,
-      };
-      state.sessions.unshift(s);
-      // Hold the single-turn slot across the awaits inside runAgent so an
-      // immediate follow-up queues instead of spawning a second CLI.
-      claimTurn(s);
-      await save();
-      runAgent(s, prompt, false, adapterAttachments(files));
-      return json(res, 201, s);
+        text,
+        files,
+        model: model || undefined,
+        options: optionCheck.value,
+        baseline,
+      });
+      return json(res, 201, session);
     }
-    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "messages") {
+    if (req.method === "POST" && parts[0] === "sessions" && parts.length === 3) {
       const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s) return json(res, 404, { error: "Session not found." });
-      const data = await body(req);
-      const when = ["now", "later", "drop", "release"].includes(data.when) ? data.when : undefined;
-      if (when === "drop" || when === "release") {
+      if (!s) {
+        const known = [
+          "messages",
+          "switch-agent",
+          "stop",
+          "permission",
+          "complete",
+          "reopen",
+          "checks",
+        ];
+        if (known.includes(parts[2])) return json(res, 404, { error: "Session not found." });
+      } else if (parts[2] === "messages") {
+        const data = await body(req);
+        if (data.when === "drop") return json(res, 200, await turns.drop(s));
+        if (data.when === "release") return json(res, 200, await turns.release(s));
+        const text = String(data.text ?? "").trim();
+        if (!text) return json(res, 400, { error: "Message cannot be empty." });
+        if (UNSUPPORTED_RISK.test(text))
+          return json(res, 403, {
+            error:
+              "ADE cannot mediate this destructive or external action's approval flow yet; the message was not sent.",
+          });
         if (s.status === "complete")
           return json(res, 409, { error: "Reopen this session before sending a message." });
-        if (when === "drop") {
-          const waiting = (s.queuedMessages ?? []).length;
-          s.queuedMessages = [];
-          if (waiting) addMessage(s, "system", "The waiting message will not be sent.");
-          await save();
-          return json(res, 200, s);
+        const attachmentIds = Array.isArray(data.attachmentIds) ? data.attachmentIds : [];
+        let files = [];
+        try {
+          files = attachmentIds.length ? await resolveAttachments(DATA_DIR, attachmentIds) : [];
+        } catch (error) {
+          if (error?.status) return json(res, error.status, { error: error.message });
+          throw error;
         }
-        const waiting = [...(s.queuedMessages ?? [])];
-        if (!waiting.length)
-          return json(res, 400, { error: "There is no waiting message to send." });
-        s.queuedMessages = [];
-        const queuedPrompt = waiting.join("\n\n");
-        if (children.has(s.id) || s.status === "verifying") {
-          s.steerNow = queuedPrompt;
-          s.status = "working";
-          s.checksCancelled = true;
-          const child = children.get(s.id);
-          if (child) stopChild(child);
-          addLog(s, "Switching to your message.");
-          await save();
-          return json(res, 200, s);
-        }
-        addLog(s, "Sending the waiting message.");
-        s.status = "working";
-        const claimed = claimTurn(s);
-        await save();
-        if (claimed) runAgent(s, queuedPrompt, true, []);
-        return json(res, 200, s);
+        // "now" stops the current turn (or checks) and runs this message as
+        // soon as it has stopped; otherwise it waits for the turn to end.
+        const when = data.when === "now" ? "now" : "later";
+        return json(res, 200, await turns.send(s, { text, files }, when));
+      } else if (parts[2] === "switch-agent") {
+        const data = await body(req);
+        const switched = await turns.switchAgent(s, String(data.agentId ?? ""));
+        return json(res, 200, { ...switched, carriesConversation: false });
+      } else if (parts[2] === "stop") {
+        return json(res, 200, await turns.stop(s));
+      } else if (parts[2] === "permission") {
+        const data = await body(req);
+        return json(res, 200, await turns.answer(s, data.requestId, data.optionId));
+      } else if (parts[2] === "complete") {
+        return json(res, 200, await turns.complete(s));
+      } else if (parts[2] === "reopen") {
+        return json(res, 200, await turns.reopen(s));
+      } else if (parts[2] === "checks") {
+        return json(res, 200, await turns.runChecks(s));
       }
-      const text = String(data.text ?? "").trim();
-      if (!text) return json(res, 400, { error: "Message cannot be empty." });
-      if (UNSUPPORTED_RISK.test(text))
-        return json(res, 403, {
-          error:
-            "ADE cannot mediate this destructive or external action's approval flow yet; the message was not sent.",
-        });
-      if (s.status === "complete")
-        return json(res, 409, { error: "Reopen this session before sending a message." });
-      const attachmentIds = Array.isArray(data.attachmentIds) ? data.attachmentIds : [];
-      let files = [];
-      try {
-        files = attachmentIds.length ? await resolveAttachments(DATA_DIR, attachmentIds) : [];
-      } catch (error) {
-        if (error?.status) return json(res, error.status, { error: error.message });
-        throw error;
-      }
-      const userVisibleText = text;
-      const prompt = `${userVisibleText}${formatAttachmentPrompt(files)}`;
-      const msgExtra = attachmentMeta(files);
-      // Follow-ups stay non-blocking: the user may keep editing between
-      // turns. runAgent re-reads the working tree at the start of each turn
-      // and refreshes the preserved-changes baseline, so the agent always
-      // sees current reality. Checks spawn no tracked child, so "verifying"
-      // must queue here too instead of racing the checks run while the
-      // header still says verifying. "now" stops the current step and runs
-      // this message as soon as that process exits.
-      if ((children.has(s.id) || s.status === "verifying") && when === "now") {
-        addMessage(s, "user", userVisibleText, msgExtra);
-        s.steerNow = prompt;
-        s.status = "working";
-        s.checksCancelled = true;
-        const child = children.get(s.id);
-        if (child) stopChild(child);
-        addLog(s, "Switching to your message.");
-        await save();
-        return json(res, 200, s);
-      }
-      if (children.has(s.id) || s.status === "verifying") {
-        // v1: native CLI flags apply only to the immediately spawned turn; queued
-        // follow-ups rely on the path appendix baked into the queued text.
-        (s.queuedMessages ??= []).push(prompt);
-        addMessage(s, "user", userVisibleText, msgExtra);
-        addLog(s, "Follow-up queued until the current CLI turn exits.");
-        await save();
-        return json(res, 200, s);
-      }
-      addMessage(s, "user", userVisibleText, msgExtra);
-      s.status = "working";
-      // Claim the turn slot synchronously: nothing awaits between the
-      // children.has() check above and this registration, so a close handler
-      // draining the queue can never double-spawn against this handler.
-      const claimed = claimTurn(s);
-      if (claimed) s.queuedMessages = [];
-      await save();
-      if (claimed) runAgent(s, prompt, true, adapterAttachments(files));
-      return json(res, 200, s);
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "switch-agent") {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s) return json(res, 404, { error: "Session not found." });
-      const data = await body(req);
-      const target = state.agents.find((a) => a.id === data.agentId);
-      const project = state.projects.find((p) => p.id === s.projectId);
-      if (!target?.installed || !target.signedIn)
-        return json(res, 400, {
-          error: `${target?.name ?? data.agentId} must be installed and authenticated before switching.`,
-        });
-      if (!project) return json(res, 404, { error: "Project not found." });
-      if (children.has(s.id))
-        return json(res, 409, {
-          error: "Stop or wait for the current CLI turn to finish before switching agents.",
-        });
-      if (s.status === "complete")
-        return json(res, 409, { error: "Reopen this session before switching agents." });
-      await projectInfo(project);
-      const from = state.agents.find((a) => a.id === s.agentId);
-      s.createdBy = s.agentId;
-      s.agentId = target.id;
-      s.agentSessionId = undefined;
-      delete s.acpDefaultModel;
-      // Model ids belong to one CLI's catalog; never transplant them across
-      // agents. The new CLI starts on its own configured default. Effort and
-      // speed are model-scoped too: a level valid for the old CLI (e.g. Pi's
-      // "high") can map to a flag the new CLI rejects outright, so they go
-      // with the model rather than breaking the next turn.
-      const droppedModel = s.model;
-      const droppedEffort = s.effort;
-      const droppedSpeed = s.speed;
-      delete s.model;
-      delete s.effort;
-      delete s.speed;
-      const carriesConversation = false;
-      addMessage(
-        s,
-        "system",
-        `Switched from ${from?.name ?? s.agentId} to ${target.name}. The new CLI starts fresh: repository state, the task, and the current diff carry over, but the prior conversation does not.` +
-          (droppedModel
-            ? ` The selected model (${droppedModel}) belonged to the previous agent and was dropped; ${target.name} starts with its own configured default.`
-            : " The model resets to the new agent's configured default.") +
-          (droppedEffort || droppedSpeed
-            ? ` Its model settings (${[droppedEffort && `effort ${droppedEffort}`, droppedSpeed && `speed ${droppedSpeed}`].filter(Boolean).join(", ")}) were cleared too, because they are tied to the previous agent's model.`
-            : ""),
-      );
-      addLog(
-        s,
-        `agent switch: ${from?.short ?? s.agentId} → ${target.short} (conversation not carried)`,
-      );
-      s.status = "working";
-      await save();
-      runAgent(
-        s,
-        `A different coding agent worked on this task before you. Review the current repository state and continue or finish the task. Original request: ${s.request}${s.criteria ? `\nAcceptance criteria: ${s.criteria}` : ""}`,
-      );
-      return json(res, 200, { ...s, carriesConversation });
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "stop") {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s) return json(res, 404, { error: "Session not found." });
-      const alreadyStopped = s.status === "stopped";
-      s.status = "stopped";
-      // A stop cancels an in-flight "send now" so the exit does not restart work.
-      delete s.steerNow;
-      // Checks have no child to kill: flag cancellation so executeChecks
-      // stops at the next step boundary instead of overwriting this state
-      // with "ready" when the loop ends.
-      s.checksCancelled = true;
-      dropPermissions(s);
-      const child = children.get(s.id);
-      stopChild(child ?? s.pid);
-      addLog(s, "Stopped by user. Existing worktree changes are kept.");
-      if (!alreadyStopped)
-        addMessage(
-          s,
-          "system",
-          "Stopped. Files are kept. Send a message when you want it to continue.",
-        );
-      await save();
-      return json(res, 200, s);
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "permission") {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s) return json(res, 404, { error: "Session not found." });
-      const data = await body(req);
-      const request = (s.pendingPermissions ?? []).find((p) => p.id === data.requestId);
-      const resolve = request && permissionWaiters.get(request.id);
-      if (!resolve)
-        return json(res, 409, { error: "The agent is no longer waiting for this answer." });
-      // Only an option the agent itself offered; ADE never invents one.
-      const option = request.options.find((o) => o.optionId === data.optionId);
-      if (!option) return json(res, 400, { error: "Choose one of the options the agent offered." });
-      s.pendingPermissions = s.pendingPermissions.filter((p) => p !== request);
-      if (!s.pendingPermissions.length) delete s.pendingPermissions;
-      permissionWaiters.delete(request.id);
-      resolve({ outcome: "selected", optionId: option.optionId });
-      addLog(
-        s,
-        JSON.stringify({
-          type: "permission",
-          decision: option.kind.startsWith("allow") ? "allowed" : "rejected",
-          title: request.title,
-          option: option.name,
-        }),
-      );
-      await save();
-      return json(res, 200, s);
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "complete") {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s || !["ready", "blocked", "stopped"].includes(s.status))
-        return json(res, 409, {
-          error: "Wait for the agent to stop before completing this session.",
-        });
-      // A "ready" that lies (a live child still running) must not complete.
-      if (children.has(s.id))
-        return json(res, 409, {
-          error: "The agent is still running. Wait for it to stop before completing this session.",
-        });
-      s.status = "complete";
-      s.completedAt = now();
-      await save();
-      return json(res, 200, s);
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "reopen") {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s) return json(res, 404, { error: "Session not found." });
-      s.status = "ready";
-      s.completedAt = undefined;
-      await save();
-      return json(res, 200, s);
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "checks") {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s) return json(res, 404, { error: "Session not found." });
-      if (children.has(s.id))
-        return json(res, 409, { error: "Stop or wait for the agent before running checks." });
-      // Mirrors the UI contract: checks run only on a session that is
-      // actually ready to review; verifying/stopped/complete must not race.
-      if (s.status !== "ready")
-        return json(res, 409, {
-          error: `Checks run only when the session is ready to review; this session is "${s.status}".`,
-        });
-      await executeChecks(s);
-      return json(res, 200, s);
     }
     if (req.method === "GET" && parts[0] === "sessions" && parts[2] === "diff") {
       const s = state.sessions.find((x) => x.id === parts[1]);
@@ -2963,7 +1789,7 @@ async function handle(req, res) {
         return json(res, 409, { error: "Reopen this session before changing its model." });
       // OpenCode's proven set-override pattern: only rewrite when the value
       // actually differs; applying at the next turn is inherent because
-      // runAgent reads session.model when it spawns the CLI.
+      // each turn reads session.model when it starts the CLI.
       const previousModel = s.model ?? null;
       const changed = previousModel !== (model || null);
       if (changed) {
@@ -3164,7 +1990,8 @@ async function handle(req, res) {
       return json(res, 200, { agents: await agentStatus() });
     return json(res, 404, { error: "Not found." });
   } catch (error) {
-    if (error instanceof SourceError) return json(res, error.status, { error: error.message });
+    if (error instanceof SourceError || error instanceof TurnRefused)
+      return json(res, error.status, { error: error.message });
     return json(res, 500, { error: error?.message ?? String(error) });
   }
 }
@@ -3175,11 +2002,6 @@ export function _setAgentsForTest(agents) {
 /** Test-only: read a live session without the bootstrap route's CLI probes. */
 export function _getSessionForTest(sessionId) {
   return state.sessions.find((item) => item.id === sessionId);
-}
-/** Test-only: adjust a session status without going through HTTP. */
-export function _setSessionStatusForTest(sessionId, status) {
-  const session = state.sessions.find((item) => item.id === sessionId);
-  if (session) session.status = status;
 }
 await load();
 // API request bodies are tiny JSON; anything larger is refused before it is

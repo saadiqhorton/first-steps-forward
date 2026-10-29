@@ -3,12 +3,13 @@
 // renamed @zed-industries/claude-code-acp), a bridge ADE sets up itself (see
 // ../acp-bridge.mjs). The turn itself runs in ../acp.mjs; this preset only
 // says how to launch it and what to ask for.
-export const claude = {
+import { defineAcpAgent } from "./kit.mjs";
+
+export const claude = defineAcpAgent({
   id: "claude",
   name: "Claude Code",
   short: "Claude",
   bin: "claude",
-  protocol: "acp",
   // ADE installs this pinned version under ~/.ade the first time Claude runs.
   bridge: {
     pkg: "@agentclientprotocol/claude-agent-acp",
@@ -67,4 +68,4 @@ export const claude = {
       },
     };
   },
-};
+});

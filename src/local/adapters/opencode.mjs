@@ -1,6 +1,7 @@
 import { opencodeComputerEnv } from "./computer-tools.mjs";
+import { defineCliAgent } from "./kit.mjs";
 
-export const opencode = {
+export const opencode = defineCliAgent({
   id: "opencode",
   name: "OpenCode",
   short: "OpenCode",
@@ -52,17 +53,31 @@ export const opencode = {
       opencodeComputerEnv(computer),
     ];
   },
-  parse(line, session) {
+  parse(line) {
     let event;
     try {
       event = JSON.parse(line);
     } catch {
-      return {};
+      return [];
     }
-    if (event.sessionID) session.agentSessionId = event.sessionID;
-    if (event.type === "text" && event.part?.text) return { text: event.part.text };
+    const events = event.sessionID ? [{ type: "conversation", id: event.sessionID }] : [];
+    if (event.type === "text" && event.part?.text)
+      events.push({ type: "text", text: event.part.text });
     if (event.type === "error")
-      return { error: event.error?.message ?? "OpenCode reported an error." };
-    return {};
+      events.push({ type: "error", text: event.error?.message ?? "OpenCode reported an error." });
+    return events;
   },
-};
+  // `opencode run` cannot ask: it rejects a permission request on its own
+  // and says so on stderr. Tell the user what happened.
+  stderr(line) {
+    const permission = line.match(/permission requested: (.*?); auto-rejecting/i);
+    return permission
+      ? [
+          {
+            type: "notice",
+            text: `OpenCode requested permission for ${permission[1]}; its non-interactive CLI rejected the request. ADE did not approve or run that action.`,
+          },
+        ]
+      : [];
+  },
+});

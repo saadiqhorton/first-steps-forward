@@ -21,11 +21,14 @@ test("Codex adapter uses its workspace-write sandbox and resumes the same thread
   assert.equal(bin, "codex");
   assert.ok(args.includes("--sandbox") && args.includes("workspace-write"));
   assert.ok(!args.some((arg) => arg.includes("dangerously")));
-  codex.parse(JSON.stringify({ type: "thread.started", thread_id: "thread-1" }), session);
+  const [conversation] = codex.parse(
+    JSON.stringify({ type: "thread.started", thread_id: "thread-1" }),
+  );
+  assert.deepEqual(conversation, { type: "conversation", id: "thread-1" });
   const resumed = codex.command({
     projectPath: "/tmp/project",
     prompt: "Continue",
-    session,
+    session: { ...session, agentSessionId: conversation.id },
     continuing: true,
   })[1];
   assert.ok(resumed.includes("thread-1"));
@@ -42,12 +45,23 @@ test("OpenCode adapter never opts into automatic permission approval", () => {
   assert.equal(bin, "opencode");
   assert.ok(args.includes("--format") && args.includes("json"));
   assert.ok(!args.includes("--auto"));
-  const event = opencode.parse(
-    JSON.stringify({ type: "text", sessionID: "oc-1", part: { text: "Real response" } }),
-    session,
+  assert.deepEqual(
+    opencode.parse(
+      JSON.stringify({ type: "text", sessionID: "oc-1", part: { text: "Real response" } }),
+    ),
+    [
+      { type: "conversation", id: "oc-1" },
+      { type: "text", text: "Real response" },
+    ],
   );
-  assert.equal(event.text, "Real response");
-  assert.equal(session.agentSessionId, "oc-1");
+  // `opencode run` rejects permission requests itself; the user is told.
+  assert.deepEqual(opencode.stderr("permission requested: bash (rm -rf x); auto-rejecting"), [
+    {
+      type: "notice",
+      text: "OpenCode requested permission for bash (rm -rf x); its non-interactive CLI rejected the request. ADE did not approve or run that action.",
+    },
+  ]);
+  assert.deepEqual(opencode.stderr("some other warning"), []);
 });
 
 test("Pi adapter restricts shell tools and parses actual JSON events", () => {
@@ -63,13 +77,15 @@ test("Pi adapter restricts shell tools and parses actual JSON events", () => {
   assert.ok(!args.includes("--no-extensions"));
   assert.ok(args.includes("read,edit,write,grep,find,ls"));
   assert.ok(!args.includes("bash"));
-  const event = pi.parse(
-    JSON.stringify({
-      type: "message_end",
-      message: { role: "assistant", content: [{ type: "text", text: "Pi response" }] },
-    }),
+  assert.deepEqual(
+    pi.parse(
+      JSON.stringify({
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "Pi response" }] },
+      }),
+    ),
+    [{ type: "text", text: "Pi response" }],
   );
-  assert.equal(event.text, "Pi response");
 });
 
 test("Pi reports only auth-check READY providers, not credential or catalog counts", async () => {
@@ -144,7 +160,7 @@ test("Pi reports only assistant messages, never the echoed user prompt", () => {
         message: { role: "user", content: [{ type: "text", text: "My question" }] },
       }),
     ),
-    {},
+    [],
   );
   assert.deepEqual(
     pi.parse(
@@ -153,7 +169,7 @@ test("Pi reports only assistant messages, never the echoed user prompt", () => {
         message: { role: "system", content: [{ type: "text", text: "Preamble" }] },
       }),
     ),
-    {},
+    [],
   );
   assert.deepEqual(
     pi.parse(
@@ -168,7 +184,7 @@ test("Pi reports only assistant messages, never the echoed user prompt", () => {
         },
       }),
     ),
-    { text: "Answer" },
+    [{ type: "text", text: "Answer" }],
   );
 });
 
@@ -190,9 +206,7 @@ test("Pi surfaces a settled failed turn so ADE does not report success", () => {
       ],
     }),
   );
-  assert.equal(failed.text, undefined);
-  assert.equal(failed.failsTurn, true);
-  assert.equal(failed.error, "500 status code (no body)");
+  assert.deepEqual(failed, [{ type: "error", text: "500 status code (no body)", fatal: true }]);
 
   // A retryable agent_end is not the end of the turn.
   const retrying = pi.parse(
@@ -202,7 +216,7 @@ test("Pi surfaces a settled failed turn so ADE does not report success", () => {
       messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: "boom" }],
     }),
   );
-  assert.equal(retrying.failsTurn, undefined);
+  assert.deepEqual(retrying, []);
 
   // A settled successful turn reports nothing at all.
   assert.deepEqual(
@@ -215,7 +229,7 @@ test("Pi surfaces a settled failed turn so ADE does not report success", () => {
         ],
       }),
     ),
-    {},
+    [],
   );
 });
 

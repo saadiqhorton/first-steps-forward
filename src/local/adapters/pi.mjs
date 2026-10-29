@@ -2,8 +2,9 @@ import { promises as fsp } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { COMPUTER_TOOL_NAMES } from "./computer-tools.mjs";
+import { defineCliAgent } from "./kit.mjs";
 
-export const pi = {
+export const pi = defineCliAgent({
   id: "pi",
   name: "Pi Agent",
   short: "Pi",
@@ -52,6 +53,10 @@ export const pi = {
       // characters or arbitrarily long store keys into the manifest/UI.
       account: `${ready.length} READY ${ready.length === 1 ? "provider" : "providers"}: ${ready.map((name) => (/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) ? name : "(unusual provider name)")).join(", ")}`,
     };
+  },
+  // Pi keeps each conversation in a session file under ADE's data folder.
+  async prepare({ dataDir }) {
+    await fsp.mkdir(path.join(dataDir, "sessions"), { recursive: true, mode: 0o700 });
   },
   command({
     prompt,
@@ -108,9 +113,9 @@ export const pi = {
     try {
       event = JSON.parse(line);
     } catch {
-      return { text: line };
+      return [{ type: "text", text: line }];
     }
-    if (event.type === "text" && event.text) return { text: event.text };
+    if (event.type === "text" && event.text) return [{ type: "text", text: event.text }];
     // Pi emits message_end for the system preamble and the user's own prompt
     // too. Only assistant messages are agent output — reporting the prompt
     // back would fabricate a reply the agent never produced.
@@ -119,18 +124,24 @@ export const pi = {
         .filter?.((part) => part.type === "text")
         .map((part) => part.text)
         .join("");
-      return { text: text ?? "" };
+      return [{ type: "text", text: text ?? "" }];
     }
     // Print mode's JSON path always exits 0, even when every retry failed and
     // the run produced no answer. `agent_end` with willRetry === false is the
     // settled point, so the last assistant message's error is the only
-    // failure signal ADE gets. failsTurn makes the turn end blocked instead
-    // of "ready to review" with no work done.
+    // failure signal ADE gets. A fatal error makes the turn end blocked
+    // instead of "ready to review" with no work done.
     if (event.type === "agent_end" && event.willRetry === false) {
       const last = [...(event.messages ?? [])].reverse().find((m) => m.role === "assistant");
       if (last?.stopReason === "error")
-        return { error: last.errorMessage || "Pi reported an error and stopped.", failsTurn: true };
+        return [
+          {
+            type: "error",
+            text: last.errorMessage || "Pi reported an error and stopped.",
+            fatal: true,
+          },
+        ];
     }
-    return {};
+    return [];
   },
-};
+});

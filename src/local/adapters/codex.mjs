@@ -1,6 +1,7 @@
 import { codexComputerArgs } from "./computer-tools.mjs";
+import { defineCliAgent } from "./kit.mjs";
 
-export const codex = {
+export const codex = defineCliAgent({
   id: "codex",
   name: "OpenAI Codex",
   short: "Codex",
@@ -78,17 +79,18 @@ export const codex = {
           ],
         ];
   },
-  parse(line, session) {
+  parse(line) {
     let event;
     try {
       event = JSON.parse(line);
     } catch {
-      return {};
+      return [];
     }
-    if (event.type === "thread.started") session.agentSessionId = event.thread_id;
+    if (event.type === "thread.started") return [{ type: "conversation", id: event.thread_id }];
     if (event.type === "item.completed" && event.item?.type === "agent_message")
-      return { text: event.item.text ?? "" };
-    if (event.type === "error") return { error: event.message ?? "Codex reported an error." };
-    return {};
+      return [{ type: "text", text: event.item.text ?? "" }];
+    if (event.type === "error")
+      return [{ type: "error", text: event.message ?? "Codex reported an error." }];
+    return [];
   },
-};
+});
