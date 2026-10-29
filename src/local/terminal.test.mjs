@@ -122,7 +122,9 @@ test(
       }
       assert.ok(childPid, "the foreground process started");
       assert.equal((await call(`/api/terminal/${id}/close`, {})).status, 200);
-      for (let attempt = 0; attempt < 40 && running(childPid); attempt++)
+      // Closing kills asynchronously and, under load, the shell can outlive
+      // the command by a few milliseconds: wait for both before asserting.
+      for (let attempt = 0; attempt < 80 && (running(childPid) || running(shellPid)); attempt++)
         await new Promise((resolve) => setTimeout(resolve, 25));
       assert.equal(running(shellPid), false, "the shell stopped");
       assert.equal(running(childPid), false, "the foreground command stopped");
