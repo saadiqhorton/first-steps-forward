@@ -9,6 +9,7 @@ import {
   parsePiModels,
   listModels,
   clearModelsCache,
+  rememberAcpModels,
   MODEL_ID,
   PI_THINKING_LEVELS,
 } from "./models.mjs";
@@ -372,4 +373,86 @@ test("opencode probe keeps plain ids when verbose returns a shorter list", async
   assert.deepEqual(result.models[0].efforts, []);
   assert.deepEqual(result.models[1].efforts, ["low", "medium", "high"]);
   assert.equal(result.models[2].efforts, undefined);
+});
+
+test("ACP agents list the models they last reported, for the same CLI version only", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(path.join(tmpdir(), "ade-acp-models-"));
+  const neverRun = async () => {
+    throw new Error("ACP agents have no list command to run");
+  };
+  try {
+    const before = await listModels("claude", neverRun, { version: "0.99.0", cacheDir: dir });
+    assert.equal(before.available, false);
+    assert.equal(before.reason, "acp-not-reported");
+    await rememberAcpModels(dir, "claude", "0.99.0", [
+      { id: "default", label: "Default" },
+      { id: "opus", label: "Opus" },
+      { id: "--flag-looking" },
+    ]);
+    const after = await listModels("claude", neverRun, { version: "0.99.0", cacheDir: dir });
+    assert.equal(after.available, true);
+    assert.equal(after.source, "acp");
+    assert.deepEqual(
+      after.models.map((m) => m.id),
+      ["default", "opus"],
+    );
+    const upgraded = await listModels("claude", neverRun, { version: "1.0.0", cacheDir: dir });
+    assert.equal(upgraded.available, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("with no list yet, ACP agents are asked once and the answer is kept", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(path.join(tmpdir(), "ade-acp-models-"));
+  const neverRun = async () => {
+    throw new Error("ACP agents have no list command to run");
+  };
+  try {
+    let probes = 0;
+    const probeAcp = async () => {
+      probes++;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return [{ id: "default", label: "Default" }, { id: "haiku" }];
+    };
+    const opts = { version: "2.1.307", cacheDir: dir, probeAcp };
+    // The picker asks for models and capabilities together: one probe.
+    const [first, second] = await Promise.all([
+      listModels("claude", neverRun, opts),
+      listModels("claude", neverRun, opts),
+    ]);
+    assert.equal(probes, 1);
+    assert.equal(first.source, "acp");
+    assert.deepEqual(
+      first.models.map((m) => m.id),
+      ["default", "haiku"],
+    );
+    assert.deepEqual(second, first);
+    assert.equal((await listModels("claude", neverRun, opts)).available, true);
+    assert.equal(probes, 1);
+
+    // A failed probe is reported, not kept: the next call asks again.
+    const failing = async () => {
+      throw new Error("Authentication required: sign in");
+    };
+    const failed = await listModels("claude", neverRun, {
+      version: "2.1.308",
+      cacheDir: dir,
+      probeAcp: failing,
+    });
+    assert.equal(failed.reason, "acp-probe-failed");
+    assert.match(failed.hint, /^Authentication required: sign in/);
+    const none = await listModels("claude", neverRun, {
+      version: "2.1.308",
+      cacheDir: dir,
+      probeAcp: async () => [],
+    });
+    assert.equal(none.reason, "acp-no-models");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

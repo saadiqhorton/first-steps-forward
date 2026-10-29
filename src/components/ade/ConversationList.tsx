@@ -6,7 +6,7 @@ import { AnimatePresence } from "motion/react";
 import { GlideIndicator, MotionItem } from "@/components/ade/motion";
 import { StatusPill } from "@/components/ade/StatusPill";
 import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
-import { useAde } from "@/lib/ade/store";
+import { needsYou, useAde } from "@/lib/ade/store";
 import type { Session } from "@/lib/ade/types";
 import { sessionTitle } from "@/lib/ade/sessionTitle";
 import {
@@ -176,7 +176,7 @@ export function ConversationList() {
                         <span className="font-mono text-[10px] text-dim">
                           {agent?.short ?? session.agentId} · {format(session.updatedAt, "MMM d")}
                         </span>
-                        <StatusPill status={session.status} />
+                        <StatusPill status={session.status} needsYou={needsYou(session)} />
                         {showElapsed && (
                           <span className="font-mono text-[10px] tabular-nums text-teal">
                             {formatElapsed(state.now, turnStart)}

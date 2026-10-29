@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { claude } from "./claude.mjs";
 import { codex } from "./codex.mjs";
 import { opencode } from "./opencode.mjs";
 import { pi } from "./pi.mjs";
+import { acpComputerServers } from "./computer-tools.mjs";
 
 const session = { id: "session-id", agentSessionId: undefined };
 
@@ -619,4 +621,86 @@ test("without a computer context nothing extra is passed", () => {
   const piArgs = pi.command({ ...base, dataDir: "/data" })[1];
   assert.ok(!piArgs.includes("-e"));
   assert.equal(piArgs[piArgs.indexOf("--tools") + 1], "read,edit,write,grep,find,ls");
+});
+
+test("Claude Code runs over ACP: the bridge drives the user's own claude", async () => {
+  assert.equal(claude.protocol, "acp");
+  assert.equal(claude.bin, "claude");
+  assert.deepEqual(
+    claude.command({
+      bridge: ["/usr/bin/node", ["/home/u/.ade/acp/claude-agent-acp-0.99.0/index.js"]],
+      executable: "/home/u/.local/bin/claude",
+    }),
+    [
+      "/usr/bin/node",
+      ["/home/u/.ade/acp/claude-agent-acp-0.99.0/index.js"],
+      { CLAUDE_CODE_EXECUTABLE: "/home/u/.local/bin/claude" },
+    ],
+  );
+  assert.deepEqual(claude.modes, { build: ["acceptEdits"], plan: ["plan"] });
+  const calls = [];
+  const runWith = (stdout) => async (bin, args) => {
+    calls.push([bin, ...args]);
+    return { code: 0, stdout, stderr: "" };
+  };
+  assert.deepEqual(
+    await claude.detectAuth(runWith(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }))),
+    { signedIn: true, account: "Claude Code account (claude.ai)" },
+  );
+  assert.deepEqual(calls[0], ["claude", "auth", "status", "--json"]);
+  assert.deepEqual(await claude.detectAuth(runWith(JSON.stringify({ loggedIn: false }))), {
+    signedIn: false,
+  });
+  assert.deepEqual(await claude.detectAuth(runWith("not json")), { signedIn: false });
+  // An odd auth method string never reaches the UI.
+  assert.equal(
+    (
+      await claude.detectAuth(
+        runWith(JSON.stringify({ loggedIn: true, authMethod: "\u001b[31mx" })),
+      )
+    ).account,
+    "Claude Code account",
+  );
+});
+
+test("Claude pre-allows only ADE's own MCP server and never offers bypass mode", () => {
+  assert.deepEqual(claude.sessionMeta({ computer: true }), {
+    claudeCode: {
+      options: { allowDangerouslySkipPermissions: false, allowedTools: ["mcp__ade_computer"] },
+    },
+  });
+  assert.deepEqual(claude.sessionMeta({ computer: false }), {
+    claudeCode: { options: { allowDangerouslySkipPermissions: false } },
+  });
+  // The model-list session saves no transcript and no memory folder.
+  assert.deepEqual(claude.sessionMeta({ computer: false, ephemeral: true }), {
+    claudeCode: {
+      options: {
+        allowDangerouslySkipPermissions: false,
+        persistSession: false,
+        settings: { autoMemoryEnabled: false },
+      },
+    },
+  });
+});
+
+test("ACP agents receive the agent computer as a stdio MCP server", () => {
+  const computer = {
+    node: "/usr/bin/node",
+    mcpScript: "/ade/src/local/computer-mcp.mjs",
+    piExtension: "/ade/src/local/computer-pi-extension.mjs",
+    env: { ADE_API: "http://127.0.0.1:3000", ADE_PROJECT_ID: "p1" },
+  };
+  assert.deepEqual(acpComputerServers(computer), [
+    {
+      name: "ade_computer",
+      command: "/usr/bin/node",
+      args: ["/ade/src/local/computer-mcp.mjs"],
+      env: [
+        { name: "ADE_API", value: "http://127.0.0.1:3000" },
+        { name: "ADE_PROJECT_ID", value: "p1" },
+      ],
+    },
+  ]);
+  assert.deepEqual(acpComputerServers(null), []);
 });

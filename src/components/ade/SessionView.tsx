@@ -7,6 +7,7 @@ import { DiffPanel } from "@/components/ade/DiffPanel";
 import { RightPanePortal } from "@/components/ade/RightPanePortal";
 import { SessionMessage } from "@/components/ade/SessionMessage";
 import { MotionItem } from "@/components/ade/motion";
+import { PermissionRequestCard } from "@/components/ade/PermissionRequestCard";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { AnimatePresence } from "motion/react";
 import { StatusPill } from "@/components/ade/StatusPill";
@@ -15,7 +16,7 @@ import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 import { currentActivity } from "@/lib/ade/formatLogs.mjs";
 import { sessionTitle } from "@/lib/ade/sessionTitle";
 import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
-import { agentModels, timeAgo, uploadAttachment, useAde } from "@/lib/ade/store";
+import { agentModels, needsYou, timeAgo, uploadAttachment, useAde } from "@/lib/ade/store";
 
 function waitingPreview(prompt: string) {
   const visible = prompt.split("\n\nThe user attached these files")[0]?.trim() ?? "";
@@ -59,6 +60,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   const stickToBottomRef = useRef(true);
   const lastMessageRole = session?.messages[session.messages.length - 1]?.role;
   const lastMessageLength = session?.messages[session.messages.length - 1]?.text.length;
+  const pendingCount = session?.pendingPermissions?.length ?? 0;
 
   const onMessagesScroll = () => {
     const el = scrollRef.current;
@@ -69,7 +71,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (stickToBottomRef.current || lastMessageRole === "user")
       endRef.current?.scrollIntoView({ block: "end" });
-  }, [session?.messages.length, session?.status, lastMessageRole, lastMessageLength]);
+  }, [session?.messages.length, session?.status, lastMessageRole, lastMessageLength, pendingCount]);
 
   useEffect(() => {
     if (!session) return;
@@ -102,7 +104,12 @@ export function SessionView({ sessionId }: { sessionId: string }) {
         setSelection((prev) => {
           const base = prev ?? selectionFromSession(session);
           if (base.agentId !== agentId || base.model.trim()) return prev;
-          const resolved = resolveModelForAgent(agentId, catalogIds, "");
+          const resolved = resolveModelForAgent(
+            agentId,
+            catalogIds,
+            "",
+            result.available && result.source === "acp",
+          );
           if (!resolved) return prev;
           return { ...base, model: resolved, effort: "", speed: "" };
         });
@@ -276,7 +283,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             </p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <StatusPill status={session.status} size="md" />
+            <StatusPill status={session.status} size="md" needsYou={needsYou(session)} />
             <span className="font-mono text-[10px] text-dim">
               {agent?.name} · model: {session.model ?? "agent default"} · real local CLI process
             </span>
@@ -321,6 +328,14 @@ export function SessionView({ sessionId }: { sessionId: string }) {
               </MotionItem>
             ))}
           </AnimatePresence>
+          {(session.pendingPermissions ?? []).map((request) => (
+            <PermissionRequestCard
+              key={request.id}
+              sessionId={session.id}
+              request={request}
+              agentName={agent?.short ?? session.agentId}
+            />
+          ))}
           {running && (
             <div className="flex flex-wrap items-center gap-3 text-[13px] text-dim">
               <span className="size-1.5 animate-pulse-soft rounded-full bg-teal" aria-hidden />

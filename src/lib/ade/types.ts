@@ -1,4 +1,4 @@
-export type AgentId = "codex" | "opencode" | "pi";
+export type AgentId = "codex" | "opencode" | "pi" | "claude";
 export type Permission = "build" | "plan";
 
 export interface Agent {
@@ -130,10 +130,26 @@ export interface AgentComputer {
   /** "default" keeps the project's logins and storage between runs; "incognito" starts clean. */
   profile: "default" | "incognito";
 }
+/** An ACP agent's question, waiting on the user; the turn pauses until it is answered. */
+export interface PendingPermission {
+  id: string;
+  /** Agent-supplied, shown as text only. */
+  title: string;
+  /** ACP tool kind: read, edit, delete, move, search, execute, think, fetch, switch_mode, other. */
+  kind: string;
+  /** The command, file paths, or URL the request is about, when the agent said. */
+  detail?: string;
+  options: {
+    optionId: string;
+    name: string;
+    kind: "allow_once" | "allow_always" | "reject_once" | "reject_always";
+  }[];
+  at: number;
+}
 export interface AgentModelsResult {
   available: boolean;
   models?: AgentModel[];
-  /** Listing provenance: "live" (CLI's own cached catalog) or "bundled". */
+  /** Listing provenance: "live" (CLI's own cached catalog), "bundled", or "acp" (reported by the agent in its last session). */
   source?: string;
   /** The quota-free CLI command the list came from, for honest disclosure. */
   command?: string;
@@ -192,6 +208,8 @@ export interface Session {
   queuedMessages?: string[];
   /** Prompt to run as soon as the current CLI process exits. */
   steerNow?: string;
+  /** ACP agents only: questions the running turn is waiting on. */
+  pendingPermissions?: PendingPermission[];
 }
 
 export interface AdeState {

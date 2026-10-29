@@ -61,6 +61,7 @@ type Api = {
   complete: (sessionId: string) => Promise<void>;
   reopen: (sessionId: string) => void;
   stop: (sessionId: string) => void;
+  answerPermission: (sessionId: string, requestId: string, optionId: string) => Promise<void>;
   switchAgent: (sessionId: string, agentId: AgentId) => Promise<void>;
   setSessionModel: (sessionId: string, model: string) => Promise<void>;
   setSessionOptions: (
@@ -248,6 +249,10 @@ export function AdeProvider({ children }: { children: ReactNode }) {
           .then(refresh)
           .catch((e) => void warnUser(e.message));
       },
+      answerPermission: async (sessionId, requestId, optionId) => {
+        await request(`/api/sessions/${sessionId}/permission`, "POST", { requestId, optionId });
+        await refresh();
+      },
       switchAgent: async (sessionId, agentId) => {
         await request(`/api/sessions/${sessionId}/switch-agent`, "POST", { agentId });
         await refresh();
@@ -316,6 +321,10 @@ export function useActiveProject() {
 export const ACTIVE: Session["status"][] = ["working", "verifying", "ready", "blocked"];
 export function isActive(s: Session) {
   return ACTIVE.includes(s.status);
+}
+/** The running turn is paused on an agent question only the user can answer. */
+export function needsYou(s: Session) {
+  return (s.pendingPermissions?.length ?? 0) > 0;
 }
 export function timeAgo(now: number, t?: number) {
   if (!now || !t) return "";

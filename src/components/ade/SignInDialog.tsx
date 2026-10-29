@@ -76,10 +76,16 @@ export function SignInDialog({ agent, onClose }: { agent: Agent; onClose: () => 
             <p>
               {agent.id === "opencode"
                 ? "OpenCode's provider selector requires an interactive terminal. ADE cannot safely fake or capture its OAuth login."
-                : "Pi currently exposes sign-in through /login in its interactive TUI; it has no supported device-login command for ADE to launch."}
+                : agent.id === "claude"
+                  ? "Claude Code signs in through its own CLI, which opens a browser. Run this in a terminal; if you already use Claude Code here, you are probably signed in already."
+                  : "Pi currently exposes sign-in through /login in its interactive TUI; it has no supported device-login command for ADE to launch."}
             </p>
             <p className="mt-2 font-mono">
-              {agent.id === "opencode" ? "opencode auth login" : "pi  →  /login"}
+              {agent.id === "opencode"
+                ? "opencode auth login"
+                : agent.id === "claude"
+                  ? "claude auth login"
+                  : "pi  →  /login"}
             </p>
           </div>
         )}

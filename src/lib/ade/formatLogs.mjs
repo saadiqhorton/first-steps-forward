@@ -289,6 +289,35 @@ export function formatJsonLogEvent(event) {
     };
   }
 
+  // ADE's ACP client (src/local/acp.mjs, ade-local.mjs): plans and permission decisions.
+  if (type === "plan") {
+    const entries = Array.isArray(event.entries) ? event.entries : [];
+    const current =
+      entries.find((entry) => entry?.status === "in_progress") ??
+      entries.find((entry) => entry?.status === "pending");
+    const step = current ? truncate(asText(current.content), 160) : "";
+    return { tone: "info", title: "Updated its plan", ...(step ? { body: step } : {}), raw: "" };
+  }
+  if (type === "permission") {
+    const decision = asText(event.decision);
+    const title =
+      decision === "asked"
+        ? "Asked for your permission"
+        : decision === "allowed"
+          ? "You allowed"
+          : decision === "rejected"
+            ? "You rejected"
+            : "Declined by ADE (Plan is read-only)";
+    const subject = truncate(asText(event.title), 160);
+    const option = asText(event.option);
+    return {
+      tone: "system",
+      title,
+      ...(subject ? { body: option ? `${subject} — ${option}` : subject } : {}),
+      raw: "",
+    };
+  }
+
   // Unknown JSON — type label only (no blob in the summarized body).
   if (type) return { tone: "info", title: type.replace(/[._]/g, " "), raw: "" };
   return { tone: "info", title: "CLI event", raw: "" };
@@ -416,6 +445,11 @@ function phraseForActivity(event) {
   }
   if (type === "tool_result" || type === "tool_output" || type === "tool_execution_end" || type === "text")
     return "Still working on the next step";
+  if (type === "permission")
+    return asText(record.decision) === "asked"
+      ? "Waiting for your answer"
+      : "Still working on the next step";
+  if (type === "plan") return "Planning the work";
   if (
     type === "turn.started" ||
     type === "thread.started" ||

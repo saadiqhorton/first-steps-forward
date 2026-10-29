@@ -17,9 +17,10 @@ const PROVIDER_UNAVAILABLE =
   /No providers are available|No models are available for provider:|Failed to initialize provider/i;
 
 // The agent's sign-in/credentials were refused; recovery is the CLI's own
-// re-auth flow, not a different model.
+// re-auth flow, not a different model. "Authentication required" is how
+// ADE's ACP client words the protocol's -32000 error.
 const AUTH_EXPIRED =
-  /\bProviderAuthError\b|Unauthorized: request was blocked|authentication (?:has )?expired|\b401\b[^\n]{0,60}unauthoriz|unauthoriz[^\n]{0,60}\b401\b|invalid (?:api )?key/i;
+  /\bProviderAuthError\b|Unauthorized: request was blocked|authentication (?:has )?expired|\b401\b[^\n]{0,60}unauthoriz|unauthoriz[^\n]{0,60}\b401\b|invalid (?:api )?key|^Authentication required: /im;
 
 const CONTEXT_OVERFLOW = /context_length_exceeded|Input exceeds context window/i;
 

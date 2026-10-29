@@ -13,8 +13,19 @@ const MAP: Record<
   blocked: { label: "Blocked", cls: "text-danger", dot: "bg-danger", glyph: "×" },
 };
 
-export function StatusPill({ status, size = "sm" }: { status: SessionStatus; size?: "sm" | "md" }) {
-  const m = MAP[status];
+const NEEDS_YOU = { label: "Needs you", cls: "text-amber-deep", dot: "bg-amber", glyph: "?" };
+
+export function StatusPill({
+  status,
+  size = "sm",
+  needsYou = false,
+}: {
+  status: SessionStatus;
+  size?: "sm" | "md";
+  /** A running turn paused on an agent question (see `needsYou` in the store). */
+  needsYou?: boolean;
+}) {
+  const m: (typeof MAP)[SessionStatus] = needsYou && status === "working" ? NEEDS_YOU : MAP[status];
   return (
     <span
       className={`inline-flex items-center gap-1.5 font-medium ${m.cls} ${size === "md" ? "text-[13px]" : "text-[11px]"}`}

@@ -1,5 +1,5 @@
 /**
- * Harness install/update jobs for ADE agent CLIs (Codex, OpenCode, Pi).
+ * Harness install/update jobs for ADE agent CLIs (Codex, OpenCode, Pi, Claude Code).
  *
  * Latest-version checks use `npm view <pkg> version` as a registry convention;
  * vendors do not document a dedicated "latest without install" API. Spawn is
@@ -11,7 +11,7 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_OUTPUT_LINES = 400;
 const LATEST_TTL_MS = 60 * 60 * 1000;
 
-/** @type {Record<string, { pkg: string, install: [string, string[]], update: [string, string[]] }>} */
+/** @type {Record<string, { pkg: string, install: [string, string[]], update: [string, string[]], selfUpdates?: boolean }>} */
 export const HARNESS = {
   codex: {
     pkg: "@openai/codex",
@@ -28,12 +28,22 @@ export const HARNESS = {
     install: ["npm", ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"]],
     update: ["pi", ["update", "--self"]],
   },
+  // Claude Code's documented npm update is a reinstall at @latest. Its
+  // native installer updates itself, so ADE flags no update for it
+  // (selfUpdates); the ACP bridge is ADE's own (acp-bridge.mjs).
+  claude: {
+    pkg: "@anthropic-ai/claude-code",
+    install: ["npm", ["install", "-g", "@anthropic-ai/claude-code"]],
+    update: ["npm", ["install", "-g", "@anthropic-ai/claude-code@latest"]],
+    selfUpdates: true,
+  },
 };
 
 const BIN = {
   codex: "codex",
   opencode: "opencode",
   pi: "pi",
+  claude: "claude",
 };
 
 const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;

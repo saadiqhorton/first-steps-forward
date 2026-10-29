@@ -144,3 +144,53 @@ test("formatSessionLogs collapses repeated empty info titles", () => {
     true,
   );
 });
+
+test("ACP plan and permission lines read as plain steps", () => {
+  const plan = formatLogLine(
+    JSON.stringify({
+      type: "plan",
+      entries: [
+        { content: "Read the readme", status: "completed" },
+        { content: "Tighten the intro", status: "in_progress" },
+      ],
+    }),
+  );
+  assert.equal(plan.title, "Updated its plan");
+  assert.equal(plan.body, "Tighten the intro");
+  const asked = formatLogLine(
+    JSON.stringify({ type: "permission", decision: "asked", title: "npm test" }),
+  );
+  assert.equal(asked.tone, "system");
+  assert.equal(asked.title, "Asked for your permission");
+  assert.equal(asked.body, "npm test");
+  const allowed = formatLogLine(
+    JSON.stringify({ type: "permission", decision: "allowed", title: "npm test", option: "Allow" }),
+  );
+  assert.equal(allowed.title, "You allowed");
+  assert.equal(allowed.body, "npm test — Allow");
+  assert.equal(
+    formatLogLine(JSON.stringify({ type: "permission", decision: "declined", title: "Edit a" }))
+      .title,
+    "Declined by ADE (Plan is read-only)",
+  );
+  assert.equal(
+    currentActivity([JSON.stringify({ type: "permission", decision: "asked", title: "x" })]),
+    "Waiting for your answer",
+  );
+  assert.equal(
+    currentActivity([JSON.stringify({ type: "plan", entries: [] })]),
+    "Planning the work",
+  );
+});
+
+test("ACP tool lines reuse the shared tool summaries", () => {
+  const line = formatLogLine(
+    JSON.stringify({ type: "tool_call", toolName: "Bash", input: { command: "npm test" } }),
+  );
+  assert.equal(line.title, "Used Bash");
+  assert.equal(line.body, "npm test");
+  assert.equal(
+    currentActivity([JSON.stringify({ type: "tool_call", toolName: "browser_click", input: {} })]),
+    "Looking at the page",
+  );
+});

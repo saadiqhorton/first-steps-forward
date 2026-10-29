@@ -5,6 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { killTree, spawnCommand as spawn } from "./spawn.mjs";
 import { adapters } from "./adapters/index.mjs";
+import { acpComputerServers } from "./adapters/computer-tools.mjs";
+import { listAcpModels, runAcpTurn } from "./acp.mjs";
+import { acpBridge } from "./acp-bridge.mjs";
 import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
 import { adeRoot, COMPUTER_ERROR_STATUS, createComputerManager, SCREEN } from "./computer.mjs";
 import { createBrowserHub } from "./browser-page.mjs";
@@ -14,7 +17,7 @@ import { diagnoseLaunchFailure } from "./browser-host.mjs";
 import { TOOLS as COMPUTER_TOOLS } from "./computer-tools-defs.mjs";
 import { createBrowserStreamServer } from "./browser-stream-server.mjs";
 import { createControlRegistry, HumanControlError } from "./browser-control.mjs";
-import { listModels, MODEL_ID, clearModelsCache } from "./models.mjs";
+import { listModels, MODEL_ID, clearModelsCache, rememberAcpModels } from "./models.mjs";
 import { optionCapabilities, validateOptions } from "./capabilities.mjs";
 import {
   HARNESS,
@@ -165,6 +168,11 @@ async function load() {
         delete s.steerNow;
         changed = true;
       }
+      // A permission request dies with the agent process that asked it.
+      if (s.pendingPermissions) {
+        delete s.pendingPermissions;
+        changed = true;
+      }
     }
     // Older ADE versions queried Git only at the selected folder. Recover a
     // completed task's missing count when a nested repo's changed files still
@@ -289,7 +297,10 @@ async function agentStatus() {
         authNote: adapter.authNote,
         installHint: adapter.installHint,
         installed: !!version,
-        ...(version ? { version: version.replace(/^.*?\s/, "") } : {}),
+        // "codex-cli 0.158.0" and "2.1.307 (Claude Code)" both report the number.
+        ...(version
+          ? { version: version.match(/\d+(?:\.\d+)+\S*/)?.[0] ?? version.replace(/^.*?\s/, "") }
+          : {}),
         ...auth,
         carriesConversation: true,
         installMethod: install.method,
@@ -310,6 +321,8 @@ async function agentStatus() {
   } catch {}
   // Background, non-blocking latest-version checks — next bootstrap poll picks them up.
   for (const agent of results) {
+    // A CLI that updates itself in place is never behind in a way ADE can fix.
+    if (HARNESS[agent.id]?.selfUpdates && agent.installMethod !== "npm") continue;
     void (async () => {
       const latest = await latestVersion(agent.id, run);
       if (latest == null) return;
@@ -718,8 +731,7 @@ export function classifyTurnFailure(session, code, logStart, messageStart) {
 }
 /** Resolve and validate effort/speed/permission against the model's capability row. */
 async function resolveSessionOptions(agentId, modelId, options) {
-  const version = state.agents.find((a) => a.id === agentId)?.version ?? "";
-  const listed = await listModels(agentId, run, { version, cacheDir: DATA_DIR });
+  const listed = await listAgentModels(agentId);
   const modelRow =
     modelId && listed?.available
       ? (listed.models?.find((m) => m.id === modelId) ?? { id: modelId })
@@ -734,9 +746,159 @@ function syncOptionFields(session, value, cleared) {
   }
 }
 
-export function agentCommand(session, project, prompt, continuing, attachments = []) {
+/** ACP permission requests waiting on the user: request id → resolve. */
+const permissionWaiters = new Map();
+/** Answer every open request "cancelled" (the turn is ending) and clear them. */
+function dropPermissions(session) {
+  for (const request of session.pendingPermissions ?? []) {
+    permissionWaiters.get(request.id)?.({ outcome: "cancelled" });
+    permissionWaiters.delete(request.id);
+  }
+  delete session.pendingPermissions;
+}
+/**
+ * Drive one ACP turn (see acp.mjs) on the spawned agent, then end the agent:
+ * close stdin, and SIGTERM its group if it lingers. Never rejects. Settles
+ * with { ok, sawText }; a failure's own error is already a system message.
+ */
+function runAcpSession(session, project, child, prompt, attachments, continuing) {
+  const adapter = adapters[session.agentId];
+  const version = state.agents.find((a) => a.id === session.agentId)?.version ?? "";
+  const computer = computerContext(project);
+  let sawText = false;
+  const end = () => {
+    child.stdin?.end();
+    const timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) stopChild(child);
+    }, 3000);
+    timer.unref?.();
+    child.once("close", () => clearTimeout(timer));
+  };
+  return runAcpTurn({
+    child,
+    name: adapter.name,
+    cwd: project.path,
+    prompt,
+    images: attachments.filter((a) => a.kind === "image"),
+    resumeId: continuing ? session.agentSessionId : undefined,
+    permission: session.permission ?? "build",
+    modes: adapter.modes,
+    model: session.model,
+    defaultModel: session.acpDefaultModel,
+    mcpServers: acpComputerServers(computer),
+    sessionMeta: adapter.sessionMeta?.({ computer: !!computer }),
+    on: {
+      sessionId: (value) => {
+        session.agentSessionId = value;
+      },
+      defaultModel: (value) => {
+        session.acpDefaultModel = value;
+      },
+      text: (text) => {
+        addMessage(session, "agent", text);
+        if (text.trim()) sawText = true;
+      },
+      log: (line) => addLog(session, line),
+      notice: (text) => addMessage(session, "system", text),
+      models: (models) => void rememberAcpModels(DATA_DIR, adapter.id, version, models),
+      permission: (request) =>
+        new Promise((resolve) => {
+          const entry = { id: id(), at: now(), ...request };
+          session.pendingPermissions = [...(session.pendingPermissions ?? []), entry];
+          permissionWaiters.set(entry.id, resolve);
+          addLog(
+            session,
+            JSON.stringify({ type: "permission", decision: "asked", title: request.title }),
+          );
+          void save();
+        }),
+    },
+  }).then(
+    ({ stopReason, declinedModeSwitch }) => {
+      end();
+      // Plan's own decline of "leave plan mode" ends Claude's turn as
+      // cancelled; the plan was delivered, so that is a finished turn.
+      const cancelled = stopReason === "cancelled" && !declinedModeSwitch;
+      if (stopReason === "max_tokens" || stopReason === "max_turn_requests")
+        addMessage(
+          session,
+          "system",
+          `${adapter.name} stopped early: it reached its ${stopReason === "max_tokens" ? "output token" : "tool request"} limit for one turn. Send a follow-up to let it continue.`,
+        );
+      if (stopReason === "refusal")
+        addMessage(session, "system", `${adapter.name} refused to continue this request.`);
+      if (cancelled)
+        addMessage(session, "system", `${adapter.name} cancelled the turn before finishing.`);
+      return { ok: stopReason !== "refusal" && !cancelled, sawText };
+    },
+    (error) => {
+      end();
+      // A stop or "send now" kills the agent on purpose, and a spawn failure
+      // is reported by runAgent's own error handler: neither is news here.
+      if (child.pid && session.status !== "stopped" && !session.steerNow)
+        addMessage(session, "system", error.message);
+      return { ok: false, sawText };
+    },
+  );
+}
+/**
+ * What an ACP adapter's command() needs beyond the session: its bridge's
+ * [bin, args] (set up on first use, announced through onInstall) and the
+ * user's own CLI on PATH.
+ */
+async function acpLaunch(adapter, onInstall) {
+  if (!adapter.bridge) return {};
+  const executable = await which(adapter.bin);
+  if (!executable)
+    throw new Error(`${adapter.name} is not on PATH (\`${adapter.bin}\`). ${adapter.installHint}.`);
+  const bridge = await acpBridge(adapter.bridge, { dataDir: DATA_DIR, which, run, onInstall });
+  return { bridge, executable };
+}
+/** An ACP agent's models, from a session it opens and is never prompted in. */
+async function probeAcpModels(adapter) {
+  const [bin, args, env] = adapter.command(await acpLaunch(adapter));
+  await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
+  const child = spawn(bin, args, {
+    cwd: DATA_DIR,
+    env: { ...process.env, ...env },
+    stdio: ["pipe", "pipe", "ignore"],
+    shell: false,
+  });
+  const timer = setTimeout(() => child.kill("SIGTERM"), 30000);
+  try {
+    return await listAcpModels({
+      child,
+      name: adapter.name,
+      cwd: DATA_DIR,
+      sessionMeta: adapter.sessionMeta?.({ computer: false, ephemeral: true }),
+    });
+  } finally {
+    clearTimeout(timer);
+    child.stdin?.end();
+    setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    }, 3000).unref?.();
+  }
+}
+/**
+ * listModels for an agent at its detected version. An installed, signed-in
+ * ACP agent is asked for its list when ADE has none for that version yet.
+ */
+function listAgentModels(agentId) {
+  const agent = state.agents.find((a) => a.id === agentId);
+  const adapter = adapters[agentId];
+  return listModels(agentId, run, {
+    version: agent?.version ?? "",
+    cacheDir: DATA_DIR,
+    ...(adapter?.protocol === "acp" && agent?.installed && agent.signedIn
+      ? { probeAcp: () => probeAcpModels(adapter) }
+      : {}),
+  });
+}
+export function agentCommand(session, project, prompt, continuing, attachments = [], launch = {}) {
   const adapter = adapters[session.agentId];
   return adapter.command({
+    ...launch,
     projectPath: project.path,
     prompt,
     session,
@@ -893,6 +1055,8 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
   let bin = "";
   let args = [];
   let extraEnv = {};
+  let turnPrompt = "";
+  const acp = adapters[session.agentId].protocol === "acp";
   try {
     session.status = "working";
     await save();
@@ -924,12 +1088,24 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
         : "");
     const safetyPreamble =
       "Safety instructions: Work only in this project. Do not deploy, publish, send external communications, modify shared or production systems, or delete data. If such an action is necessary, stop and ask the user instead. Preserve existing files unless the requested code change requires editing them. ";
+    turnPrompt = `${safetyPreamble}${manifestLine}\n\nTask: ${prompt}`;
     const command = agentCommand(
       session,
       project,
-      `${safetyPreamble}${manifestLine}\n\nTask: ${prompt}`,
+      turnPrompt,
       continuing,
       attachments,
+      acp
+        ? await acpLaunch(adapters[session.agentId], () => {
+            const { name, bin, bridge } = adapters[session.agentId];
+            addMessage(
+              session,
+              "system",
+              `Setting up ${name} for ADE, once: installing its ACP bridge (${bridge.pkg}@${bridge.version}) under ~/.ade/acp. Your own \`${bin}\` stays the one that runs.`,
+            );
+            void save();
+          })
+        : {},
     );
     bin = command[0];
     args = command[1];
@@ -957,7 +1133,8 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
   const child = spawn(bin, args, {
     cwd: project.path,
     env: { ...process.env, ...extraEnv },
-    stdio: ["ignore", "pipe", "pipe"],
+    // An ACP agent takes the whole turn as JSON-RPC over stdin/stdout.
+    stdio: [acp ? "pipe" : "ignore", "pipe", "pipe"],
     shell: false,
     detached: process.platform !== "win32",
   });
@@ -1002,7 +1179,12 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
       if (update?.text?.trim()) sawAgentText = true;
     }
   };
-  child.stdout.on("data", (d) => consume(d));
+  // ADE ends an ACP agent itself once the turn settles, so its exit code says
+  // nothing about the turn: the close handler takes the ACP outcome instead.
+  const acpTurn = acp
+    ? runAcpSession(session, project, child, turnPrompt, attachments, continuing)
+    : null;
+  if (!acp) child.stdout.on("data", (d) => consume(d));
   child.stderr.on("data", (d) => consume(d, true));
   child.on("error", async (error) => {
     children.delete(session.id);
@@ -1011,7 +1193,17 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
     addMessage(session, "system", `${bin} failed to start: ${error.message}`);
     await save();
   });
-  child.on("close", async (code, signal) => {
+  child.on("close", async (exitCode, exitSignal) => {
+    let code = exitCode;
+    let signal = exitSignal;
+    if (acpTurn) {
+      const outcome = await acpTurn;
+      dropPermissions(session);
+      code = outcome.ok ? 0 : 1;
+      signal = null;
+      if (!outcome.ok) turnFailed = true;
+      if (outcome.sawText) sawAgentText = true;
+    }
     if (stdoutBuffer.trim()) {
       const update = parseAgentOutput(session, stdoutBuffer);
       if (update?.failsTurn) turnFailed = true;
@@ -1093,9 +1285,11 @@ async function runAgent(session, prompt, continuing = false, attachments = []) {
                 ? `The agent's sign-in or credentials were refused — no work was performed. Re-authenticate with this CLI's own sign-in flow from the Agents page, then retry. Nothing in the project was changed; your task is kept.`
                 : failureKind === "context_overflow"
                   ? `The conversation exceeded the model's context window and the turn stopped. Shorten or summarize your follow-up (or start a fresh session for a narrower task); a larger-context model may also help — use Change model. Any project edits made before the failure were left in place.`
-                  : turnFailed
-                    ? `The agent reported that this turn failed and produced no result; nothing was applied. The CLI's own error is shown above and in Logs. Your task is kept — retry, switch model, or switch agents.`
-                    : `Agent process exited with ${signal ?? `code ${code}`}. Existing project changes were left in place. See Logs for details.`,
+                  : acpTurn
+                    ? `${meta.name} did not finish this turn; its own error is shown above and in Logs. Any project edits it made before stopping are kept. Your task is kept — retry, switch model, or switch agents.`
+                    : turnFailed
+                      ? `The agent reported that this turn failed and produced no result; nothing was applied. The CLI's own error is shown above and in Logs. Your task is kept — retry, switch model, or switch agents.`
+                      : `Agent process exited with ${signal ?? `code ${code}`}. Existing project changes were left in place. See Logs for details.`,
       );
     }
     session.summary = session.messages.filter((m) => m.role === "agent").at(-1)?.text;
@@ -1943,7 +2137,7 @@ async function handle(req, res) {
     if (req.method === "POST" && parts[0] === "projects" && parts[2] === "default-agent") {
       const project = state.projects.find((p) => p.id === parts[1]);
       const data = await body(req);
-      if (!project || !["codex", "opencode", "pi"].includes(data.agentId))
+      if (!project || !Object.hasOwn(adapters, String(data.agentId)))
         return json(res, 400, { error: "Choose a supported agent and project." });
       project.defaultAgent = data.agentId;
       await save();
@@ -2225,6 +2419,7 @@ async function handle(req, res) {
       s.createdBy = s.agentId;
       s.agentId = target.id;
       s.agentSessionId = undefined;
+      delete s.acpDefaultModel;
       // Model ids belong to one CLI's catalog; never transplant them across
       // agents. The new CLI starts on its own configured default. Effort and
       // speed are model-scoped too: a level valid for the old CLI (e.g. Pi's
@@ -2271,6 +2466,7 @@ async function handle(req, res) {
       // stops at the next step boundary instead of overwriting this state
       // with "ready" when the loop ends.
       s.checksCancelled = true;
+      dropPermissions(s);
       const child = children.get(s.id);
       stopChild(child ?? s.pid);
       addLog(s, "Stopped by user. Existing worktree changes are kept.");
@@ -2280,6 +2476,33 @@ async function handle(req, res) {
           "system",
           "Stopped. Files are kept. Send a message when you want it to continue.",
         );
+      await save();
+      return json(res, 200, s);
+    }
+    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "permission") {
+      const s = state.sessions.find((x) => x.id === parts[1]);
+      if (!s) return json(res, 404, { error: "Session not found." });
+      const data = await body(req);
+      const request = (s.pendingPermissions ?? []).find((p) => p.id === data.requestId);
+      const resolve = request && permissionWaiters.get(request.id);
+      if (!resolve)
+        return json(res, 409, { error: "The agent is no longer waiting for this answer." });
+      // Only an option the agent itself offered; ADE never invents one.
+      const option = request.options.find((o) => o.optionId === data.optionId);
+      if (!option) return json(res, 400, { error: "Choose one of the options the agent offered." });
+      s.pendingPermissions = s.pendingPermissions.filter((p) => p !== request);
+      if (!s.pendingPermissions.length) delete s.pendingPermissions;
+      permissionWaiters.delete(request.id);
+      resolve({ outcome: "selected", optionId: option.optionId });
+      addLog(
+        s,
+        JSON.stringify({
+          type: "permission",
+          decision: option.kind.startsWith("allow") ? "allowed" : "rejected",
+          title: request.title,
+          option: option.name,
+        }),
+      );
       await save();
       return json(res, 200, s);
     }
@@ -2635,7 +2858,9 @@ async function handle(req, res) {
           error:
             agent.id === "opencode"
               ? "OpenCode's provider chooser is interactive and has no stable non-interactive OAuth API. Run `opencode auth login` in a terminal; credentials are kept in OpenCode's user-level store."
-              : "Pi's supported sign-in is the interactive /login command inside Pi. Run `pi`, then choose /login. ADE does not collect or store provider credentials.",
+              : agent.id === "claude"
+                ? "Claude Code's sign-in opens a browser from its own CLI. Run `claude auth login` in a terminal; credentials stay in Claude Code's own store."
+                : "Pi's supported sign-in is the interactive /login command inside Pi. Run `pi`, then choose /login. ADE does not collect or store provider credentials.",
         });
       const existing = authChildren.get(agent.id);
       if (existing) return json(res, 200, { output: existing.output, running: true });
@@ -2667,12 +2892,13 @@ async function handle(req, res) {
     if (req.method === "GET" && parts[0] === "agents" && parts[2] === "models") {
       const agentId = parts[1];
       if (!adapters[agentId])
-        return json(res, 404, { error: "Unknown agent. Available: codex, opencode, pi." });
+        return json(res, 404, {
+          error: `Unknown agent. Available: ${Object.keys(adapters).join(", ")}.`,
+        });
       // Probes the CLI's own quota-free listing. The cache key includes the
       // CLI version reported by the bootstrap status poll so an upgraded
       // binary is never served a stale catalog.
-      const version = state.agents.find((a) => a.id === agentId)?.version ?? "";
-      return json(res, 200, await listModels(agentId, run, { version, cacheDir: DATA_DIR }));
+      return json(res, 200, await listAgentModels(agentId));
     }
     if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "model") {
       const s = state.sessions.find((x) => x.id === parts[1]);
@@ -2798,10 +3024,11 @@ async function handle(req, res) {
     if (req.method === "GET" && parts[0] === "agents" && parts[2] === "capabilities") {
       const agentId = parts[1];
       if (!adapters[agentId])
-        return json(res, 404, { error: "Unknown agent. Available: codex, opencode, pi." });
+        return json(res, 404, {
+          error: `Unknown agent. Available: ${Object.keys(adapters).join(", ")}.`,
+        });
       const modelId = url.searchParams.get("model") || undefined;
-      const version = state.agents.find((a) => a.id === agentId)?.version ?? "";
-      const listed = await listModels(agentId, run, { version, cacheDir: DATA_DIR });
+      const listed = await listAgentModels(agentId);
       const modelRow =
         modelId && listed?.available
           ? (listed.models?.find((m) => m.id === modelId) ?? { id: modelId })
@@ -2815,7 +3042,9 @@ async function handle(req, res) {
     ) {
       const agentId = parts[1];
       if (!adapters[agentId] || !HARNESS[agentId])
-        return json(res, 404, { error: "Unknown agent. Available: codex, opencode, pi." });
+        return json(res, 404, {
+          error: `Unknown agent. Available: ${Object.keys(adapters).join(", ")}.`,
+        });
       const agent = state.agents.find((a) => a.id === agentId);
       if (req.method === "GET" && parts[2] === "harness") {
         const job = harnessJobs.get(agentId);
@@ -2894,6 +3123,10 @@ async function handle(req, res) {
 /** Test-only: pin agent rows so route tests are not raced by CLI probes. */
 export function _setAgentsForTest(agents) {
   state.agents = agents;
+}
+/** Test-only: read a live session without the bootstrap route's CLI probes. */
+export function _getSessionForTest(sessionId) {
+  return state.sessions.find((item) => item.id === sessionId);
 }
 /** Test-only: adjust a session status without going through HTTP. */
 export function _setSessionStatusForTest(sessionId, status) {

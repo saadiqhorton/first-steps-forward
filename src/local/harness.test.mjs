@@ -37,6 +37,13 @@ test("HARNESS lists npm install and vendor update argv for each agent", () => {
     install: ["npm", ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"]],
     update: ["pi", ["update", "--self"]],
   });
+  // Claude Code itself, not its ACP bridge (ADE sets that up on its own).
+  assert.deepEqual(HARNESS.claude, {
+    pkg: "@anthropic-ai/claude-code",
+    install: ["npm", ["install", "-g", "@anthropic-ai/claude-code"]],
+    update: ["npm", ["install", "-g", "@anthropic-ai/claude-code@latest"]],
+    selfUpdates: true,
+  });
 });
 
 test("commandLine joins bin and args, quoting args that contain spaces", () => {

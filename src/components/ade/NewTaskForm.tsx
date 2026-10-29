@@ -55,7 +55,10 @@ export function NewTaskForm({
     setSelectedWorkflow(workflow);
     setSelection((prev) => ({
       ...prev,
-      ...(workflow.agentId ? { agentId: workflow.agentId } : {}),
+      // A model (and its effort and speed) belongs to the agent it was picked for.
+      ...(workflow.agentId && workflow.agentId !== prev.agentId
+        ? { agentId: workflow.agentId, model: "", effort: "", speed: "" }
+        : {}),
       ...(workflow.permission ? { permission: workflow.permission } : {}),
     }));
   }, []);
@@ -70,7 +73,12 @@ export function NewTaskForm({
         const catalogIds = result.available ? (result.models ?? []).map((m) => m.id) : [];
         setSelection((prev) => {
           if (prev.agentId !== agentId || prev.model.trim()) return prev;
-          const resolved = resolveModelForAgent(agentId, catalogIds, "");
+          const resolved = resolveModelForAgent(
+            agentId,
+            catalogIds,
+            "",
+            result.available && result.source === "acp",
+          );
           if (!resolved) return prev;
           return { ...prev, model: resolved, effort: "", speed: "" };
         });

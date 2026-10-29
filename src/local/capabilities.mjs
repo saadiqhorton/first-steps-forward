@@ -18,6 +18,10 @@ const PERMISSION_NOTES = {
     build: "Pi tools: read, edit, write, grep, find, ls (no shell).",
     plan: "Pi read-only tools: read, grep, find, ls.",
   },
+  claude: {
+    build: "Claude Code accepts file edits; shell commands and other actions ask you in ADE first.",
+    plan: "Claude Code plan mode: reads and plans, no edits. ADE declines any request to edit, run commands, or leave plan mode.",
+  },
 };
 
 export function optionCapabilities(agentId, model) {

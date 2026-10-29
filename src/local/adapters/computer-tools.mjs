@@ -32,6 +32,19 @@ export function codexComputerArgs(computer) {
   ];
 }
 
+/** ACP agents: a stdio server in session/new `mcpServers` (env as name/value pairs). */
+export function acpComputerServers(computer) {
+  if (!computer) return [];
+  return [
+    {
+      name: "ade_computer",
+      command: computer.node,
+      args: [computer.mcpScript],
+      env: Object.entries(computer.env).map(([name, value]) => ({ name, value })),
+    },
+  ];
+}
+
 /** OpenCode: an inline config layered on the user's own (OPENCODE_CONFIG_CONTENT). */
 export function opencodeComputerEnv(computer, existing = process.env.OPENCODE_CONFIG_CONTENT) {
   if (!computer) return {};

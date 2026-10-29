@@ -43,16 +43,19 @@ export function writeLastModel(agentId: AgentId, model: string) {
 
 /**
  * Prefer an already-chosen model, else the last model for this agent, else the
- * first catalog entry. Empty string if nothing is available yet.
+ * first catalog entry. Empty string if nothing is available yet. A `complete`
+ * catalog (an ACP agent's own list) is all the agent accepts, so a last model
+ * outside it is skipped.
  */
 export function resolveModelForAgent(
   agentId: AgentId,
   catalogIds: string[],
   current: string,
+  complete = false,
 ): string {
   const trimmed = current.trim();
   if (trimmed) return trimmed;
   const last = readLastModel(agentId);
-  if (last) return last;
+  if (last && (!complete || catalogIds.includes(last))) return last;
   return catalogIds[0] ?? "";
 }

@@ -66,6 +66,75 @@ async function writeFileCache(cacheDir, fingerprint, entry) {
   } catch {}
 }
 
+// ACP agents have no list command: their model choices arrive in each
+// session's `configOptions`. ADE keeps the last list an agent reported, keyed
+// by CLI version; with none yet, `probeAcp` asks the agent (a session that is
+// never prompted). Turns refresh the list too.
+const ACP_MODEL_AGENTS = { claude: "Claude Code" };
+const acpModelsFile = (cacheDir, agentId) => path.join(cacheDir, `acp-models-${agentId}.json`);
+/** @type {Map<string, Promise<object[]>>} one probe per agent and version at a time */
+const acpProbes = new Map();
+
+const acpListed = (agentId, models) => ({
+  available: true,
+  models,
+  source: "acp",
+  command: `reported by ${ACP_MODEL_AGENTS[agentId]}`,
+});
+
+/** Record the model list an ACP agent offered (rows from acp.mjs); returns the rows kept. */
+export async function rememberAcpModels(cacheDir, agentId, version, models) {
+  const rows = models.filter((model) => MODEL_ID.test(model?.id ?? "")).slice(0, 200);
+  if (!rows.length) return rows;
+  try {
+    await fsp.mkdir(cacheDir, { recursive: true, mode: 0o700 });
+    await fsp.writeFile(
+      acpModelsFile(cacheDir, agentId),
+      JSON.stringify({ version, reportedAt: Date.now(), models: rows }, null, 2),
+      { mode: 0o600 },
+    );
+  } catch {}
+  return rows;
+}
+
+async function acpModels(cacheDir, agentId, version, probe) {
+  try {
+    const raw = JSON.parse(await fsp.readFile(acpModelsFile(cacheDir, agentId), "utf8"));
+    if (raw?.version === version && Array.isArray(raw.models) && raw.models.length)
+      return acpListed(agentId, raw.models);
+  } catch {}
+  if (!probe)
+    return {
+      available: false,
+      reason: "acp-not-reported",
+      hint: "It lists them once it is installed and signed in. You can also enter a model id manually.",
+    };
+  const key = `${agentId}|${version}`;
+  if (!acpProbes.has(key))
+    acpProbes.set(
+      key,
+      Promise.resolve()
+        .then(probe)
+        .then((rows) => rememberAcpModels(cacheDir, agentId, version, rows))
+        .finally(() => acpProbes.delete(key)),
+    );
+  try {
+    const rows = await acpProbes.get(key);
+    if (rows.length) return acpListed(agentId, rows);
+    return {
+      available: false,
+      reason: "acp-no-models",
+      hint: "It uses its own configured model. You can still enter a model id manually.",
+    };
+  } catch (error) {
+    return {
+      available: false,
+      reason: "acp-probe-failed",
+      hint: `${String(error?.message ?? error).slice(0, 300)} You can still enter a model id manually.`,
+    };
+  }
+}
+
 /** Parse `codex debug models` JSON. Only visibility === "list" is offered. */
 export function parseCodexModels(stdout) {
   let payload;
@@ -314,6 +383,8 @@ async function probe(agentId, run) {
  */
 export async function listModels(agentId, run, opts = {}) {
   const version = opts.version ?? "";
+  if (ACP_MODEL_AGENTS[agentId])
+    return acpModels(opts.cacheDir ?? "", agentId, version, opts.probeAcp);
   const key = `${agentId}|${version}`;
   const now = opts.now ?? Date.now();
   const cached = modelsCache.get(key);

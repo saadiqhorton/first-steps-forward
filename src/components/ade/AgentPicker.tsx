@@ -142,8 +142,13 @@ export function AgentPicker({
 }) {
   const { state } = useAde();
   const panelRef = useRef<HTMLDivElement>(null);
-  const [models, setModels] = useState<AgentModelsResult | null>(null);
-  const [modelsLoading, setModelsLoading] = useState(true);
+  // Tagged with its agent: right after a switch, the previous agent's list
+  // must never be read as the new agent's.
+  const [loaded, setLoaded] = useState<{ agentId: AgentId; result: AgentModelsResult } | null>(
+    null,
+  );
+  const models = loaded?.agentId === value.agentId ? loaded.result : null;
+  const modelsLoading = !models;
   const [caps, setCaps] = useState<OptionCapabilities | null>(null);
   const [showOther, setShowOther] = useState(false);
   const [otherText, setOtherText] = useState("");
@@ -160,23 +165,24 @@ export function AgentPicker({
 
   useEffect(() => {
     let cancelled = false;
-    setModelsLoading(true);
-    setModels(null);
+    const agentId = value.agentId;
     setShowOther(false);
     setOtherText("");
     setModelQuery("");
-    agentModels(value.agentId)
-      .then((r) => !cancelled && setModels(r))
+    agentModels(agentId)
+      .then((result) => !cancelled && setLoaded({ agentId, result }))
       .catch(
         (e) =>
           !cancelled &&
-          setModels({
-            available: false,
-            reason: "cli-failed",
-            hint: e instanceof Error ? e.message : String(e),
+          setLoaded({
+            agentId,
+            result: {
+              available: false,
+              reason: "cli-failed",
+              hint: e instanceof Error ? e.message : String(e),
+            },
           }),
-      )
-      .finally(() => !cancelled && setModelsLoading(false));
+      );
     return () => {
       cancelled = true;
     };
@@ -194,19 +200,30 @@ export function AgentPicker({
   }, [value.agentId, value.model]);
 
   useEffect(() => {
-    const listed = !!models?.models?.some((m) => m.id === value.model);
-    if (value.model && models?.available && !listed) {
-      setShowOther(true);
-      setOtherText(value.model);
+    if (!value.model || !models?.available) return;
+    const ids = (models.models ?? []).map((m) => m.id);
+    if (ids.includes(value.model)) return;
+    if (models.source === "acp") {
+      // The agent's own list is all it accepts: an id outside it (say, one
+      // remembered from another agent) would only fail the turn.
+      const resolved = resolveModelForAgent(value.agentId, ids, "", true);
+      if (resolved !== value.model) onChange({ ...value, model: resolved, effort: "", speed: "" });
+      return;
     }
-  }, [models, value.model]);
+    setShowOther(true);
+    setOtherText(value.model);
+  }, [models, onChange, value]);
 
   // Prefer last model for this agent/provider; fall back to first catalog entry.
   useEffect(() => {
-    if (value.model.trim()) return;
-    const catalogIds =
-      !modelsLoading && models?.available ? (models.models ?? []).map((m) => m.id) : [];
-    const resolved = resolveModelForAgent(value.agentId, catalogIds, "");
+    if (value.model.trim() || modelsLoading) return;
+    const catalogIds = models?.available ? (models.models ?? []).map((m) => m.id) : [];
+    const resolved = resolveModelForAgent(
+      value.agentId,
+      catalogIds,
+      "",
+      !!models?.available && models.source === "acp",
+    );
     if (!resolved) return;
     onChange({
       agentId: value.agentId,
@@ -236,9 +253,10 @@ export function AgentPicker({
         label: m.label && m.label !== m.id ? `${m.label} — ${m.id}` : m.id,
       });
     }
-    rows.push({ id: OTHER, label: "Other model id…" });
+    // An ACP agent's list is complete; it would reject any other id.
+    if (models?.source !== "acp") rows.push({ id: OTHER, label: "Other model id…" });
     return rows;
-  }, [listedModels]);
+  }, [listedModels, models?.source]);
 
   const filteredModelRows = useMemo(() => {
     const q = modelQuery.trim().toLowerCase();
@@ -520,13 +538,6 @@ export function AgentPicker({
                 </div>
               );
             })}
-            <div className="mb-0.5 rounded-md px-2 py-1.5 text-[12.5px] leading-snug text-dim opacity-60">
-              <div className="flex items-start gap-2">
-                <span className="mt-0.5 grid size-3.5 shrink-0 place-items-center" />
-                <span className="font-medium">Claude Code</span>
-              </div>
-              <div className="ml-[22px] mt-0.5 font-mono text-[10px]">Coming later</div>
-            </div>
           </div>
 
           {/* Model */}
@@ -599,6 +610,11 @@ export function AgentPicker({
                   {models.source === "bundled" && (
                     <p className="mt-1 px-2 font-mono text-[10px] text-dim">
                       Offline bundled catalog — may omit newer models.
+                    </p>
+                  )}
+                  {models.source === "acp" && (
+                    <p className="mt-1 px-2 font-mono text-[10px] text-dim">
+                      The models this agent reports offering.
                     </p>
                   )}
                 </div>

@@ -9,6 +9,9 @@ export const REASON_TEXT: Record<string, string> = {
   "no-providers-configured": "This CLI returned no models in its catalog.",
   empty: "The CLI returned an empty model list.",
   "unknown-agent": "Model listing is not supported for this agent.",
+  "acp-not-reported": "This agent has not listed its models yet.",
+  "acp-probe-failed": "ADE could not read this agent's model list.",
+  "acp-no-models": "This agent offers no model choice.",
 };
 
 /**
@@ -125,6 +128,11 @@ export function ModelPicker({
                 Pi's cached model catalog (no quota used) can list models from providers that are
                 not READY for Pi. The READY provider count shown by ADE comes from Pi's auth check,
                 not this model list. A listed model is not a guarantee of entitlement.
+              </>
+            ) : result.source === "acp" ? (
+              <>
+                The models {agentName} itself reports offering. ADE applies the one you pick through
+                the agent's own model setting.
               </>
             ) : (
               <>

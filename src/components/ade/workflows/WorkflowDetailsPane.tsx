@@ -13,6 +13,7 @@ function agentTagLabel(agentId?: Workflow["agentId"]) {
   if (agentId === "codex") return "Codex";
   if (agentId === "opencode") return "OpenCode";
   if (agentId === "pi") return "Pi";
+  if (agentId === "claude") return "Claude Code";
   return agentId;
 }
 
