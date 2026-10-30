@@ -2,17 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { codex, parseCodexModels } from "./adapters/codex.agent.mjs";
 import {
-  parseCodexModels,
+  opencode,
   parseOpencodeModels,
   parseOpencodeVerboseModels,
-  parsePiModels,
-  listModels,
-  clearModelsCache,
-  rememberAcpModels,
-  MODEL_ID,
-  PI_THINKING_LEVELS,
-} from "./models.mjs";
+} from "./adapters/opencode.agent.mjs";
+import { pi, parsePiModels, PI_THINKING_LEVELS } from "./adapters/pi.agent.mjs";
+import { acpModelListing, clearModelsCache, rememberAcpModels, MODEL_ID } from "./models.mjs";
 
 // Fixtures mirror the real shapes captured on this machine:
 // codex-cli 0.154.0 `codex debug models`, opencode 1.18.30 `opencode models`,
@@ -102,7 +99,7 @@ test("parsePiModels skips extension banner lines and parses the table", () => {
 test("Pi model catalog includes extension models without asserting their auth status", async () => {
   clearModelsCache();
   const run = fakeRun({ "--offline --list-models": { code: 0, stdout: PI_TABLE } });
-  const result = await listModels("pi", run, { version: "0.87.1" });
+  const result = await pi.listModels({ run, version: "0.87.1" });
   assert.equal(result.available, true);
   assert.deepEqual([...new Set(result.models.map((m) => m.id.split("/")[0]))].sort(), [
     "ollama-cloud",
@@ -146,18 +143,18 @@ const fakeRun = (responses) => {
 test("listModels caches per agent+version for the TTL and flags cache hits", async () => {
   clearModelsCache();
   const run = fakeRun({ "debug models": { code: 0, stdout: CODEX_JSON } });
-  const first = await listModels("codex", run, { version: "0.154.0", now: 1000 });
+  const first = await codex.listModels({ run, version: "0.154.0", now: 1000 });
   assert.equal(first.available, true);
   assert.equal(first.cached, undefined);
   assert.equal(first.source, "live");
-  const second = await listModels("codex", run, { version: "0.154.0", now: 2000 });
+  const second = await codex.listModels({ run, version: "0.154.0", now: 2000 });
   assert.equal(second.cached, true);
   assert.equal(run.calls.length, 1, "TTL hit must not re-spawn");
   // TTL expiry re-probes.
-  await listModels("codex", run, { version: "0.154.0", now: 62_000 });
+  await codex.listModels({ run, version: "0.154.0", now: 62_000 });
   assert.equal(run.calls.length, 2);
   // A different CLI version is a different cache key (no stale catalog).
-  await listModels("codex", run, { version: "0.155.0", now: 62_001 });
+  await codex.listModels({ run, version: "0.155.0", now: 62_001 });
   assert.equal(run.calls.length, 3);
 });
 
@@ -167,7 +164,7 @@ test("codex falls back to the bundled catalog when the live probe fails", async 
     "debug models": { code: 1, stdout: "", stderr: "cache refresh failed" },
     "debug models --bundled": { code: 0, stdout: CODEX_JSON },
   });
-  const result = await listModels("codex", run, { now: 1 });
+  const result = await codex.listModels({ run, now: 1 });
   assert.equal(result.available, true);
   assert.equal(result.source, "bundled");
   assert.equal(result.command, "codex debug models --bundled");
@@ -194,26 +191,26 @@ test("structured failures distinguish not-installed, cli-failed, and no provider
       child.on("error", (e) => resolve({ code: 127, stdout, stderr: `${stderr}${e.message}` }));
       child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
     });
-  const missing = await listModels("pi", strippedPathRun, { version: "none" });
+  const missing = await pi.listModels({ run: strippedPathRun, version: "none" });
   assert.equal(missing.available, false);
   assert.equal(missing.reason, "not-installed");
   assert.match(missing.hint, /enter a model id manually/i);
 
   clearModelsCache();
   const noPiRows = fakeRun({ "--offline --list-models": { code: 0, stdout: "" } });
-  const piEmpty = await listModels("pi", noPiRows, { version: "0.87.1" });
+  const piEmpty = await pi.listModels({ run: noPiRows, version: "0.87.1" });
   assert.equal(piEmpty.available, false);
   assert.match(piEmpty.hint, /does not indicate whether any provider is READY/);
 
   clearModelsCache();
   const failing = fakeRun({ default: { code: 1, stdout: "", stderr: "boom" } });
-  const cliFailed = await listModels("opencode", failing, { version: "1.18.30" });
+  const cliFailed = await opencode.listModels({ run: failing, version: "1.18.30" });
   assert.equal(cliFailed.available, false);
   assert.equal(cliFailed.reason, "cli-failed");
 
   clearModelsCache();
   const emptyList = fakeRun({ models: { code: 0, stdout: "\n" } });
-  const none = await listModels("opencode", emptyList, { version: "1.18.30" });
+  const none = await opencode.listModels({ run: emptyList, version: "1.18.30" });
   assert.equal(none.available, false);
   assert.equal(none.reason, "no-providers-configured");
 });
@@ -226,18 +223,18 @@ test("file cache under cacheDir survives the memory cache but not a version chan
     clearModelsCache();
     // Verbose probe fails to parse empty stdout, so the probe falls back to plain `models`.
     const run = fakeRun({ models: { code: 0, stdout: OPENCODE_LINES } });
-    const first = await listModels("opencode", run, { version: "1.18.30", cacheDir: dir });
+    const first = await opencode.listModels({ run, version: "1.18.30", cacheDir: dir });
     assert.equal(first.cached, undefined);
     assert.equal(run.calls.length, 2, "verbose then plain fallback");
     // Simulate a server restart: memory cache gone, file cache still fresh.
     clearModelsCache();
-    const second = await listModels("opencode", run, { version: "1.18.30", cacheDir: dir });
+    const second = await opencode.listModels({ run, version: "1.18.30", cacheDir: dir });
     assert.equal(second.cached, true);
     assert.equal(second.models.length, 4);
     assert.equal(run.calls.length, 2, "file cache hit must not re-spawn");
     // Upgraded CLI: fingerprint mismatch forces a re-probe (no stale rows).
     clearModelsCache();
-    await listModels("opencode", run, { version: "2.0.0", cacheDir: dir });
+    await opencode.listModels({ run, version: "2.0.0", cacheDir: dir });
     assert.equal(run.calls.length, 4);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -329,7 +326,7 @@ test("opencode probe prefers models --verbose and falls back to plain models", a
     // Cross-check against plain; same ids so verbose wins.
     models: { code: 0, stdout: "opencode/big-pickle\nopencode/ling-3.0-flash\n" },
   });
-  const verbose = await listModels("opencode", verboseRun, { version: "1.18.33", now: 1 });
+  const verbose = await opencode.listModels({ run: verboseRun, version: "1.18.33", now: 1 });
   assert.equal(verbose.available, true);
   assert.equal(verbose.command, "opencode models --verbose");
   assert.deepEqual(verbose.models[0].efforts, []);
@@ -344,7 +341,7 @@ test("opencode probe prefers models --verbose and falls back to plain models", a
     "models --verbose": { code: 0, stdout: "garbage" },
     models: { code: 0, stdout: OPENCODE_LINES },
   });
-  const fallback = await listModels("opencode", fallbackRun, { version: "1.18.33", now: 1 });
+  const fallback = await opencode.listModels({ run: fallbackRun, version: "1.18.33", now: 1 });
   assert.equal(fallback.available, true);
   assert.equal(fallback.command, "opencode models");
   assert.equal(fallback.models.length, 4);
@@ -363,7 +360,7 @@ test("opencode probe keeps plain ids when verbose returns a shorter list", async
       stdout: "opencode/big-pickle\nopencode/ling-3.0-flash\nopenrouter/openai/gpt-4o\n",
     },
   });
-  const result = await listModels("opencode", run, { version: "1.18.33", now: 1 });
+  const result = await opencode.listModels({ run, version: "1.18.33", now: 1 });
   assert.equal(result.available, true);
   assert.equal(result.command, "opencode models");
   assert.deepEqual(
@@ -383,7 +380,10 @@ test("ACP agents list the models they last reported, for the same CLI version on
     throw new Error("ACP agents have no list command to run");
   };
   try {
-    const before = await listModels("claude", neverRun, { version: "0.99.0", cacheDir: dir });
+    const before = await acpModelListing("claude", "Claude Code", {
+      version: "0.99.0",
+      cacheDir: dir,
+    });
     assert.equal(before.available, false);
     assert.equal(before.reason, "acp-not-reported");
     await rememberAcpModels(dir, "claude", "0.99.0", [
@@ -391,14 +391,20 @@ test("ACP agents list the models they last reported, for the same CLI version on
       { id: "opus", label: "Opus" },
       { id: "--flag-looking" },
     ]);
-    const after = await listModels("claude", neverRun, { version: "0.99.0", cacheDir: dir });
+    const after = await acpModelListing("claude", "Claude Code", {
+      version: "0.99.0",
+      cacheDir: dir,
+    });
     assert.equal(after.available, true);
     assert.equal(after.source, "acp");
     assert.deepEqual(
       after.models.map((m) => m.id),
       ["default", "opus"],
     );
-    const upgraded = await listModels("claude", neverRun, { version: "1.0.0", cacheDir: dir });
+    const upgraded = await acpModelListing("claude", "Claude Code", {
+      version: "1.0.0",
+      cacheDir: dir,
+    });
     assert.equal(upgraded.available, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -414,16 +420,16 @@ test("with no list yet, ACP agents are asked once and the answer is kept", async
   };
   try {
     let probes = 0;
-    const probeAcp = async () => {
+    const probe = async () => {
       probes++;
       await new Promise((resolve) => setTimeout(resolve, 10));
       return [{ id: "default", label: "Default" }, { id: "haiku" }];
     };
-    const opts = { version: "2.1.307", cacheDir: dir, probeAcp };
+    const opts = { version: "2.1.307", cacheDir: dir, probe };
     // The picker asks for models and capabilities together: one probe.
     const [first, second] = await Promise.all([
-      listModels("claude", neverRun, opts),
-      listModels("claude", neverRun, opts),
+      acpModelListing("claude", "Claude Code", opts),
+      acpModelListing("claude", "Claude Code", opts),
     ]);
     assert.equal(probes, 1);
     assert.equal(first.source, "acp");
@@ -432,24 +438,24 @@ test("with no list yet, ACP agents are asked once and the answer is kept", async
       ["default", "haiku"],
     );
     assert.deepEqual(second, first);
-    assert.equal((await listModels("claude", neverRun, opts)).available, true);
+    assert.equal((await acpModelListing("claude", "Claude Code", opts)).available, true);
     assert.equal(probes, 1);
 
     // A failed probe is reported, not kept: the next call asks again.
     const failing = async () => {
       throw new Error("Authentication required: sign in");
     };
-    const failed = await listModels("claude", neverRun, {
+    const failed = await acpModelListing("claude", "Claude Code", {
       version: "2.1.308",
       cacheDir: dir,
-      probeAcp: failing,
+      probe: failing,
     });
     assert.equal(failed.reason, "acp-probe-failed");
     assert.match(failed.hint, /^Authentication required: sign in/);
-    const none = await listModels("claude", neverRun, {
+    const none = await acpModelListing("claude", "Claude Code", {
       version: "2.1.308",
       cacheDir: dir,
-      probeAcp: async () => [],
+      probe: async () => [],
     });
     assert.equal(none.reason, "acp-no-models");
   } finally {

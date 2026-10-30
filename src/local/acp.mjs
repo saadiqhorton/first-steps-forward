@@ -271,6 +271,7 @@ const modelRows = (values) =>
  * The models an ACP agent offers, read from a session it opens but is never
  * prompted in (ACP has no listing method). Resolves with [] when it offers no
  * model choice. The caller owns the process, as for runAcpTurn.
+ * @param {{ child: any, name: string, cwd: string, sessionMeta?: object, clientVersion?: string }} options
  */
 export async function listAcpModels({ child, name, cwd, sessionMeta, clientVersion }) {
   const rpc = createRpc(child.stdout, child.stdin, {

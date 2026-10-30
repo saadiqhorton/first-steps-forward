@@ -3,12 +3,64 @@ import os from "node:os";
 import path from "node:path";
 import { COMPUTER_TOOL_NAMES } from "./computer-tools.mjs";
 import { defineCliAgent } from "./kit.mjs";
+import { MANUAL_HINT } from "../models.mjs";
+
+/** Thinking levels Pi accepts via `--thinking` (clamped per model by Pi itself). */
+export const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * Parse the `pi --list-models` fixed-width table.
+ * Pi extensions may print banner lines before the header, so we skip until a
+ * header row containing both "provider" and "model" and only then read rows
+ * of 5-6 whitespace-separated columns.
+ */
+export function parsePiModels(stdout) {
+  const lines = stdout.split(/\r?\n/);
+  let headerSeen = false;
+  const models = [];
+  for (const line of lines) {
+    const cols = line.trim().split(/\s+/).filter(Boolean);
+    if (!headerSeen) {
+      if (cols.includes("provider") && cols.includes("model")) headerSeen = true;
+      continue;
+    }
+    if (cols.length < 5 || cols.length > 6) continue;
+    const [provider, model, context, maxOut] = cols;
+    if (!provider || !model) continue;
+    const thinking = cols[4];
+    const meta = [context ? `context ${context}` : "", maxOut ? `max-out ${maxOut}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+    models.push({
+      id: `${provider}/${model}`,
+      label: model,
+      ...(meta ? { meta } : {}),
+      ...(thinking === "yes" ? { efforts: [...PI_THINKING_LEVELS] } : {}),
+    });
+  }
+  return models;
+}
 
 export const pi = defineCliAgent({
   id: "pi",
   name: "Pi Agent",
   short: "Pi",
   bin: "pi",
+  order: 3,
+  signIn: {
+    note: "Pi currently exposes sign-in through /login in its interactive TUI; it has no supported device-login command for ADE to launch. ADE does not collect or store provider credentials.",
+    command: "pi  →  /login",
+  },
+  harness: {
+    pkg: "@earendil-works/pi-coding-agent",
+    install: ["npm", ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"]],
+    update: ["pi", ["update", "--self"]],
+  },
+  permissionNotes: {
+    build: "Pi tools: read, edit, write, grep, find, ls (no shell).",
+    plan: "Pi read-only tools: read, grep, find, ls.",
+  },
+  notes: { effort: "Pi clamps the level to what the model supports." },
   authMethod: "Pi's /login command",
   authNote:
     "Pi provides /login inside its interactive TUI; it does not expose a supported browser/device login command for this UI. Sign in with `pi`, then choose /login.",
@@ -52,6 +104,36 @@ export const pi = defineCliAgent({
       // Keep original provider IDs for Pi's CLI, but never put control
       // characters or arbitrarily long store keys into the manifest/UI.
       account: `${ready.length} READY ${ready.length === 1 ? "provider" : "providers"}: ${ready.map((name) => (/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) ? name : "(unusual provider name)")).join(", ")}`,
+    };
+  },
+  /** The CLI's own cached model listing; never a network refresh, never quota. */
+  async probeModels(run) {
+    // Extensions stay enabled: providers can be registered by packages
+    // (e.g. pi-ollama-cloud registers the ollama-cloud provider), so
+    // stripping them here would hide models the agent can actually use.
+    // --offline only blocks forced network refreshes, matching the other
+    // CLI probes.
+    const result = await run("pi", ["--offline", "--list-models"], {
+      timeout: 20000,
+    });
+    if (result.code === 127)
+      return { available: false, reason: "not-installed", hint: MANUAL_HINT };
+    if (result.code !== 0) return { available: false, reason: "cli-failed", hint: MANUAL_HINT };
+    const models = parsePiModels(result.stdout);
+    if (!models.length)
+      return {
+        available: false,
+        reason: "no-providers-configured",
+        hint:
+          "Pi's cached model catalog has no models to list. This does not indicate whether any provider is READY. " +
+          MANUAL_HINT.toLowerCase(),
+      };
+    return {
+      available: true,
+      models,
+      source: "live",
+      command: "pi --offline --list-models",
+      note: "Pi's cached model catalog (no quota used) can list models from providers that are not READY for Pi. The READY provider count shown by ADE comes from Pi's auth check, not this model list. A listed model is not a guarantee of entitlement.",
     };
   },
   // Pi keeps each conversation in a session file under ADE's data folder.

@@ -5,38 +5,23 @@
 export const PERMISSIONS = ["build", "plan"];
 export const OPTION_VALUE = /^[a-z][a-z0-9_-]{0,31}$/;
 
-const PERMISSION_NOTES = {
-  codex: {
-    build: "Codex workspace-write sandbox: can edit files in this project.",
-    plan: "Codex read-only sandbox: reads and answers, cannot edit files.",
-  },
-  opencode: {
-    build: "Make changes using your configured OpenCode permissions.",
-    plan: "OpenCode plan agent: file edits and shell commands need approval, which ADE's non-interactive runs decline.",
-  },
-  pi: {
-    build: "Pi tools: read, edit, write, grep, find, ls (no shell).",
-    plan: "Pi read-only tools: read, grep, find, ls.",
-  },
-  claude: {
-    build: "Claude Code accepts file edits; shell commands and other actions ask you in ADE first.",
-    plan: "Claude Code plan mode: reads and plans, no edits. ADE declines any request to edit, run commands, or leave plan mode.",
-  },
-};
-
-export function optionCapabilities(agentId, model) {
+/**
+ * What an agent offers for one model: efforts and speeds come from the
+ * model's listing row; permissions are always Build and Plan, explained by
+ * the agent adapter's own notes.
+ * @param {{ permissionNotes?: { build: string, plan: string }, notes?: { effort?: string, speed?: string } } | undefined} agent
+ * @param {{ efforts?: string[], speeds?: string[] } | undefined} model
+ */
+export function optionCapabilities(agent, model) {
   const efforts = Array.isArray(model?.efforts) ? [...model.efforts] : [];
   const speeds = Array.isArray(model?.speeds) ? [...model.speeds] : [];
-  const notes = PERMISSION_NOTES[agentId] ?? { build: "", plan: "" };
+  const notes = agent?.permissionNotes ?? { build: "", plan: "" };
 
   let effortNote = "";
   if (!model) effortNote = "Pick a model to choose effort.";
-  else if (agentId === "pi" && efforts.length) {
-    effortNote = "Pi clamps the level to what the model supports.";
-  }
+  else if (efforts.length && agent?.notes?.effort) effortNote = agent.notes.effort;
 
-  let speedNote = "";
-  if (agentId === "opencode") speedNote = "OpenCode has no speed setting.";
+  const speedNote = agent?.notes?.speed ?? "";
 
   return {
     efforts,
@@ -48,8 +33,8 @@ export function optionCapabilities(agentId, model) {
   };
 }
 
-export function validateOptions(agentId, options = {}, model) {
-  const caps = optionCapabilities(agentId, model);
+export function validateOptions(agent, options = {}, model) {
+  const caps = optionCapabilities(agent, model);
   const value = {};
 
   for (const key of ["effort", "speed", "permission"]) {
@@ -64,8 +49,8 @@ export function validateOptions(agentId, options = {}, model) {
       return {
         ok: false,
         error:
-          key === "speed" && agentId === "opencode"
-            ? "OpenCode has no speed setting."
+          key === "speed" && caps.speedNote && !caps.speeds.length
+            ? caps.speedNote
             : `${key} "${raw}" is not available for this agent/model.`,
       };
     }

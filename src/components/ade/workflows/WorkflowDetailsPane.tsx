@@ -1,20 +1,17 @@
 import { useEffect, useState } from "react";
 import { Check, Clipboard, FilePenLine, Play, Sparkles, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import type { Workflow } from "@/lib/ade/types";
+import type { Agent, Workflow } from "@/lib/ade/types";
 import { warnUser } from "@/components/ade/NoticeDialog";
 import { copyText, isInsecureOrigin } from "@/lib/ade/clipboard";
+import { useAde } from "@/lib/ade/store";
 import { workflowAccent } from "./workflowFilters.mjs";
 
 const COPY_RESET_MS = 2000;
 
-function agentTagLabel(agentId?: Workflow["agentId"]) {
+function agentTagLabel(agentId: Workflow["agentId"], agents: Agent[]) {
   if (!agentId) return "Any agent";
-  if (agentId === "codex") return "Codex";
-  if (agentId === "opencode") return "OpenCode";
-  if (agentId === "pi") return "Pi";
-  if (agentId === "claude") return "Claude Code";
-  return agentId;
+  return agents.find((a) => a.id === agentId)?.short ?? agentId;
 }
 
 function permissionTagLabel(permission?: Workflow["permission"]) {
@@ -35,6 +32,7 @@ export function WorkflowDetailsPane({
   onEdit: (workflow: Workflow) => void;
   onDelete: (workflow: Workflow) => void;
 }) {
+  const { state } = useAde();
   const accent = workflowAccent(workflow.id);
   const builtIn = !!workflow.builtIn;
   const permissionLabel = permissionTagLabel(workflow.permission);
@@ -81,7 +79,7 @@ export function WorkflowDetailsPane({
         <div className="mt-3 flex flex-wrap gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 py-1 text-[11px] text-dim">
             <Sparkles className="size-3" aria-hidden />
-            {agentTagLabel(workflow.agentId)}
+            {agentTagLabel(workflow.agentId, state.agents)}
           </span>
           {permissionLabel ? (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 py-1 text-[11px] text-dim">

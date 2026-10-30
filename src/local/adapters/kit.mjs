@@ -1,13 +1,21 @@
 // @ts-check
-// The two ways an agent runs a turn, behind one adapter shape. An agent file
+// One adapter shape for every agent. An agent file (adapters/<id>.agent.mjs)
 // describes its agent with defineCliAgent (a CLI that prints JSON lines) or
-// defineAcpAgent (an agent that speaks the Agent Client Protocol); either way
-// the session turn module only ever calls `runTurn(input, io)` and hears back
-// session events and how the turn ended. Nothing here touches a session.
-import { runAcpTurn } from "../acp.mjs";
+// defineAcpAgent (an agent that speaks the Agent Client Protocol). Either way
+// the rest of ADE sees the same adapter:
+//
+// - its profile (see AgentProfile), which the UI renders as-is;
+// - detectAuth(run): whether the user is signed in;
+// - listModels(context): the agent's model listing;
+// - runTurn(input, io): one turn, reported as session events and how it ended.
+//
+// Nothing here touches a session.
+import { promises as fs } from "node:fs";
+import { commandLine } from "../harness.mjs";
+import { listAcpModels, runAcpTurn } from "../acp.mjs";
 import { acpBridge } from "../acp-bridge.mjs";
-import { rememberAcpModels } from "../models.mjs";
-import { findOnPath, runCommand, stopProcess } from "../spawn.mjs";
+import { acpModelListing, cliModelListing, MANUAL_HINT, rememberAcpModels } from "../models.mjs";
+import { findOnPath, runCommand, spawnCommand, stopProcess } from "../spawn.mjs";
 import { acpComputerServers } from "./computer-tools.mjs";
 
 /**
@@ -54,7 +62,55 @@ import { acpComputerServers } from "./computer-tools.mjs";
  * @property {(bin: string, args: string[], options?: { env?: Record<string, string>, stdin?: "pipe" | "ignore" }) => import("node:child_process").ChildProcess} spawn
  *   start the turn's process in the project; throws once the turn was interrupted
  * @property {AbortSignal} signal aborted when ADE stops the turn on purpose
+ *
+ * What ADE shows about an agent; plain data, served with each agent row.
+ * @typedef {object} AgentProfile
+ * @property {string} id
+ * @property {string} name
+ * @property {string} short
+ * @property {string} bin the user's own CLI on PATH
+ * @property {number} [order] position in agent lists (lower first)
+ * @property {string} tools what the agent can do in a turn, in plain words
+ * @property {string} authMethod
+ * @property {string} authNote
+ * @property {string} installHint
+ * @property {{ note: string, command?: string, device?: [string, string[]], waiting?: string }} signIn
+ *   how the user signs in: a `command` to run in a terminal, or a `device`
+ *   flow ADE starts itself (showing `waiting` while it runs)
+ * @property {{ pkg: string, install: [string, string[]], update: [string, string[]], selfUpdates?: boolean }} harness
+ *   how ADE installs and updates the CLI; `selfUpdates` when it updates itself
+ * @property {{ build: string, plan: string }} permissionNotes what Build and Plan mean for this agent
+ * @property {{ effort?: string, speed?: string }} [notes] caveats shown beside effort and speed
+ *
+ * Where a model listing comes from and how fresh it may be.
+ * @typedef {{ run?: typeof runCommand, version?: string, cacheDir?: string, now?: number, canProbe?: boolean }} ListingContext
  */
+
+/**
+ * The agent row the UI renders, before detection adds what is installed
+ * and signed in.
+ * @param {AgentProfile} agent
+ */
+export function describeAgent(agent) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    short: agent.short,
+    tools: agent.tools,
+    authMethod: agent.authMethod,
+    authNote: agent.authNote,
+    installHint: agent.installHint,
+    signIn: {
+      note: agent.signIn.note,
+      ...(agent.signIn.command ? { command: agent.signIn.command } : {}),
+      ...(agent.signIn.device ? { device: true, waiting: agent.signIn.waiting ?? "" } : {}),
+    },
+    harness: {
+      install: commandLine(agent.harness.install),
+      update: commandLine(agent.harness.update),
+    },
+  };
+}
 
 /** Calls `onLine` for each complete, non-blank line, buffering partial ones. */
 function lines(onLine) {
@@ -88,12 +144,24 @@ function exited(child) {
  * - `parse(line)` → the session events one stdout line carries.
  * - `stderr(line)` (optional) → session events a stderr line carries.
  * - `prepare(input)` (optional) runs before the process starts.
+ * - `probeModels(run)` (optional) → the CLI's own model listing.
  * @template {{ command: (input: TurnInput) => any[], parse: (line: string) => SessionEvent[], stderr?: (line: string) => SessionEvent[], prepare?: (input: TurnInput) => Promise<void> }} T
  * @param {T} spec
  */
 export function defineCliAgent(spec) {
   return {
     ...spec,
+    /** @param {ListingContext} context */
+    listModels({ run = runCommand, version, cacheDir, now } = {}) {
+      const probe = /** @type {any} */ (spec).probeModels;
+      if (!probe)
+        return Promise.resolve({ available: false, reason: "unsupported", hint: MANUAL_HINT });
+      return cliModelListing(/** @type {any} */ (spec).id, () => probe(run), {
+        version,
+        cacheDir,
+        now,
+      });
+    },
     /** @param {TurnInput} input @param {TurnIO} io @returns {Promise<TurnEnd>} */
     async runTurn(input, io) {
       await spec.prepare?.(input);
@@ -165,9 +233,46 @@ export async function acpLaunch(spec, { dataDir, onInstall }) {
  * @param {T} spec
  */
 export function defineAcpAgent(spec) {
+  /** The agent's models, from a session it opens and is never prompted in. */
+  async function probeModels(dataDir) {
+    const [bin, args, env = {}] = spec.command(await acpLaunch(spec, { dataDir }));
+    await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
+    const child = spawnCommand(bin, args, {
+      cwd: dataDir,
+      env: { ...process.env, ...env },
+      stdio: ["pipe", "pipe", "ignore"],
+      shell: false,
+    });
+    const timer = setTimeout(() => child.kill("SIGTERM"), 30000);
+    try {
+      return await listAcpModels({
+        child,
+        name: spec.name,
+        cwd: dataDir,
+        sessionMeta: spec.sessionMeta?.({ computer: false, ephemeral: true }),
+      });
+    } finally {
+      clearTimeout(timer);
+      child.stdin?.end();
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+      }, 3000).unref?.();
+    }
+  }
   return {
     ...spec,
-    protocol: "acp",
+    /**
+     * The models the agent last reported for this version; with `canProbe`
+     * (installed and signed in) it is asked when there is no list yet.
+     * @param {ListingContext} context
+     */
+    listModels({ version, cacheDir = "", canProbe = false } = {}) {
+      return acpModelListing(spec.id, spec.name, {
+        version,
+        cacheDir,
+        ...(canProbe ? { probe: () => probeModels(cacheDir) } : {}),
+      });
+    },
     /** @param {TurnInput} input @param {TurnIO} io @returns {Promise<TurnEnd>} */
     async runTurn(input, io) {
       const launch = await acpLaunch(spec, {

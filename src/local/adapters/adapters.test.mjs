@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { claude } from "./claude.mjs";
-import { codex } from "./codex.mjs";
-import { opencode } from "./opencode.mjs";
-import { pi } from "./pi.mjs";
+import { claude } from "./claude.agent.mjs";
+import { codex } from "./codex.agent.mjs";
+import { opencode } from "./opencode.agent.mjs";
+import { pi } from "./pi.agent.mjs";
 import { acpComputerServers } from "./computer-tools.mjs";
 
 const session = { id: "session-id", agentSessionId: undefined };
@@ -638,7 +638,6 @@ test("without a computer context nothing extra is passed", () => {
 });
 
 test("Claude Code runs over ACP: the bridge drives the user's own claude", async () => {
-  assert.equal(claude.protocol, "acp");
   assert.equal(claude.bin, "claude");
   assert.deepEqual(
     claude.command({

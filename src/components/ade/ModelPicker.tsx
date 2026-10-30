@@ -123,24 +123,19 @@ export function ModelPicker({
             </p>
           )}
           <p className="mt-1 text-[11px] leading-relaxed text-dim">
-            {agentId === "pi" ? (
-              <>
-                Pi's cached model catalog (no quota used) can list models from providers that are
-                not READY for Pi. The READY provider count shown by ADE comes from Pi's auth check,
-                not this model list. A listed model is not a guarantee of entitlement.
-              </>
-            ) : result.source === "acp" ? (
-              <>
-                The models {agentName} itself reports offering. ADE applies the one you pick through
-                the agent's own model setting.
-              </>
-            ) : (
-              <>
-                Read from {agentName}'s own cached catalog (no quota used); only providers
-                configured in that CLI are listed. A listed model is not a guarantee of entitlement
-                — availability depends on your account.
-              </>
-            )}{" "}
+            {result.note ??
+              (result.source === "acp" ? (
+                <>
+                  The models {agentName} itself reports offering. ADE applies the one you pick
+                  through the agent's own model setting.
+                </>
+              ) : (
+                <>
+                  Read from {agentName}'s own cached catalog (no quota used); only providers
+                  configured in that CLI are listed. A listed model is not a guarantee of
+                  entitlement — availability depends on your account.
+                </>
+              ))}{" "}
             Leaving this unset uses the agent's configured default.
           </p>
         </>

@@ -11,8 +11,7 @@ import {
   stopProcess as stopChild,
 } from "./spawn.mjs";
 import { adapters } from "./adapters/index.mjs";
-import { acpLaunch } from "./adapters/kit.mjs";
-import { listAcpModels } from "./acp.mjs";
+import { describeAgent } from "./adapters/kit.mjs";
 import { getDiff, projectInfo } from "./project-git.mjs";
 import { checksFor, packageManager } from "./project-scripts.mjs";
 import { addLog, addMessage, createSessionTurns, TurnRefused } from "./session-turns.mjs";
@@ -24,11 +23,9 @@ import { diagnoseLaunchFailure } from "./browser-host.mjs";
 import { TOOLS as COMPUTER_TOOLS } from "./computer-tools-defs.mjs";
 import { createBrowserStreamServer } from "./browser-stream-server.mjs";
 import { createControlRegistry, HumanControlError } from "./browser-control.mjs";
-import { listModels, MODEL_ID, clearModelsCache } from "./models.mjs";
+import { MODEL_ID, clearModelsCache } from "./models.mjs";
 import { optionCapabilities, validateOptions } from "./capabilities.mjs";
 import {
-  HARNESS,
-  commandLine,
   compareVersions,
   detectInstallMethod,
   latestVersion,
@@ -224,7 +221,7 @@ const harnessDetectDeps = {
 const harnessJobs = createHarnessJobs({
   spawn,
   onFinished: () => {
-    clearModelsCache(DATA_DIR);
+    clearModelsCache(DATA_DIR, Object.keys(adapters));
     agentStatus().catch(() => {});
   },
 });
@@ -234,19 +231,9 @@ async function agentStatus() {
     Object.values(adapters).map(async (adapter) => {
       const version = await executable(adapter.bin);
       const auth = version ? await adapter.detectAuth(run) : { signedIn: false };
-      const install = await detectInstallMethod(adapter.id, harnessDetectDeps);
-      const entry = HARNESS[adapter.id];
-      const harness = entry
-        ? { install: commandLine(entry.install), update: commandLine(entry.update) }
-        : { install: "", update: "" };
+      const install = await detectInstallMethod(adapter, harnessDetectDeps);
       const row = {
-        id: adapter.id,
-        name: adapter.name,
-        short: adapter.short,
-        tools: adapter.tools,
-        authMethod: adapter.authMethod,
-        authNote: adapter.authNote,
-        installHint: adapter.installHint,
+        ...describeAgent(adapter),
         installed: !!version,
         // "codex-cli 0.158.0" and "2.1.307 (Claude Code)" both report the number.
         ...(version
@@ -256,7 +243,6 @@ async function agentStatus() {
         carriesConversation: true,
         installMethod: install.method,
         ...(install.path ? { installPath: install.path } : {}),
-        harness,
       };
       return row;
     }),
@@ -273,9 +259,9 @@ async function agentStatus() {
   // Background, non-blocking latest-version checks — next bootstrap poll picks them up.
   for (const agent of results) {
     // A CLI that updates itself in place is never behind in a way ADE can fix.
-    if (HARNESS[agent.id]?.selfUpdates && agent.installMethod !== "npm") continue;
+    if (adapters[agent.id]?.harness.selfUpdates && agent.installMethod !== "npm") continue;
     void (async () => {
-      const latest = await latestVersion(agent.id, run);
+      const latest = await latestVersion(adapters[agent.id], run);
       if (latest == null) return;
       const current = state.agents.find((a) => a.id === agent.id);
       if (!current) return;
@@ -308,21 +294,12 @@ async function bootstrapAgents() {
     cached = JSON.parse(await fs.readFile(AGENTS_STATUS_FILE, "utf8"));
   } catch {}
   if (cached?.agents) {
-    // Caches written before agentStatus copied the adapter tools string lack
-    // it: backfill from the adapter so the context manifest names the real tool
-    // set immediately, while the background probe refreshes the rest.
-    state.agents = cached.agents.map((agent) => {
-      const entry = HARNESS[agent.id];
-      return {
-        ...agent,
-        tools: agent.tools ?? adapters[agent.id]?.tools,
-        harness:
-          agent.harness ??
-          (entry
-            ? { install: commandLine(entry.install), update: commandLine(entry.update) }
-            : undefined),
-      };
-    });
+    // What an agent is comes from its adapter, never from an older cache;
+    // only detection (installed, version, sign-in) is reused until the
+    // background probe refreshes it. Agents without an adapter are dropped.
+    state.agents = cached.agents
+      .filter((agent) => adapters[agent.id])
+      .map((agent) => ({ ...agent, ...describeAgent(adapters[agent.id]) }));
   }
   // Never make the project list wait on CLI version/auth probes. If there's
   // no cache yet, return the current (possibly empty) agent list; the normal
@@ -491,7 +468,7 @@ async function resolveSessionOptions(agentId, modelId, options) {
     modelId && listed?.available
       ? (listed.models?.find((m) => m.id === modelId) ?? { id: modelId })
       : undefined;
-  return validateOptions(agentId, options, modelRow);
+  return validateOptions(adapters[agentId], options, modelRow);
 }
 
 function syncOptionFields(session, value, cleared) {
@@ -501,45 +478,17 @@ function syncOptionFields(session, value, cleared) {
   }
 }
 
-/** An ACP agent's models, from a session it opens and is never prompted in. */
-async function probeAcpModels(adapter) {
-  const [bin, args, env] = adapter.command(await acpLaunch(adapter, { dataDir: DATA_DIR }));
-  await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
-  const child = spawn(bin, args, {
-    cwd: DATA_DIR,
-    env: { ...process.env, ...env },
-    stdio: ["pipe", "pipe", "ignore"],
-    shell: false,
-  });
-  const timer = setTimeout(() => child.kill("SIGTERM"), 30000);
-  try {
-    return await listAcpModels({
-      child,
-      name: adapter.name,
-      cwd: DATA_DIR,
-      sessionMeta: adapter.sessionMeta?.({ computer: false, ephemeral: true }),
-    });
-  } finally {
-    clearTimeout(timer);
-    child.stdin?.end();
-    setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-    }, 3000).unref?.();
-  }
-}
 /**
- * listModels for an agent at its detected version. An installed, signed-in
- * ACP agent is asked for its list when ADE has none for that version yet.
+ * An agent's model listing at its detected version. An installed, signed-in
+ * agent may be asked for its list when ADE has none for that version yet.
  */
 function listAgentModels(agentId) {
   const agent = state.agents.find((a) => a.id === agentId);
-  const adapter = adapters[agentId];
-  return listModels(agentId, run, {
+  return adapters[agentId].listModels({
+    run,
     version: agent?.version ?? "",
     cacheDir: DATA_DIR,
-    ...(adapter?.protocol === "acp" && agent?.installed && agent.signedIn
-      ? { probeAcp: () => probeAcpModels(adapter) }
-      : {}),
+    canProbe: !!(agent?.installed && agent.signedIn),
   });
 }
 /**
@@ -1726,18 +1675,16 @@ async function handle(req, res) {
     if (req.method === "POST" && parts[0] === "agents" && parts[2] === "login") {
       const agent = state.agents.find((a) => a.id === parts[1]);
       if (!agent?.installed) return json(res, 400, { error: "Install this CLI first." });
-      if (agent.id !== "codex")
+      // ADE starts only a sign-in the agent offers as a device flow; any
+      // other sign-in happens in the agent's own terminal UI.
+      const signIn = adapters[agent.id]?.signIn;
+      if (!signIn?.device)
         return json(res, 400, {
-          error:
-            agent.id === "opencode"
-              ? "OpenCode's provider chooser is interactive and has no stable non-interactive OAuth API. Run `opencode auth login` in a terminal; credentials are kept in OpenCode's user-level store."
-              : agent.id === "claude"
-                ? "Claude Code's sign-in opens a browser from its own CLI. Run `claude auth login` in a terminal; credentials stay in Claude Code's own store."
-                : "Pi's supported sign-in is the interactive /login command inside Pi. Run `pi`, then choose /login. ADE does not collect or store provider credentials.",
+          error: `${signIn?.note ?? `${agent.name} signs in from its own CLI.`}${signIn?.command ? ` Run \`${signIn.command}\` in a terminal.` : ""}`,
         });
       const existing = authChildren.get(agent.id);
       if (existing) return json(res, 200, { output: existing.output, running: true });
-      const child = spawn("codex", ["login", "--device-auth"], {
+      const child = spawn(signIn.device[0], signIn.device[1], {
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
       });
@@ -1906,7 +1853,7 @@ async function handle(req, res) {
         modelId && listed?.available
           ? (listed.models?.find((m) => m.id === modelId) ?? { id: modelId })
           : undefined;
-      return json(res, 200, optionCapabilities(agentId, modelRow));
+      return json(res, 200, optionCapabilities(adapters[agentId], modelRow));
     }
     if (
       parts[0] === "agents" &&
@@ -1914,7 +1861,7 @@ async function handle(req, res) {
       (parts[2] === "install" || parts[2] === "update" || parts[2] === "harness")
     ) {
       const agentId = parts[1];
-      if (!adapters[agentId] || !HARNESS[agentId])
+      if (!adapters[agentId])
         return json(res, 404, {
           error: `Unknown agent. Available: ${Object.keys(adapters).join(", ")}.`,
         });
@@ -1950,7 +1897,7 @@ async function handle(req, res) {
         });
       }
       try {
-        const job = harnessJobs.start(agentId, kind, HARNESS[agentId][kind]);
+        const job = harnessJobs.start(agentId, kind, adapters[agentId].harness[kind]);
         return json(res, 200, job);
       } catch (error) {
         if (error?.code === "BUSY") return json(res, 409, { error: error.message });
@@ -2002,6 +1949,14 @@ export function _setAgentsForTest(agents) {
 /** Test-only: read a live session without the bootstrap route's CLI probes. */
 export function _getSessionForTest(sessionId) {
   return state.sessions.find((item) => item.id === sessionId);
+}
+/**
+ * Test-only: whether a turn or checks run still holds the session's slot —
+ * including a stopped session whose run is winding down. A stopped session
+ * answers 409 to a new session in its project until this turns false.
+ */
+export function _sessionBusyForTest(sessionId) {
+  return turns.isBusy(_getSessionForTest(sessionId));
 }
 await load();
 // API request bodies are tiny JSON; anything larger is refused before it is

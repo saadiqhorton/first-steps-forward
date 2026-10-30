@@ -70,8 +70,18 @@ process.env.HOME = home;
 // tests would write into the real ~/.ade workspace.
 process.env.USERPROFILE = home;
 
-const { handleLocalApi, _setAgentsForTest } = await import("./ade-local.mjs");
+const { handleLocalApi, _setAgentsForTest, _sessionBusyForTest } = await import("./ade-local.mjs");
 _setAgentsForTest(seedAgents);
+
+// A stop returns before the interrupted turn has fully wound down; a new
+// session in the same project is refused until the slot is released.
+const settled = async (id) => {
+  const deadline = Date.now() + 15000;
+  while (_sessionBusyForTest(id)) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for session ${id} to settle.`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+};
 
 const callJson = async (urlPath, body) => {
   const method = body === undefined ? "GET" : "POST";
@@ -148,6 +158,7 @@ test("session create stores attachment metadata without paths in message text", 
   assert.ok(!msg.text.includes(".ade/attachments"));
 
   await callJson(`/api/sessions/${created.json.id}/stop`, {});
+  await settled(created.json.id);
 });
 
 test("follow-up message attaches metadata", async () => {

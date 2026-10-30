@@ -1,11 +1,58 @@
 import { codexComputerArgs } from "./computer-tools.mjs";
 import { defineCliAgent } from "./kit.mjs";
+import { MANUAL_HINT } from "../models.mjs";
+
+/** Parse `codex debug models` JSON. Only visibility === "list" is offered. */
+export function parseCodexModels(stdout) {
+  let payload;
+  try {
+    payload = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  const list = Array.isArray(payload?.models) ? payload.models : null;
+  if (!list) return null;
+  return list
+    .filter((m) => m?.visibility === "list" && typeof m.slug === "string" && m.slug)
+    .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
+    .map((m) => {
+      const row = { id: m.slug, ...(m.display_name ? { label: m.display_name } : {}) };
+      if (Array.isArray(m.supported_reasoning_levels)) {
+        const efforts = m.supported_reasoning_levels
+          .map((level) => level?.effort)
+          .filter((effort) => typeof effort === "string" && effort);
+        if (efforts.length) row.efforts = efforts;
+      }
+      if (typeof m.default_reasoning_level === "string" && m.default_reasoning_level) {
+        row.defaultEffort = m.default_reasoning_level;
+      }
+      if (Array.isArray(m.additional_speed_tiers) && m.additional_speed_tiers.length) {
+        row.speeds = m.additional_speed_tiers.filter((tier) => typeof tier === "string" && tier);
+      }
+      return row;
+    });
+}
 
 export const codex = defineCliAgent({
   id: "codex",
   name: "OpenAI Codex",
   short: "Codex",
   bin: "codex",
+  order: 1,
+  signIn: {
+    note: "Codex signs in with your ChatGPT account through its own device flow, which ADE can start for you.",
+    device: ["codex", ["login", "--device-auth"]],
+    waiting: "Waiting for Codex device sign-in… finish in the browser opened by Codex.",
+  },
+  harness: {
+    pkg: "@openai/codex",
+    install: ["npm", ["install", "-g", "@openai/codex"]],
+    update: ["codex", ["update"]],
+  },
+  permissionNotes: {
+    build: "Codex workspace-write sandbox: can edit files in this project.",
+    plan: "Codex read-only sandbox: reads and answers, cannot edit files.",
+  },
   authMethod: "ChatGPT sign-in (browser or device code)",
   authNote:
     "Codex CLI supports ChatGPT sign-in, including a device flow. Credentials remain in Codex's user-level auth store.",
@@ -16,6 +63,24 @@ export const codex = defineCliAgent({
     const signedIn =
       result.code === 0 && /logged in|signed in/i.test(result.stdout + result.stderr);
     return { signedIn, ...(signedIn ? { account: "Codex account" } : {}) };
+  },
+  /** The CLI's own cached model listing; never a network refresh, never quota. */
+  async probeModels(run) {
+    let result = await run("codex", ["debug", "models"], { timeout: 15000 });
+    let source = "live";
+    let command = "codex debug models";
+    if (result.code === 127)
+      return { available: false, reason: "not-installed", hint: MANUAL_HINT };
+    if (result.code !== 0) {
+      result = await run("codex", ["debug", "models", "--bundled"], { timeout: 15000 });
+      source = "bundled";
+      command = "codex debug models --bundled";
+      if (result.code !== 0) return { available: false, reason: "cli-failed", hint: MANUAL_HINT };
+    }
+    const models = parseCodexModels(result.stdout);
+    if (models === null) return { available: false, reason: "cli-failed", hint: MANUAL_HINT };
+    if (!models.length) return { available: false, reason: "empty", hint: MANUAL_HINT };
+    return { available: true, models, source, command };
   },
   command({
     projectPath,

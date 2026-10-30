@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import os from "node:os";
 import path from "node:path";
 import { acpBridge, bridgeDir } from "./acp-bridge.mjs";
-import { claude } from "./adapters/claude.mjs";
+import { claude } from "./adapters/claude.agent.mjs";
 
 const spec = claude.bridge;
 const entryIn = (dir) => path.join(dir, "node_modules", spec.pkg, spec.entry);

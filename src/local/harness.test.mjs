@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { adapters } from "./adapters/index.mjs";
 import {
-  HARNESS,
   commandLine,
   compareVersions,
   detectInstallMethod,
@@ -21,7 +21,10 @@ function fakeChild() {
   return child;
 }
 
-test("HARNESS lists npm install and vendor update argv for each agent", () => {
+test("each agent adapter lists its npm install and vendor update argv", () => {
+  const HARNESS = Object.fromEntries(
+    Object.values(adapters).map((adapter) => [adapter.id, adapter.harness]),
+  );
   assert.deepEqual(HARNESS.codex, {
     pkg: "@openai/codex",
     install: ["npm", ["install", "-g", "@openai/codex"]],
@@ -68,7 +71,7 @@ test("compareVersions does numeric dotted compare and strips prefixes", () => {
 });
 
 test("detectInstallMethod reports missing, npm, and other", async () => {
-  const missing = await detectInstallMethod("codex", {
+  const missing = await detectInstallMethod(adapters.codex, {
     which: async () => null,
     realpath: async () => {
       throw new Error("should not realpath");
@@ -78,7 +81,7 @@ test("detectInstallMethod reports missing, npm, and other", async () => {
   assert.deepEqual(missing, { method: "missing" });
 
   const npmRoot = "/home/u/.nvm/versions/node/v24/lib/node_modules";
-  const npm = await detectInstallMethod("codex", {
+  const npm = await detectInstallMethod(adapters.codex, {
     which: async (bin) => {
       assert.equal(bin, "codex");
       return "/home/u/.nvm/versions/node/v24/bin/codex";
@@ -92,7 +95,7 @@ test("detectInstallMethod reports missing, npm, and other", async () => {
   assert.equal(npm.method, "npm");
   assert.equal(npm.path, "/home/u/.nvm/versions/node/v24/bin/codex");
 
-  const other = await detectInstallMethod("opencode", {
+  const other = await detectInstallMethod(adapters.opencode, {
     which: async () => "/usr/local/bin/opencode",
     realpath: async () => "/opt/opencode/bin/opencode",
     npmRoot: async () => npmRoot,
@@ -100,7 +103,7 @@ test("detectInstallMethod reports missing, npm, and other", async () => {
   assert.equal(other.method, "other");
   assert.equal(other.path, "/usr/local/bin/opencode");
 
-  const noRoot = await detectInstallMethod("pi", {
+  const noRoot = await detectInstallMethod(adapters.pi, {
     which: async () => "/usr/bin/pi",
     realpath: async () => "/usr/bin/pi",
     npmRoot: async () => null,
@@ -117,19 +120,19 @@ test("latestVersion runs npm view, caches for one hour, null on failure", async 
     return { code: 0, stdout: "1.0.0\n", stderr: "" };
   };
 
-  const first = await latestVersion("codex", run, { now: 1_000 });
+  const first = await latestVersion(adapters.codex, run, { now: 1_000 });
   assert.equal(first, "0.159.2");
   assert.deepEqual(calls[0], ["npm", "view", "@openai/codex", "version"]);
 
-  const cached = await latestVersion("codex", run, { now: 1_000 + 3_600_000 - 1 });
+  const cached = await latestVersion(adapters.codex, run, { now: 1_000 + 3_600_000 - 1 });
   assert.equal(cached, "0.159.2");
   assert.equal(calls.length, 1, "must not re-query within the 1-hour TTL");
 
-  const refreshed = await latestVersion("codex", run, { now: 1_000 + 3_600_000 });
+  const refreshed = await latestVersion(adapters.codex, run, { now: 1_000 + 3_600_000 });
   assert.equal(refreshed, "0.159.2");
   assert.equal(calls.length, 2, "TTL expiry re-queries");
 
-  const failed = await latestVersion("opencode", run, { now: 1 });
+  const failed = await latestVersion(adapters.opencode, run, { now: 1 });
   assert.equal(failed, null);
 });
 
@@ -149,7 +152,7 @@ test("createHarnessJobs lifecycle: idle → running → succeeded with exitCode"
 
   assert.deepEqual(jobs.get("codex"), { status: "idle", command: "", output: [] });
 
-  const started = jobs.start("codex", "install", HARNESS.codex.install);
+  const started = jobs.start("codex", "install", adapters.codex.harness.install);
   assert.equal(started.status, "running");
   assert.equal(started.agentId, "codex");
   assert.equal(started.kind, "install");
@@ -179,7 +182,7 @@ test("createHarnessJobs marks non-zero exit as failed", async () => {
     },
     onFinished: () => {},
   });
-  jobs.start("pi", "update", HARNESS.pi.update);
+  jobs.start("pi", "update", adapters.pi.harness.update);
   child.emit("close", 7);
   await new Promise((r) => setImmediate(r));
   const job = jobs.get("pi");
@@ -197,13 +200,13 @@ test("createHarnessJobs throws BUSY when a job for the agent is already running"
     },
     onFinished: () => {},
   });
-  jobs.start("codex", "install", HARNESS.codex.install);
+  jobs.start("codex", "install", adapters.codex.harness.install);
   assert.throws(
-    () => jobs.start("codex", "update", HARNESS.codex.update),
+    () => jobs.start("codex", "update", adapters.codex.harness.update),
     (err) => err instanceof Error && err.code === "BUSY",
   );
   // A different agent can still start on the same runner.
-  assert.doesNotThrow(() => jobs.start("opencode", "install", HARNESS.opencode.install));
+  assert.doesNotThrow(() => jobs.start("opencode", "install", adapters.opencode.harness.install));
   for (const child of children) child.emit("close", 0);
 });
 
@@ -216,7 +219,7 @@ test("createHarnessJobs caps output at the last 400 lines and strips ANSI", asyn
     },
     onFinished: () => {},
   });
-  jobs.start("codex", "install", HARNESS.codex.install);
+  jobs.start("codex", "install", adapters.codex.harness.install);
   const lines = Array.from({ length: 450 }, (_, i) => `line-${i}`);
   child.stdout.emit("data", Buffer.from(`\x1b[31m${lines.join("\n")}\x1b[0m\n`));
   child.stderr.emit("data", Buffer.from("\x1b[1mwarn\x1b[0m\n"));
@@ -241,7 +244,7 @@ test("createHarnessJobs times out, kills the child, and marks failed", async () 
     onFinished: (job) => finished.push(job.status),
     timeoutMs: 30,
   });
-  jobs.start("opencode", "update", HARNESS.opencode.update);
+  jobs.start("opencode", "update", adapters.opencode.harness.update);
   await new Promise((r) => setTimeout(r, 80));
   const job = jobs.get("opencode");
   assert.equal(job.status, "failed");

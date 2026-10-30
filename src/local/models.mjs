@@ -1,14 +1,15 @@
 /**
- * Model catalog probes for the ADE model picker.
+ * Model listings for the ADE model picker: the rules every agent's listing
+ * follows, and the caches they share. Each agent adapter knows how to ask
+ * its own CLI (see adapters/*.agent.mjs).
  *
- * Every probe uses the CLI's own non-interactive list command, which reads
- * that CLI's local catalog cache. None of them consumes inference quota and
- * none is allowed to force a network refresh (`opencode models --refresh` and
- * `pi update --models` stay off this path). When listing is impossible we
- * return a structured failure with a reason; the UI then offers manual entry.
- * We never fabricate a list and never ship a static stand-in catalog in the
- * picker: provenance is either "live" (the CLI's own cached listing) or
- * "bundled" (codex's offline fallback shipped with the binary).
+ * A JSON-lines CLI is asked with its own non-interactive list command, which
+ * reads that CLI's local catalog cache. None of them consumes inference quota
+ * and none is allowed to force a network refresh. When listing is impossible
+ * the result is a structured failure with a reason; the UI then offers manual
+ * entry. ADE never fabricates a list and never ships a static stand-in
+ * catalog: provenance is "live" (the CLI's own cached listing), "bundled"
+ * (a fallback shipped with the CLI) or "acp" (reported by the agent itself).
  */
 import { promises as fsp } from "node:fs";
 import path from "node:path";
@@ -28,10 +29,9 @@ const CACHE_TTL_MS = 60_000;
 // probes (schema 2 only covered extension-provider pi listings).
 const FILE_CACHE_TTL_MS = 300_000;
 const FILE_CACHE_SCHEMA = 3;
-const modelsCache = new Map();
-
-/** Thinking levels Pi accepts via `--thinking` (clamped per model by Pi itself). */
-export const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+// Process-wide, like the browser installer: when Vite loads ADE's modules
+// twice, every copy reads and clears the same cache.
+const modelsCache = (globalThis.__adeModelsCache ??= new Map());
 
 async function readFileCache(cacheDir, fingerprint) {
   try {
@@ -47,7 +47,12 @@ async function readFileCache(cacheDir, fingerprint) {
       Array.isArray(raw?.models) &&
       Date.now() - Number(raw?.fetchedAt) < FILE_CACHE_TTL_MS
     )
-      return { models: raw.models, source: raw.source, command: raw.command };
+      return {
+        models: raw.models,
+        source: raw.source,
+        command: raw.command,
+        ...(raw.note ? { note: raw.note } : {}),
+      };
   } catch {}
   return null;
 }
@@ -68,18 +73,17 @@ async function writeFileCache(cacheDir, fingerprint, entry) {
 
 // ACP agents have no list command: their model choices arrive in each
 // session's `configOptions`. ADE keeps the last list an agent reported, keyed
-// by CLI version; with none yet, `probeAcp` asks the agent (a session that is
+// by CLI version; with none yet, `probe` asks the agent (a session that is
 // never prompted). Turns refresh the list too.
-const ACP_MODEL_AGENTS = { claude: "Claude Code" };
 const acpModelsFile = (cacheDir, agentId) => path.join(cacheDir, `acp-models-${agentId}.json`);
 /** @type {Map<string, Promise<object[]>>} one probe per agent and version at a time */
-const acpProbes = new Map();
+const acpProbes = (globalThis.__adeAcpModelProbes ??= new Map());
 
-const acpListed = (agentId, models) => ({
+const acpListed = (agentName, models) => ({
   available: true,
   models,
   source: "acp",
-  command: `reported by ${ACP_MODEL_AGENTS[agentId]}`,
+  command: `reported by ${agentName}`,
 });
 
 /** Record the model list an ACP agent offered (rows from acp.mjs); returns the rows kept. */
@@ -97,11 +101,23 @@ export async function rememberAcpModels(cacheDir, agentId, version, models) {
   return rows;
 }
 
-async function acpModels(cacheDir, agentId, version, probe) {
+/**
+ * An ACP agent's models: the list it last reported for this version, or
+ * (with `probe`) the list it reports when asked. One probe per agent and
+ * version runs at a time; a failed probe is reported, never kept.
+ * @param {string} agentId
+ * @param {string} agentName
+ * @param {{ version?: string, cacheDir?: string, probe?: () => Promise<object[]> }} opts
+ */
+export async function acpModelListing(
+  agentId,
+  agentName,
+  { version = "", cacheDir = "", probe } = {},
+) {
   try {
     const raw = JSON.parse(await fsp.readFile(acpModelsFile(cacheDir, agentId), "utf8"));
     if (raw?.version === version && Array.isArray(raw.models) && raw.models.length)
-      return acpListed(agentId, raw.models);
+      return acpListed(agentName, raw.models);
   } catch {}
   if (!probe)
     return {
@@ -120,7 +136,7 @@ async function acpModels(cacheDir, agentId, version, probe) {
     );
   try {
     const rows = await acpProbes.get(key);
-    if (rows.length) return acpListed(agentId, rows);
+    if (rows.length) return acpListed(agentName, rows);
     return {
       available: false,
       reason: "acp-no-models",
@@ -135,256 +151,23 @@ async function acpModels(cacheDir, agentId, version, probe) {
   }
 }
 
-/** Parse `codex debug models` JSON. Only visibility === "list" is offered. */
-export function parseCodexModels(stdout) {
-  let payload;
-  try {
-    payload = JSON.parse(stdout);
-  } catch {
-    return null;
-  }
-  const list = Array.isArray(payload?.models) ? payload.models : null;
-  if (!list) return null;
-  return list
-    .filter((m) => m?.visibility === "list" && typeof m.slug === "string" && m.slug)
-    .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
-    .map((m) => {
-      const row = { id: m.slug, ...(m.display_name ? { label: m.display_name } : {}) };
-      if (Array.isArray(m.supported_reasoning_levels)) {
-        const efforts = m.supported_reasoning_levels
-          .map((level) => level?.effort)
-          .filter((effort) => typeof effort === "string" && effort);
-        if (efforts.length) row.efforts = efforts;
-      }
-      if (typeof m.default_reasoning_level === "string" && m.default_reasoning_level) {
-        row.defaultEffort = m.default_reasoning_level;
-      }
-      if (Array.isArray(m.additional_speed_tiers) && m.additional_speed_tiers.length) {
-        row.speeds = m.additional_speed_tiers.filter((tier) => typeof tier === "string" && tier);
-      }
-      return row;
-    });
-}
-
-/** Parse `opencode models` plain lines of `provider/model`. */
-export function parseOpencodeModels(stdout) {
-  const ids = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !/\s/.test(line) && line.includes("/"));
-  return ids.length ? ids.map((id) => ({ id })) : [];
-}
-
-/**
- * Parse `opencode models --verbose`: each `provider/model` line followed by a
- * JSON object. Returns null when the stream cannot be parsed as that shape.
- */
-export function parseOpencodeVerboseModels(stdout) {
-  if (typeof stdout !== "string" || !stdout.trim()) return null;
-  const lines = stdout.split(/\r?\n/);
-  const models = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i].trim();
-    i += 1;
-    if (!line) continue;
-    if (/\s/.test(line) || !line.includes("/")) return null;
-    while (i < lines.length && !lines[i].trim()) i += 1;
-    if (i >= lines.length || lines[i].trim()[0] !== "{") return null;
-    let depth = 0;
-    let json = "";
-    for (; i < lines.length; i += 1) {
-      const raw = lines[i];
-      json += (json ? "\n" : "") + raw;
-      for (const ch of raw) {
-        if (ch === "{") depth += 1;
-        else if (ch === "}") depth -= 1;
-      }
-      if (depth === 0) {
-        i += 1;
-        break;
-      }
-    }
-    if (depth !== 0) return null;
-    let meta;
-    try {
-      meta = JSON.parse(json);
-    } catch {
-      return null;
-    }
-    const variants = meta?.variants;
-    const efforts =
-      variants && typeof variants === "object" && !Array.isArray(variants)
-        ? Object.keys(variants)
-        : [];
-    models.push({ id: line, efforts });
-  }
-  return models.length ? models : null;
-}
-
-/**
- * Parse the `pi --list-models` fixed-width table.
- * Pi extensions may print banner lines before the header, so we skip until a
- * header row containing both "provider" and "model" and only then read rows
- * of 5-6 whitespace-separated columns.
- */
-export function parsePiModels(stdout) {
-  const lines = stdout.split(/\r?\n/);
-  let headerSeen = false;
-  const models = [];
-  for (const line of lines) {
-    const cols = line.trim().split(/\s+/).filter(Boolean);
-    if (!headerSeen) {
-      if (cols.includes("provider") && cols.includes("model")) headerSeen = true;
-      continue;
-    }
-    if (cols.length < 5 || cols.length > 6) continue;
-    const [provider, model, context, maxOut] = cols;
-    if (!provider || !model) continue;
-    const thinking = cols[4];
-    const meta = [context ? `context ${context}` : "", maxOut ? `max-out ${maxOut}` : ""]
-      .filter(Boolean)
-      .join(" · ");
-    models.push({
-      id: `${provider}/${model}`,
-      label: model,
-      ...(meta ? { meta } : {}),
-      ...(thinking === "yes" ? { efforts: [...PI_THINKING_LEVELS] } : {}),
-    });
-  }
-  return models;
-}
-
-const MANUAL_HINT =
+export const MANUAL_HINT =
   "You can still enter a model id manually; availability depends on your account.";
 
-async function probe(agentId, run) {
-  if (agentId === "codex") {
-    let result = await run("codex", ["debug", "models"], { timeout: 15000 });
-    let source = "live";
-    let command = "codex debug models";
-    if (result.code === 127)
-      return { available: false, reason: "not-installed", hint: MANUAL_HINT };
-    if (result.code !== 0) {
-      result = await run("codex", ["debug", "models", "--bundled"], { timeout: 15000 });
-      source = "bundled";
-      command = "codex debug models --bundled";
-      if (result.code !== 0) return { available: false, reason: "cli-failed", hint: MANUAL_HINT };
-    }
-    const models = parseCodexModels(result.stdout);
-    if (models === null) return { available: false, reason: "cli-failed", hint: MANUAL_HINT };
-    if (!models.length) return { available: false, reason: "empty", hint: MANUAL_HINT };
-    return { available: true, models, source, command };
-  }
-  if (agentId === "opencode") {
-    // Never pass --refresh here: that is an opt-in network refresh elsewhere.
-    // Prefer --verbose so variant keys become efforts; fall back to plain lines.
-    // Large OpenRouter catalogs can take well over 20s; keep the budget generous
-    // so a mid-list kill cannot stick a truncated catalog in the file cache.
-    let result = await run("opencode", ["models", "--verbose"], { timeout: 60000 });
-    if (result.code === 127)
-      return { available: false, reason: "not-installed", hint: MANUAL_HINT };
-    let verboseModels = null;
-    if (result.code === 0) {
-      verboseModels = parseOpencodeVerboseModels(result.stdout);
-      if (verboseModels !== null && !verboseModels.length)
-        return {
-          available: false,
-          reason: "no-providers-configured",
-          hint:
-            "OpenCode lists only models from providers configured in its own auth store. Run `opencode auth login` in a terminal, or " +
-            MANUAL_HINT.toLowerCase(),
-        };
-    }
-    result = await run("opencode", ["models"], { timeout: 60000 });
-    if (result.code === 127)
-      return { available: false, reason: "not-installed", hint: MANUAL_HINT };
-    if (result.code !== 0) {
-      if (verboseModels?.length)
-        return {
-          available: true,
-          models: verboseModels,
-          source: "live",
-          command: "opencode models --verbose",
-        };
-      return { available: false, reason: "cli-failed", hint: MANUAL_HINT };
-    }
-    const plainModels = parseOpencodeModels(result.stdout);
-    if (!plainModels.length && !verboseModels?.length)
-      return {
-        available: false,
-        reason: "no-providers-configured",
-        hint:
-          "OpenCode lists only models from providers configured in its own auth store. Run `opencode auth login` in a terminal, or " +
-          MANUAL_HINT.toLowerCase(),
-      };
-    // Cross-check: an incomplete verbose stream can still parse (exit 0 with a
-    // short list). Prefer the complete plain id set and keep efforts from verbose.
-    if (verboseModels?.length && verboseModels.length >= plainModels.length)
-      return {
-        available: true,
-        models: verboseModels,
-        source: "live",
-        command: "opencode models --verbose",
-      };
-    if (verboseModels?.length) {
-      const effortsById = new Map(verboseModels.map((m) => [m.id, m.efforts]));
-      return {
-        available: true,
-        models: plainModels.map((m) => {
-          const efforts = effortsById.get(m.id);
-          return efforts ? { id: m.id, efforts } : m;
-        }),
-        source: "live",
-        command: "opencode models",
-      };
-    }
-    return { available: true, models: plainModels, source: "live", command: "opencode models" };
-  }
-  if (agentId === "pi") {
-    // Extensions stay enabled: providers can be registered by packages
-    // (e.g. pi-ollama-cloud registers the ollama-cloud provider), so
-    // stripping them here would hide models the agent can actually use.
-    // --offline only blocks forced network refreshes, matching the other
-    // CLI probes.
-    const result = await run("pi", ["--offline", "--list-models"], {
-      timeout: 20000,
-    });
-    if (result.code === 127)
-      return { available: false, reason: "not-installed", hint: MANUAL_HINT };
-    if (result.code !== 0) return { available: false, reason: "cli-failed", hint: MANUAL_HINT };
-    const models = parsePiModels(result.stdout);
-    if (!models.length)
-      return {
-        available: false,
-        reason: "no-providers-configured",
-        hint:
-          "Pi's cached model catalog has no models to list. This does not indicate whether any provider is READY. " +
-          MANUAL_HINT.toLowerCase(),
-      };
-    return {
-      available: true,
-      models,
-      source: "live",
-      command: "pi --offline --list-models",
-    };
-  }
-  return { available: false, reason: "unknown-agent", hint: MANUAL_HINT };
-}
-
 /**
- * List models for an agent. Two cache layers, both keyed by agent plus the
- * CLI's reported version string (opts.version), so an upgraded or replaced
- * binary never sees a stale catalog:
+ * A JSON-lines CLI's models, from `probe` (its own list command). Two cache
+ * layers, both keyed by agent plus the CLI's reported version, so an upgraded
+ * or replaced binary never sees a stale catalog:
  *  - in-memory, 60s TTL (hot path for the UI's polling);
  *  - file under opts.cacheDir (~/.ade, 0600), 300s TTL, survives restarts.
  * Cache hits carry `cached: true`. Failures are never cached into a list;
  * only successful probes are stored.
+ * @param {string} agentId
+ * @param {() => Promise<any>} probe
+ * @param {{ version?: string, cacheDir?: string, now?: number }} opts
  */
-export async function listModels(agentId, run, opts = {}) {
+export async function cliModelListing(agentId, probe, opts = {}) {
   const version = opts.version ?? "";
-  if (ACP_MODEL_AGENTS[agentId])
-    return acpModels(opts.cacheDir ?? "", agentId, version, opts.probeAcp);
   const key = `${agentId}|${version}`;
   const now = opts.now ?? Date.now();
   const cached = modelsCache.get(key);
@@ -397,23 +180,24 @@ export async function listModels(agentId, run, opts = {}) {
       return { ...result, cached: true };
     }
   }
-  const result = await probe(agentId, run);
+  const result = await probe();
   modelsCache.set(key, { at: now, result });
   if (result.available && opts.cacheDir && version)
     await writeFileCache(opts.cacheDir, key, {
       models: result.models,
       source: result.source,
       command: result.command,
+      ...(result.note ? { note: result.note } : {}),
     });
   return result;
 }
 
-export function clearModelsCache(cacheDir) {
+export function clearModelsCache(cacheDir, agentIds = []) {
   modelsCache.clear();
   if (!cacheDir) return;
   // Best-effort: drop on-disk catalogs so a truncated probe cannot linger for
   // the file TTL after an intentional clear (e.g. harness install/update).
-  for (const agentId of ["codex", "opencode", "pi"]) {
+  for (const agentId of agentIds) {
     fsp.unlink(path.join(cacheDir, `models-cache-${agentId}.json`)).catch(() => {});
   }
 }

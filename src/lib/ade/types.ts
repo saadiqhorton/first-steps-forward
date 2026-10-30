@@ -1,10 +1,12 @@
-export type AgentId = "codex" | "opencode" | "pi" | "claude";
+/** Agent ids come from the server's adapter files; any id it serves is valid. */
+export type AgentId = string;
 export type Permission = "build" | "plan";
 
 export interface Agent {
   id: AgentId;
   name: string;
   short: string;
+  tools: string;
   installed: boolean;
   version?: string;
   signedIn: boolean;
@@ -12,6 +14,8 @@ export interface Agent {
   providers?: string[];
   authMethod: string;
   authNote: string;
+  /** How the user signs in: a terminal `command`, or a `device` flow ADE starts itself. */
+  signIn: { note: string; command?: string; device?: boolean; waiting?: string };
   carriesConversation: boolean;
   installHint: string;
   installMethod?: "npm" | "other" | "missing";
@@ -156,6 +160,8 @@ export interface AgentModelsResult {
   reason?: string;
   hint?: string;
   cached?: boolean;
+  /** Agent-specific caveat about this listing, in the agent's own words. */
+  note?: string;
 }
 
 export interface Session {

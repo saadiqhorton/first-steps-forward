@@ -58,46 +58,30 @@ export function SignInDialog({ agent, onClose }: { agent: Agent; onClose: () => 
           ADE does not receive or store credentials. Provider/model usage may be billed by your
           provider.
         </p>
-        {agent.id === "codex" ? (
+        {agent.signIn?.device ? (
           <>
             {output && (
               <pre className="mt-4 max-h-40 overflow-auto rounded-md bg-deck p-3 font-mono text-[11px] text-deck-foreground">
                 {output}
               </pre>
             )}
-            {running && (
-              <p className="mt-3 text-[12px] text-teal">
-                Waiting for Codex device sign-in… finish in the browser opened by Codex.
-              </p>
-            )}
+            {running && <p className="mt-3 text-[12px] text-teal">{agent.signIn.waiting}</p>}
           </>
         ) : (
           <div className="mt-4 rounded-md bg-amber/10 p-3 text-[12px] leading-relaxed">
-            <p>
-              {agent.id === "opencode"
-                ? "OpenCode's provider selector requires an interactive terminal. ADE cannot safely fake or capture its OAuth login."
-                : agent.id === "claude"
-                  ? "Claude Code signs in through its own CLI, which opens a browser. Run this in a terminal; if you already use Claude Code here, you are probably signed in already."
-                  : "Pi currently exposes sign-in through /login in its interactive TUI; it has no supported device-login command for ADE to launch."}
-            </p>
-            <p className="mt-2 font-mono">
-              {agent.id === "opencode"
-                ? "opencode auth login"
-                : agent.id === "claude"
-                  ? "claude auth login"
-                  : "pi  →  /login"}
-            </p>
+            <p>{agent.signIn?.note ?? agent.authNote}</p>
+            {agent.signIn?.command && <p className="mt-2 font-mono">{agent.signIn.command}</p>}
           </div>
         )}
         {error && <p className="mt-3 text-[12px] text-danger">{error}</p>}
         <div className="mt-5 flex gap-2">
-          {agent.id === "codex" && !started && (
+          {agent.signIn?.device && !started && (
             <button className="btn-amber px-4 py-2 text-[13px]" onClick={begin}>
               Start device sign-in
             </button>
           )}
           <button className="btn-quiet ml-auto px-4 py-2 text-[13px]" onClick={onClose}>
-            {agent.id === "codex" && running ? "Close (continues)" : "Done"}
+            {agent.signIn?.device && running ? "Close (continues)" : "Done"}
           </button>
         </div>
       </div>

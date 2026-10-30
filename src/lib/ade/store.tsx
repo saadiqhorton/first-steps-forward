@@ -350,7 +350,7 @@ export function useActiveProject() {
       branch: "",
       ahead: 0,
       uncommittedFiles: [],
-      defaultAgent: "codex",
+      defaultAgent: "",
       addedAt: 0,
     } satisfies Project)
   );

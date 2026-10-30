@@ -27,7 +27,12 @@ export function NewTaskForm({
   const navigate = useNavigate();
   const project = state.projects.find((p) => p.id === projectId);
   const [selection, setSelection] = useState<AgentSelection>(() => ({
-    agentId: initialSelection?.agentId ?? project?.defaultAgent ?? "codex",
+    // The project's default agent, else the first ready one — never a hardcoded id.
+    agentId:
+      initialSelection?.agentId ??
+      (project?.defaultAgent || state.agents.find((a) => a.installed && a.signedIn)?.id) ??
+      state.agents[0]?.id ??
+      "",
     model: "",
     effort: "",
     speed: "",
@@ -100,6 +105,16 @@ export function NewTaskForm({
   useEffect(() => {
     if (selection.model.trim()) writeLastModel(selection.agentId, selection.model);
   }, [selection.agentId, selection.model]);
+
+  // A default that points nowhere — agents still loading at mount, or an
+  // agent that no longer exists — falls back to the first ready agent. A
+  // selection the user made is never overridden, even if it is not usable.
+  useEffect(() => {
+    if (state.agents.some((a) => a.id === selection.agentId)) return;
+    const fallback = state.agents.find((a) => a.installed && a.signedIn)?.id ?? state.agents[0]?.id;
+    if (!fallback) return;
+    setSelection((prev) => ({ ...prev, agentId: fallback, model: "", effort: "", speed: "" }));
+  }, [state.agents, selection.agentId]);
 
   useEffect(() => {
     if (!prefillWorkflowId || workflows.length === 0) return;

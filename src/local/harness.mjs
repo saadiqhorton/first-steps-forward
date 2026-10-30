@@ -1,5 +1,6 @@
 /**
- * Harness install/update jobs for ADE agent CLIs (Codex, OpenCode, Pi, Claude Code).
+ * Harness install/update jobs for ADE agent CLIs. What to install and how to
+ * update comes from each agent adapter's `harness` profile.
  *
  * Latest-version checks use `npm view <pkg> version` as a registry convention;
  * vendors do not document a dedicated "latest without install" API. Spawn is
@@ -10,41 +11,6 @@ import path from "node:path";
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_OUTPUT_LINES = 400;
 const LATEST_TTL_MS = 60 * 60 * 1000;
-
-/** @type {Record<string, { pkg: string, install: [string, string[]], update: [string, string[]], selfUpdates?: boolean }>} */
-export const HARNESS = {
-  codex: {
-    pkg: "@openai/codex",
-    install: ["npm", ["install", "-g", "@openai/codex"]],
-    update: ["codex", ["update"]],
-  },
-  opencode: {
-    pkg: "opencode-ai",
-    install: ["npm", ["install", "-g", "opencode-ai"]],
-    update: ["opencode", ["upgrade", "--method", "npm"]],
-  },
-  pi: {
-    pkg: "@earendil-works/pi-coding-agent",
-    install: ["npm", ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"]],
-    update: ["pi", ["update", "--self"]],
-  },
-  // Claude Code's documented npm update is a reinstall at @latest. Its
-  // native installer updates itself, so ADE flags no update for it
-  // (selfUpdates); the ACP bridge is ADE's own (acp-bridge.mjs).
-  claude: {
-    pkg: "@anthropic-ai/claude-code",
-    install: ["npm", ["install", "-g", "@anthropic-ai/claude-code"]],
-    update: ["npm", ["install", "-g", "@anthropic-ai/claude-code@latest"]],
-    selfUpdates: true,
-  },
-};
-
-const BIN = {
-  codex: "codex",
-  opencode: "opencode",
-  pi: "pi",
-  claude: "claude",
-};
 
 const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 
@@ -93,14 +59,14 @@ export function compareVersions(a, b) {
  * some other way. "npm" when the resolved binary path sits under
  * `${npmRoot}/${pkg}`.
  */
-export async function detectInstallMethod(agentId, deps) {
-  const bin = BIN[agentId];
+export async function detectInstallMethod(agent, deps) {
+  const bin = agent?.bin;
   if (!bin) return { method: "missing" };
   const whichPath = await deps.which(bin);
   if (!whichPath) return { method: "missing" };
   const npmRoot = await deps.npmRoot();
   if (!npmRoot) return { method: "other", path: whichPath };
-  const pkg = HARNESS[agentId]?.pkg;
+  const pkg = agent.harness?.pkg;
   if (!pkg) return { method: "other", path: whichPath };
   let resolved;
   try {
@@ -126,9 +92,10 @@ const latestCache = new Map();
  * Registry check via `npm view <pkg> version`. 1-hour in-memory cache.
  * Returns null on any failure (non-zero exit, missing agent, thrown run).
  */
-export async function latestVersion(agentId, run, { now = Date.now() } = {}) {
-  const entry = HARNESS[agentId];
+export async function latestVersion(agent, run, { now = Date.now() } = {}) {
+  const entry = agent?.harness;
   if (!entry) return null;
+  const agentId = agent.id;
   const cached = latestCache.get(agentId);
   if (cached && now - cached.at < LATEST_TTL_MS) return cached.version;
   try {

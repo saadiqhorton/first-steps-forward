@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { adapters } from "./adapters/index.mjs";
 import { PERMISSIONS, OPTION_VALUE, optionCapabilities, validateOptions } from "./capabilities.mjs";
 
 test("PERMISSIONS and OPTION_VALUE are fixed shapes", () => {
@@ -20,7 +21,7 @@ test("optionCapabilities lists efforts/speeds from the model and always offers p
     defaultEffort: "low",
     speeds: ["fast"],
   };
-  const codex = optionCapabilities("codex", codexModel);
+  const codex = optionCapabilities(adapters.codex, codexModel);
   assert.deepEqual(codex.efforts, ["low", "medium", "high"]);
   assert.deepEqual(codex.speeds, ["fast"]);
   assert.deepEqual(codex.permissions, ["build", "plan"]);
@@ -33,19 +34,19 @@ test("optionCapabilities lists efforts/speeds from the model and always offers p
     "Codex read-only sandbox: reads and answers, cannot edit files.",
   );
 
-  const noModel = optionCapabilities("codex", undefined);
+  const noModel = optionCapabilities(adapters.codex, undefined);
   assert.deepEqual(noModel.efforts, []);
   assert.deepEqual(noModel.speeds, []);
   assert.equal(noModel.effortNote, "Pick a model to choose effort.");
 
-  const listedNoEfforts = optionCapabilities("opencode", {
+  const listedNoEfforts = optionCapabilities(adapters.opencode, {
     id: "opencode/big-pickle",
     efforts: [],
   });
   assert.deepEqual(listedNoEfforts.efforts, []);
   assert.equal(listedNoEfforts.effortNote, "");
 
-  const openCode = optionCapabilities("opencode", {
+  const openCode = optionCapabilities(adapters.opencode, {
     id: "opencode/ling",
     efforts: ["low", "high"],
   });
@@ -61,7 +62,7 @@ test("optionCapabilities lists efforts/speeds from the model and always offers p
     "OpenCode plan agent: file edits and shell commands need approval, which ADE's non-interactive runs decline.",
   );
 
-  const pi = optionCapabilities("pi", {
+  const pi = optionCapabilities(adapters.pi, {
     id: "opencode-go/x",
     efforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
   });
@@ -75,28 +76,32 @@ test("validateOptions accepts listed values and rejects unknown, flag-like, and 
   const model = { id: "gpt-6-astra", efforts: ["low", "high"], speeds: ["fast"] };
 
   assert.deepEqual(
-    validateOptions("codex", { effort: "high", speed: "fast", permission: "plan" }, model),
+    validateOptions(adapters.codex, { effort: "high", speed: "fast", permission: "plan" }, model),
     {
       ok: true,
       value: { effort: "high", speed: "fast", permission: "plan" },
     },
   );
-  assert.deepEqual(validateOptions("codex", {}, model), { ok: true, value: {} });
+  assert.deepEqual(validateOptions(adapters.codex, {}, model), { ok: true, value: {} });
 
-  const unknownEffort = validateOptions("codex", { effort: "ultra" }, model);
+  const unknownEffort = validateOptions(adapters.codex, { effort: "ultra" }, model);
   assert.equal(unknownEffort.ok, false);
   assert.match(unknownEffort.error, /effort/i);
 
-  const flagLike = validateOptions("codex", { effort: "--x" }, model);
+  const flagLike = validateOptions(adapters.codex, { effort: "--x" }, model);
   assert.equal(flagLike.ok, false);
   assert.match(flagLike.error, /invalid|effort|--x/i);
 
-  const openSpeed = validateOptions("opencode", { speed: "fast" }, { id: "x", efforts: ["low"] });
+  const openSpeed = validateOptions(
+    adapters.opencode,
+    { speed: "fast" },
+    { id: "x", efforts: ["low"] },
+  );
   assert.equal(openSpeed.ok, false);
   assert.match(openSpeed.error, /speed/i);
 
   const badPermission = validateOptions(
-    "pi",
+    adapters.pi,
     { permission: "yolo" },
     { id: "x", efforts: ["low"] },
   );
