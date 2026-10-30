@@ -351,21 +351,37 @@ test("a turn that exits 0 with no reply says so and stays ready", { skip }, asyn
 });
 
 test(
-  "switching agents restarts the task on the new agent without its model",
+  "model and provider changes do not start a CLI until the user sends a message",
   { skip },
   async () => {
     const id = await start("p-switch", "text", { model: "gpt-5.5", effort: "high" });
     await waitFor(() => settled(id), "the first turn");
-    const switched = await call(`/api/sessions/${id}/switch-agent`, { agentId: "opencode" });
+    const modelChanged = await call(`/api/sessions/${id}/model`, { model: "gpt-5.6-sol" });
+    assert.equal(modelChanged.status, 200);
+    assert.equal(modelChanged.json.status, "ready");
+    assert.equal(turns("p-switch").length, 1);
+
+    const switched = await call(`/api/sessions/${id}/switch-agent`, {
+      agentId: "opencode",
+      model: "opencode-go/gpt-5.6-luna",
+      permission: "build",
+    });
     assert.equal(switched.status, 200);
     assert.equal(switched.json.carriesConversation, false);
+    assert.equal(switched.json.status, "ready");
+    assert.equal(switched.json.model, "opencode-go/gpt-5.6-luna");
+    assert.equal(turns("p-switch").length, 1);
+    assert.match(systemTexts(switched.json).at(-1), /No agent turn was started/);
+
+    const message = await call(`/api/sessions/${id}/messages`, { text: "keep going" });
+    assert.equal(message.status, 200);
     const done = await waitFor(
       () => turns("p-switch").length === 2 && settled(id),
-      "the switched turn",
+      "the first OpenCode turn",
     );
     assert.equal(done.status, "ready");
     assert.equal(done.agentId, "opencode");
-    assert.equal(done.model, undefined);
+    assert.equal(done.model, "opencode-go/gpt-5.6-luna");
     assert.equal(done.effort, undefined);
     assert.ok(
       systemTexts(done).some((t) => t.startsWith("Switched from OpenAI Codex to OpenCode")),
@@ -373,11 +389,14 @@ test(
     const second = turns("p-switch")[1];
     assert.equal(second.agent, "opencode");
     assert.match(promptOf(second), /A different coding agent worked on this task before you/);
+    assert.match(promptOf(second), /Original request: tidy the readme wording/);
+    assert.match(promptOf(second), /User follow-up: keep going/);
+    assert.ok(second.args.includes("opencode-go/gpt-5.6-luna"));
   },
 );
 
 test(
-  "a message sent right after an agent switch waits for the switched turn",
+  "a message sent right after an agent switch starts exactly one fresh turn",
   { skip },
   async () => {
     const id = await start("p-switch-race");
@@ -387,18 +406,15 @@ test(
     await call(`/api/sessions/${id}/switch-agent`, { agentId: "opencode" });
     const followUp = await call(`/api/sessions/${id}/messages`, { text: "and the footer" });
     assert.equal(followUp.status, 200);
-    await waitFor(() => turns("p-switch-race").length >= 2, "the switched turn to start");
-    // Give a wrongly started second turn time to show up.
+    await waitFor(() => turns("p-switch-race").length === 2, "the user-requested turn to start");
+    // Give a wrongly auto-started provider turn time to show up.
     await sleep(500);
     assert.equal(turns("p-switch-race").length, 2, "only one turn runs at a time");
     process.env.FAKE_CLI_SCENARIO = "text";
     open();
-    const done = await waitFor(
-      () => turns("p-switch-race").length === 3 && settled(id),
-      "the follow-up turn",
-    );
+    const done = await waitFor(() => settled(id), "the user-requested turn");
     assert.equal(done.status, "ready");
-    assert.match(promptOf(turns("p-switch-race")[2]), /Task: and the footer$/);
+    assert.match(promptOf(turns("p-switch-race")[1]), /User follow-up: and the footer/);
   },
 );
 
@@ -514,7 +530,10 @@ test(
 
     // Pi gets the same browser, as a Pi extension.
     process.env.FAKE_CLI_SCENARIO = "text";
-    await call(`/api/sessions/${id}/switch-agent`, { agentId: "pi" });
+    const switched = await call(`/api/sessions/${id}/switch-agent`, { agentId: "pi" });
+    assert.equal(switched.json.status, "ready");
+    assert.equal(turns("p-manifest").length, 1);
+    await call(`/api/sessions/${id}/messages`, { text: "continue with Pi" });
     await waitFor(() => turns("p-manifest").length === 2 && settled(id), "the Pi turn");
     const piArgs = turns("p-manifest")[1].args;
     assert.ok(

@@ -1351,7 +1351,37 @@ async function handle(req, res) {
         return json(res, 200, await turns.send(s, { text, files }, when));
       } else if (parts[2] === "switch-agent") {
         const data = await body(req);
-        const switched = await turns.switchAgent(s, String(data.agentId ?? ""));
+        if (s.status === "complete")
+          return json(res, 409, { error: "Reopen this session before switching agents." });
+        if (turns.isBusy(s))
+          return json(res, 409, {
+            error: "Stop or wait for the current CLI turn to finish before switching agents.",
+          });
+        const agentId = String(data.agentId ?? "");
+        if (!adapters[agentId])
+          return json(res, 400, {
+            error: `Unknown agent. Available: ${Object.keys(adapters).join(", ")}.`,
+          });
+        const model = String(data.model ?? "").trim();
+        if (model && !MODEL_ID.test(model))
+          return json(res, 400, {
+            error:
+              "Model ids must start with a letter or digit and may then contain letters, digits, and . _ / : [ ] - + (max 256 characters), so they can never read as a CLI flag. Nothing was changed.",
+          });
+        const optionInput = {};
+        const cleared = new Set();
+        for (const key of ["effort", "speed", "permission"]) {
+          const raw = data[key];
+          if (raw === undefined || raw === null || raw === "") cleared.add(key);
+          else optionInput[key] = raw;
+        }
+        const optionCheck = await resolveSessionOptions(agentId, model || undefined, optionInput);
+        if (!optionCheck.ok) return json(res, 400, { error: optionCheck.error });
+        const switched = await turns.switchAgent(s, agentId, {
+          model: model || undefined,
+          options: optionCheck.value,
+          cleared,
+        });
         return json(res, 200, { ...switched, carriesConversation: false });
       } else if (parts[2] === "stop") {
         return json(res, 200, await turns.stop(s));

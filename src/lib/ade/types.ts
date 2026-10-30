@@ -183,6 +183,8 @@ export interface Session {
   updatedAt: number;
   completedAt?: number;
   agentSessionId?: string;
+  /** A provider was selected, but its first turn is waiting for a user message. */
+  agentStartFresh?: boolean;
   model?: string;
   effort?: string;
   speed?: string;

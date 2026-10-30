@@ -41,7 +41,7 @@ import { acpComputerServers } from "./computer-tools.mjs";
  * @typedef {object} TurnInput
  * @property {string} projectPath the project folder, also the working directory
  * @property {string} prompt the full prompt: safety preamble, context manifest and task
- * @property {{ id: string, agentSessionId?: string }} session ADE's session id, and the agent's own conversation id
+ * @property {{ id: string, agentSessionId?: string, agentSessionKey?: string }} session ADE's session id, the agent's own conversation id, and an optional provider-local session key
  * @property {boolean} continuing a follow-up in the same conversation
  * @property {string} dataDir ADE's data folder (~/.ade)
  * @property {string[]} [providers] providers the agent reported ready

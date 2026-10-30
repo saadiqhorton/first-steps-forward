@@ -151,6 +151,15 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
     addLog(session, "Switching to your message.");
   };
 
+  /** Add the original request to the first turn after switching providers. */
+  function agentHandoffPrompt(session, prompt) {
+    return (
+      `A different coding agent worked on this task before you. Review the current repository state and continue or finish it. Original request: ${session.request}` +
+      (session.criteria ? `\nAcceptance criteria: ${session.criteria}` : "") +
+      `\n\nUser follow-up: ${prompt}`
+    );
+  }
+
   /**
    * After a run, in this order: the "send now" message, then the queue, then
    * `settle` (the run's own outcome). A stopped or completed session keeps
@@ -169,7 +178,13 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
         // Queued turns only carry the path appendix in text; native CLI flags
         // apply to the immediately spawned turn, not to drained queue entries.
         const prompt = queue.join("\n\n");
-        return begin(session, renew(session), { prompt, continuing: true, attachments: [] });
+        const fresh = session.agentStartFresh === true;
+        delete session.agentStartFresh;
+        return begin(session, renew(session), {
+          prompt: fresh ? agentHandoffPrompt(session, prompt) : prompt,
+          continuing: !fresh,
+          attachments: [],
+        });
       }
       settle();
     }
@@ -359,7 +374,11 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
         {
           projectPath: project.path,
           prompt: `${SAFETY_PREAMBLE}${manifestLine(session, project)}\n\nTask: ${prompt}`,
-          session: { id: session.id, agentSessionId: session.agentSessionId },
+          session: {
+            id: session.id,
+            agentSessionId: session.agentSessionId,
+            agentSessionKey: session.agentSessionKey,
+          },
           continuing,
           dataDir,
           providers: agent.providers,
@@ -485,7 +504,9 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
      */
     async send(session, { text, files = [] }, when = "later") {
       refuseIfComplete(session, "sending a message");
-      const prompt = `${text}${formatAttachmentPrompt(files)}`;
+      const fresh = session.agentStartFresh === true;
+      const rawPrompt = `${text}${formatAttachmentPrompt(files)}`;
+      const prompt = fresh ? agentHandoffPrompt(session, rawPrompt) : rawPrompt;
       addMessage(session, "user", text, attachmentMeta(files));
       if (busy(session)) {
         if (when === "now") steer(session, prompt);
@@ -497,12 +518,13 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
         return session;
       }
       const slot = /** @type {NonNullable<ReturnType<typeof claim>>} */ (claim(session));
-      session.queuedMessages = [];
+      if (!fresh) session.queuedMessages = [];
+      delete session.agentStartFresh;
       setStatus(session, "working");
       await save();
       void runTurn(session, slot, {
         prompt,
-        continuing: true,
+        continuing: !fresh,
         attachments: nativeAttachments(files),
       });
       return session;
@@ -519,9 +541,16 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
       else {
         addLog(session, "Sending the waiting message.");
         const slot = /** @type {NonNullable<ReturnType<typeof claim>>} */ (claim(session));
+        const fresh = session.agentStartFresh === true;
+        const freshPrompt = fresh ? agentHandoffPrompt(session, prompt) : prompt;
+        delete session.agentStartFresh;
         setStatus(session, "working");
         await save();
-        void runTurn(session, slot, { prompt, continuing: true, attachments: [] });
+        void runTurn(session, slot, {
+          prompt: freshPrompt,
+          continuing: !fresh,
+          attachments: [],
+        });
         return session;
       }
       await save();
@@ -584,12 +613,13 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
     },
 
     /**
-     * Hand the task to another agent: a fresh conversation that starts with
-     * the repository as it is. The model and its settings belong to the
-     * previous agent's catalog and are dropped.
+     * Change the selected agent and its options without starting a turn. The
+     * next user message starts a fresh agent conversation against the current
+     * repository state.
      * @param {Session} session @param {string} agentId
+     * @param {{ model?: string, options?: Record<string, string>, cleared?: Set<string> }} [selection]
      */
-    async switchAgent(session, agentId) {
+    async switchAgent(session, agentId, selection = {}) {
       const target = state.agents.find((a) => a.id === agentId);
       if (!target?.installed || !target.signedIn)
         throw new TurnRefused(
@@ -603,40 +633,51 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
           "Stop or wait for the current CLI turn to finish before switching agents.",
         );
       refuseIfComplete(session, "switching agents");
-      const slot = /** @type {NonNullable<ReturnType<typeof claim>>} */ (claim(session));
       const from = state.agents.find((a) => a.id === session.agentId);
+      // A previous provider failure no longer describes the newly selected
+      // agent. Keep the session idle until the user explicitly sends a turn.
+      if (session.status === "blocked") setStatus(session, "stopped");
+      delete session.failureKind;
       session.createdBy = session.agentId;
       session.agentId = target.id;
       session.agentSessionId = undefined;
+      // Pi stores conversations by file path instead of returning a resumable
+      // conversation id. A new key prevents switching back from reopening its
+      // previous provider conversation.
+      session.agentSessionKey = randomUUID();
       delete session.acpDefaultModel;
       // Effort and speed are model-scoped too: a level valid for the old CLI
       // (e.g. Pi's "high") can map to a flag the new CLI rejects outright.
       const droppedModel = session.model;
       const droppedEffort = session.effort;
       const droppedSpeed = session.speed;
-      delete session.model;
-      delete session.effort;
-      delete session.speed;
+      if (selection.model) session.model = selection.model;
+      else delete session.model;
+      for (const key of ["effort", "speed", "permission"]) {
+        if (selection.cleared?.has(key)) delete session[key];
+        else if (selection.options?.[key] !== undefined) session[key] = selection.options[key];
+        else delete session[key];
+      }
+      session.agentStartFresh = true;
       addMessage(
         session,
         "system",
-        `Switched from ${from?.name ?? session.createdBy} to ${target.name}. The new CLI starts fresh: repository state, the task, and the current diff carry over, but the prior conversation does not.` +
+        `Switched from ${from?.name ?? session.createdBy} to ${target.name}. No agent turn was started. The new agent will start a fresh conversation when you send a message; the repository state, task, and current diff carry over, but the prior conversation does not.` +
           (droppedModel
-            ? ` The selected model (${droppedModel}) belonged to the previous agent and was dropped; ${target.name} starts with its own configured default.`
-            : " The model resets to the new agent's configured default.") +
+            ? ` The previous model (${droppedModel}) belonged to the old agent.`
+            : "") +
+          (selection.model
+            ? ` The selected model is "${selection.model}".`
+            : ` ${target.name} will use its configured default model.`) +
           (droppedEffort || droppedSpeed
-            ? ` Its model settings (${[droppedEffort && `effort ${droppedEffort}`, droppedSpeed && `speed ${droppedSpeed}`].filter(Boolean).join(", ")}) were cleared too, because they are tied to the previous agent's model.`
+            ? " The previous model's effort and speed settings were replaced with the new agent's selections."
             : ""),
       );
       addLog(
         session,
-        `agent switch: ${from?.short ?? session.createdBy} → ${target.short} (conversation not carried)`,
+        `agent switch: ${from?.short ?? session.createdBy} → ${target.short} (no agent turn started; conversation not carried)`,
       );
-      await begin(session, slot, {
-        prompt: `A different coding agent worked on this task before you. Review the current repository state and continue or finish the task. Original request: ${session.request}${session.criteria ? `\nAcceptance criteria: ${session.criteria}` : ""}`,
-        continuing: false,
-        attachments: [],
-      });
+      await save();
       return session;
     },
 

@@ -152,7 +152,7 @@ export const pi = defineCliAgent({
     attachments,
     computer,
   }) {
-    const sessionFile = `${dataDir}/sessions/${session.id}.jsonl`;
+    const sessionFile = `${dataDir}/sessions/${session.agentSessionKey ?? session.id}.jsonl`;
     const fileTools = permission === "plan" ? "read,grep,find,ls" : "read,edit,write,grep,find,ls";
     // Pi has no MCP client: ADE's agent computer arrives as a Pi extension
     // (-e) with its tool names added to the allowlist.

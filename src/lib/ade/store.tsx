@@ -68,7 +68,11 @@ type Api = {
   reopen: (sessionId: string) => void;
   stop: (sessionId: string) => void;
   answerPermission: (sessionId: string, requestId: string, optionId: string) => Promise<void>;
-  switchAgent: (sessionId: string, agentId: AgentId) => Promise<void>;
+  switchAgent: (
+    sessionId: string,
+    agentId: AgentId,
+    selection: { model: string; effort: string; speed: string; permission: Permission },
+  ) => Promise<void>;
   setSessionModel: (sessionId: string, model: string) => Promise<void>;
   setSessionOptions: (
     sessionId: string,
@@ -290,8 +294,11 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         await request(`/api/sessions/${sessionId}/permission`, "POST", { requestId, optionId });
         await refresh();
       },
-      switchAgent: async (sessionId, agentId) => {
-        await request(`/api/sessions/${sessionId}/switch-agent`, "POST", { agentId });
+      switchAgent: async (sessionId, agentId, selection) => {
+        await request(`/api/sessions/${sessionId}/switch-agent`, "POST", {
+          agentId,
+          ...selection,
+        });
         await refresh();
       },
       setSessionModel: async (sessionId, model) => {

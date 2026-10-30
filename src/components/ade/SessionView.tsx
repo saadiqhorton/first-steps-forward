@@ -49,6 +49,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   const { rightTab } = useShell();
   const session = state.sessions.find((s) => s.id === sessionId);
   const [selection, setSelection] = useState<AgentSelection | null>(null);
+  const pendingAgentSelection = useRef<AgentSelection | null>(null);
   const [sending, setSending] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [checksBusy, setChecksBusy] = useState(false);
@@ -219,18 +220,57 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     const prev = activeSelection;
     setSelection(next);
     if (next.model.trim()) writeLastModel(next.agentId, next.model);
+    // The picker may resolve the new provider's default model while the
+    // provider-switch request is still in flight. Keep that choice with the
+    // switch so it is never sent to the previous provider's session options.
+    if (pendingAgentSelection.current) {
+      pendingAgentSelection.current = next;
+      return;
+    }
     if (next.agentId !== prev.agentId) {
-      void switchAgent(session.id, next.agentId)
-        .then(() =>
-          setSessionOptions(session.id, {
-            model: next.model,
-            effort: next.effort,
-            speed: next.speed,
-            permission: next.permission,
-          }),
-        )
+      pendingAgentSelection.current = next;
+      let applied = prev;
+      void switchAgent(session.id, next.agentId, {
+        model: next.model,
+        effort: next.effort,
+        speed: next.speed,
+        permission: next.permission,
+      })
+        .then(async () => {
+          applied = next;
+          while (true) {
+            const latest = pendingAgentSelection.current ?? applied;
+            if (
+              latest.agentId === applied.agentId &&
+              latest.model === applied.model &&
+              latest.effort === applied.effort &&
+              latest.speed === applied.speed &&
+              latest.permission === applied.permission
+            ) {
+              pendingAgentSelection.current = null;
+              return;
+            }
+            if (latest.agentId !== applied.agentId) {
+              await switchAgent(session.id, latest.agentId, {
+                model: latest.model,
+                effort: latest.effort,
+                speed: latest.speed,
+                permission: latest.permission,
+              });
+            } else {
+              await setSessionOptions(session.id, {
+                model: latest.model,
+                effort: latest.effort,
+                speed: latest.speed,
+                permission: latest.permission,
+              });
+            }
+            applied = latest;
+          }
+        })
         .catch((e) => {
-          setSelection(prev);
+          pendingAgentSelection.current = null;
+          setSelection(applied);
           void warnUser(e instanceof Error ? e.message : String(e));
         });
       return;
@@ -475,7 +515,11 @@ export function SessionView({ sessionId }: { sessionId: string }) {
               ? { disabledReason: "Reopen the session to continue." }
               : {})}
             placeholder={
-              running ? "Write a message" : "Send a follow-up to the same agent session…"
+              running
+                ? "Write a message"
+                : session.agentStartFresh
+                  ? "Send a message to start with this agent…"
+                  : "Send a follow-up to the same agent session…"
             }
             sending={sending}
             error={sendError}
