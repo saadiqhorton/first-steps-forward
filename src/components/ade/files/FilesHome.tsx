@@ -3,7 +3,7 @@ import { ChevronRight, Folder, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { documentPreviewsQuery, documentsQuery, entriesQuery } from "@/lib/ade/queries";
-import { timeAgo, useAde } from "@/lib/ade/store";
+import { timeAgo, useNow } from "@/lib/ade/store";
 import type { ProjectDocument } from "@/lib/ade/types";
 import { editorFileIcon, type EditorEntry } from "../editorApi";
 import { MarkdownDocument } from "./MarkdownDocument";
@@ -44,7 +44,7 @@ export function FilesHome({
   onCreateFile,
   onRemoveFile,
 }: Props) {
-  const { state } = useAde();
+  const now = useNow();
   const [cwd, setCwd] = useState("");
   const [creating, setCreating] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -140,7 +140,7 @@ export function FilesHome({
                   <div className="flex items-baseline justify-between gap-2 border-t border-line pt-2">
                     <span className="truncate font-mono text-[11px] text-ink">{doc.name}</span>
                     <span className="shrink-0 font-mono text-[10px] text-dim">
-                      {timeAgo(state.now, doc.modifiedAt)}
+                      {timeAgo(now, doc.modifiedAt)}
                     </span>
                   </div>
                 </button>

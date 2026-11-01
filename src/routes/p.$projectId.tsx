@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Link, Outlet, createFileRoute } from "@tanstack/react-router";
 import { writeLastProject } from "@/lib/ade/navigation";
-import { useAde } from "@/lib/ade/store";
+import { useAde, useAdeState } from "@/lib/ade/store";
 
 export const Route = createFileRoute("/p/$projectId")({
   component: ProjectLayout,
@@ -9,7 +9,12 @@ export const Route = createFileRoute("/p/$projectId")({
 
 function ProjectLayout() {
   const { projectId } = Route.useParams();
-  const { state, selectProject } = useAde();
+  const { selectProject } = useAde();
+  const state = useAdeState((state) => ({
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+    hydrated: state.hydrated,
+  }));
   const known = state.projects.some((p) => p.id === projectId);
 
   useEffect(() => {

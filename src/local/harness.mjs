@@ -162,7 +162,12 @@ function flushPartial(job) {
  * `node:child_process.spawn`). Jobs use stdio `["ignore","pipe","pipe"]`
  * so stdin is closed. Default timeout is 10 minutes.
  */
-export function createHarnessJobs({ spawn, onFinished, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export function createHarnessJobs({
+  spawn,
+  onFinished,
+  onChange,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+} = {}) {
   /** @type {Map<string, object>} */
   const jobs = new Map();
 
@@ -179,6 +184,9 @@ export function createHarnessJobs({ spawn, onFinished, timeoutMs = DEFAULT_TIMEO
     delete job._partial;
     delete job._child;
     delete job._timer;
+    try {
+      onChange?.(job);
+    } catch {}
     try {
       onFinished?.(job);
     } catch {
@@ -205,6 +213,9 @@ export function createHarnessJobs({ spawn, onFinished, timeoutMs = DEFAULT_TIMEO
         _partial: null,
       };
       jobs.set(agentId, job);
+      try {
+        onChange?.(job);
+      } catch {}
 
       let child;
       try {
@@ -216,7 +227,12 @@ export function createHarnessJobs({ spawn, onFinished, timeoutMs = DEFAULT_TIMEO
       }
       job._child = child;
 
-      const onData = (chunk) => appendOutput(job, chunk);
+      const onData = (chunk) => {
+        appendOutput(job, chunk);
+        try {
+          onChange?.(job);
+        } catch {}
+      };
       child.stdout?.on?.("data", onData);
       child.stderr?.on?.("data", onData);
 

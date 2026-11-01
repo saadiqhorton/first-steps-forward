@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
-import { useAde } from "@/lib/ade/store";
+import { useAde, useAdeState } from "@/lib/ade/store";
 
 export function ProjectsMenu({
   showActiveName = false,
@@ -16,10 +16,13 @@ export function ProjectsMenu({
   /** Mobile: show the active project name on the trigger. */
   showActiveName?: boolean;
 }) {
-  const { state, selectProject, removeProject } = useAde();
+  const { selectProject, removeProject } = useAde();
+  const { projects, activeProjectId } = useAdeState((state) => ({
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+  }));
   const navigate = useNavigate();
-  const active =
-    state.projects.find((p) => p.id === state.activeProjectId) ?? state.projects[0] ?? null;
+  const active = projects.find((p) => p.id === activeProjectId) ?? projects[0] ?? null;
 
   const removeActive = async () => {
     if (!active) return;
@@ -31,7 +34,7 @@ export function ProjectsMenu({
     if (!confirmed) return;
     try {
       await removeProject(active.id);
-      const next = state.projects.find((p) => p.id !== active.id);
+      const next = projects.find((p) => p.id !== active.id);
       if (next) {
         selectProject(next.id);
         void navigate({
@@ -62,7 +65,7 @@ export function ProjectsMenu({
         <ChevronDown className="size-3.5 shrink-0" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[16rem] border-line bg-panel">
-        {state.projects.map((p) => (
+        {projects.map((p) => (
           <DropdownMenuItem
             key={p.id}
             className="flex cursor-pointer flex-col items-start gap-0.5 py-2"
@@ -81,7 +84,7 @@ export function ProjectsMenu({
             </span>
           </DropdownMenuItem>
         ))}
-        {state.projects.length === 0 && (
+        {projects.length === 0 && (
           <DropdownMenuItem asChild>
             <Link to="/projects/add" className="cursor-pointer text-[13px]">
               + Add project

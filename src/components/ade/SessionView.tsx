@@ -16,7 +16,17 @@ import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 import { currentActivity } from "@/lib/ade/formatLogs.mjs";
 import { sessionTitle } from "@/lib/ade/sessionTitle";
 import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
-import { agentModels, needsYou, timeAgo, uploadAttachment, useAde } from "@/lib/ade/store";
+import {
+  agentModels,
+  needsYou,
+  timeAgo,
+  uploadAttachment,
+  useAde,
+  useSession,
+  useSessionLogs,
+  useNow,
+  useAdeState,
+} from "@/lib/ade/store";
 
 function waitingPreview(prompt: string) {
   const visible = prompt.split("\n\nThe user attached these files")[0]?.trim() ?? "";
@@ -44,10 +54,29 @@ function selectionFromSession(session: {
 }
 
 export function SessionView({ sessionId }: { sessionId: string }) {
-  const { state, steer, complete, reopen, stop, switchAgent, setSessionOptions, runChecks } =
-    useAde();
+  const { steer, complete, reopen, stop, switchAgent, setSessionOptions, runChecks } = useAde();
+  const state = useAdeState((state) => ({
+    sessions: state.sessions,
+    projects: state.projects,
+    agents: state.agents,
+    hydrated: state.hydrated,
+  }));
   const { rightTab } = useShell();
-  const session = state.sessions.find((s) => s.id === sessionId);
+  const now = useNow();
+  const summary = state.sessions.find((s) => s.id === sessionId);
+  const detailQuery = useSession(summary?.id ?? "");
+  const logsQuery = useSessionLogs(summary?.id ?? "");
+  const session = useMemo(
+    () =>
+      summary && detailQuery.data
+        ? {
+            ...summary,
+            ...detailQuery.data,
+            logs: logsQuery.data?.lines.map((line) => line.text) ?? [],
+          }
+        : null,
+    [summary, detailQuery.data, logsQuery.data],
+  );
   const [selection, setSelection] = useState<AgentSelection | null>(null);
   const pendingAgentSelection = useRef<AgentSelection | null>(null);
   const [sending, setSending] = useState(false);
@@ -145,10 +174,16 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     return msgs;
   }, [session]);
 
-  if (!session) {
+  if (!summary) {
     if (!state.hydrated) return <main className="flex-1" />;
     throw notFound();
   }
+  if (!session)
+    return (
+      <div className="grid h-full place-items-center text-sm text-dim" role="status">
+        {detailQuery.error ? "Could not load this conversation." : "Loading conversation…"}
+      </div>
+    );
   if (!project) return <main className="flex-1 p-8">Project not found.</main>;
 
   const running = ["working", "verifying"].includes(session.status);
@@ -308,7 +343,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             </Link>
             <span className="label-mono">/ task</span>
             <span className="ml-auto font-mono text-[10px] text-dim">
-              started {timeAgo(state.now, session.createdAt)} · {agent?.short ?? session.agentId}
+              started {timeAgo(now, session.createdAt)} · {agent?.short ?? session.agentId}
             </span>
           </div>
           <h1

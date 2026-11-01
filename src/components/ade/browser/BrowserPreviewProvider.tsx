@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   getBrowserStatus,
   postBrowserControl,
   postFileChooser,
   type BrowserControlState,
-  type BrowserStatus,
 } from "@/lib/ade/browser/api";
 import { copyText } from "@/lib/ade/clipboard";
 import { uploadAttachment } from "@/lib/ade/store";
@@ -26,7 +26,6 @@ import {
   type BrowserPreviewValue,
 } from "./browserPreviewContext";
 
-const STATUS_POLL_MS = 2000;
 // Frames are decoded at up to this size. The page is sized to the docked surface.
 const FRAME_MAX_WIDTH = 2560;
 const FRAME_MAX_HEIGHT = 1600;
@@ -66,11 +65,14 @@ export function BrowserPreviewProvider({
   const [place, setPlace] = useState<BrowserPlace>("dock");
   const [minis, setMinis] = useState<Record<string, BrowserMiniPlayerState>>({});
   // Project-tagged so a previous project's answer is never shown or connected to.
-  const [statusState, setStatusState] = useState<{
-    projectId: string;
-    value: BrowserStatus;
-  } | null>(null);
-  const [statusError, setStatusError] = useState<string | null>(null);
+  const statusQuery = useQuery({
+    queryKey: ["browser", projectId],
+    queryFn: () => getBrowserStatus(projectId!),
+    staleTime: Infinity,
+    enabled: projectId !== null,
+  });
+  const status = statusQuery.data ?? null;
+  const statusError = statusQuery.error instanceof Error ? statusQuery.error.message : null;
   const [controlState, setControlState] = useState<{
     projectId: string;
     value: BrowserStreamControl;
@@ -95,7 +97,6 @@ export function BrowserPreviewProvider({
   const navUrlRef = useRef<string | null>(null);
   const errorUrlRef = useRef<string | null>(null);
 
-  const status = statusState?.projectId === projectId ? statusState.value : null;
   const control = controlState?.projectId === projectId ? controlState.value : null;
   const mini = (projectId !== null && minis[projectId]) || EMPTY_MINI;
 
@@ -134,36 +135,15 @@ export function BrowserPreviewProvider({
     }
   }, []);
 
-  // Availability and control, polled while a project is active.
+  // Availability and control refresh when the server invalidates this project's browser state.
   useEffect(() => {
-    if (!projectId) return;
-    let active = true;
-    const refresh = () => {
-      getBrowserStatus(projectId).then(
-        (next) => {
-          if (!active) return;
-          setStatusState({ projectId, value: next });
-          setStatusError(null);
-          // While the stream is open it reports control itself.
-          if (!streamOpenRef.current) {
-            setControlState({
-              projectId,
-              value: controlFromState(next.control, browserViewerId()),
-            });
-          }
-        },
-        (error: unknown) => {
-          if (active) setStatusError(error instanceof Error ? error.message : String(error));
-        },
-      );
-    };
-    refresh();
-    const timer = window.setInterval(refresh, STATUS_POLL_MS);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [projectId]);
+    if (!projectId || !status) return;
+    if (!streamOpenRef.current)
+      setControlState({
+        projectId,
+        value: controlFromState(status.control, browserViewerId()),
+      });
+  }, [projectId, status]);
 
   // The one stream for this project.
   useEffect(() => {

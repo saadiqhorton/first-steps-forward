@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { saveWorkflow, useAde } from "@/lib/ade/store";
+import { saveWorkflow, useAdeState } from "@/lib/ade/store";
 import type { AgentId, Permission, Workflow } from "@/lib/ade/types";
 
 export type WorkflowDraft = {
@@ -34,7 +34,7 @@ export function WorkflowEditor({
   onSaved: (workflow: Workflow) => void;
   onCancel: () => void;
 }) {
-  const { state } = useAde();
+  const agents = useAdeState((state) => state.agents);
   const [draft, setDraft] = useState<WorkflowDraft>(() => toDraft(initial));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -143,7 +143,7 @@ export function WorkflowEditor({
             className="mt-2 w-full rounded-md border border-line bg-paper px-3 py-2 text-[13px]"
           >
             <option value="">Any / default</option>
-            {state.agents.map((agent) => (
+            {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name}
               </option>

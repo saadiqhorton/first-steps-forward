@@ -39,6 +39,8 @@ import {
 } from "./harness.mjs";
 import { listWorkflows, upsertWorkflow, deleteWorkflow as removeWorkflow } from "./workflows.mjs";
 import { saveWorkspace } from "./workspace-persistence.mjs";
+import { createEventHub } from "./events.mjs";
+import { createSessionLogs } from "./session-logs.mjs";
 import {
   SourceError,
   cloneRepository,
@@ -56,6 +58,8 @@ import {
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
+const sessionLogs = createSessionLogs(path.join(DATA_DIR, "session-logs"));
+const eventHub = createEventHub();
 const state = { projects: [], sessions: [], processes: [], agents: [], workflows: [] };
 const children = new Map();
 const authChildren = new Map();
@@ -92,6 +96,9 @@ const turns = createSessionTurns({
   save,
   adapters,
   dataDir: DATA_DIR,
+  logs: sessionLogs,
+  emit: (scope) => eventHub.emit(scope),
+  turnEnded: () => refreshBootstrapInBackground(eventHub.activeProjects()),
   turnContext: (project) => ({
     computer: computerContext(project),
     devServer: devServerStatus(project),
@@ -114,6 +121,10 @@ let probingAgents = false;
 const AGENT_PROBE_INTERVAL_MS = 60_000;
 let lastProbeStartedAt = 0;
 let refreshingBootstrap = false;
+let clientRefreshTimer = null;
+let computerWatchTimer = null;
+const computerFingerprints = new Map();
+const CLIENT_REFRESH_MS = 10_000;
 const id = () => randomUUID();
 const now = () => Date.now();
 const UNSUPPORTED_RISK =
@@ -140,8 +151,43 @@ function safeTokenEqual(a, b) {
   }
 }
 
+let lastBootstrapFingerprint = "";
+const summaryOf = (session) => {
+  const lastUserMessageAt =
+    session.lastUserMessageAt ??
+    session.messages?.filter((message) => message.role === "user").at(-1)?.at ??
+    session.createdAt;
+  return {
+    id: session.id,
+    projectId: session.projectId,
+    agentId: session.agentId,
+    createdBy: session.createdBy,
+    request: session.request,
+    criteria: session.criteria,
+    status: session.status,
+    summary: session.summary,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    completedAt: session.completedAt,
+    model: session.model,
+    failureKind: session.failureKind,
+    pendingPermissions: session.pendingPermissions,
+    lastUserMessageAt,
+  };
+};
+const bootstrapPayload = () => ({
+  projects: state.projects.map(safeProject),
+  sessions: state.sessions.map(summaryOf),
+  processes: state.processes.map(({ output, ...process }) => process),
+  agents: state.agents,
+});
 async function save() {
   await saveWorkspace(DATA_FILE, state);
+  const fingerprint = JSON.stringify(bootstrapPayload());
+  if (fingerprint !== lastBootstrapFingerprint) {
+    lastBootstrapFingerprint = fingerprint;
+    eventHub.emit("bootstrap");
+  }
 }
 async function load() {
   try {
@@ -151,6 +197,12 @@ async function load() {
     state.processes = Array.isArray(saved.processes) ? saved.processes : [];
     state.workflows = Array.isArray(saved.workflows) ? saved.workflows : [];
     let changed = false;
+    for (const session of state.sessions) {
+      if (!session.lastUserMessageAt)
+        session.lastUserMessageAt =
+          session.messages?.filter((message) => message.role === "user").at(-1)?.at ??
+          session.createdAt;
+    }
     // Older versions stored raw CLI lines whole (up to 1.7 MB each); shrink them once here.
     for (const session of state.sessions) {
       if (!Array.isArray(session.logs)) continue;
@@ -160,6 +212,7 @@ async function load() {
         changed = true;
       }
     }
+    if (await sessionLogs.migrate(state.sessions)) changed = true;
     for (const p of state.processes) {
       const project = state.projects.find((item) => item.id === p.projectId);
       const running = !!(p.pid && project && (await processMatches(p.pid, project.path)));
@@ -228,6 +281,7 @@ const harnessDetectDeps = {
   realpath: (p) => fs.realpath(p),
 };
 const harnessJobs = createHarnessJobs({
+  onChange: (job) => eventHub.emit(`harness:${job.agentId}`),
   spawn,
   onFinished: () => {
     clearModelsCache(DATA_DIR, Object.keys(adapters));
@@ -263,6 +317,7 @@ async function agentStatus() {
   // stamping them with their own, later time would push the next probe back each time one lands.
   const fetchedAt = Date.now();
   await writeAgentsStatus(results, fetchedAt);
+  eventHub.emit("agents");
   // Background, non-blocking latest-version checks — next bootstrap poll picks them up.
   for (const agent of results) {
     // A CLI that updates itself in place is never behind in a way ADE can fix.
@@ -277,6 +332,7 @@ async function agentStatus() {
         current.updateAvailable = true;
       else delete current.updateAvailable;
       await writeAgentsStatus(state.agents, fetchedAt);
+      eventHub.emit("agents");
     })();
   }
   return results;
@@ -330,15 +386,20 @@ async function bootstrapAgents() {
   }
   return state.agents;
 }
-function refreshBootstrapInBackground() {
+function refreshBootstrapInBackground(activeProjectIds = []) {
   if (refreshingBootstrap) return;
   refreshingBootstrap = true;
   void (async () => {
-    const needsDiff = new Set(
-      state.sessions.filter((item) => item.status !== "complete").map((item) => item.projectId),
+    const beforeBootstrap = JSON.stringify(bootstrapPayload());
+    const beforeChanges = new Map(
+      state.sessions.map((session) => [session.id, JSON.stringify(session.changes ?? [])]),
     );
+    const needsDiff = new Set([
+      ...state.sessions.filter((item) => item.status !== "complete").map((item) => item.projectId),
+      ...activeProjectIds,
+    ]);
     let devStateChanged = false;
-    for (const p of state.projects) {
+    for (const p of state.projects.filter((project) => needsDiff.has(project.id))) {
       try {
         await projectInfo(p);
         if (!p.missing) {
@@ -359,13 +420,60 @@ function refreshBootstrapInBackground() {
         console.warn(`ADE background project refresh failed for ${p.path}:`, error);
       }
     }
-    if (devStateChanged) save().catch(() => {});
+    const bootstrapChanged = beforeBootstrap !== JSON.stringify(bootstrapPayload());
+    const changedSessions = state.sessions.filter(
+      (session) => beforeChanges.get(session.id) !== JSON.stringify(session.changes ?? []),
+    );
+    if (bootstrapChanged || changedSessions.length || devStateChanged) {
+      for (const session of changedSessions) eventHub.emit(`session:${session.id}`);
+      save().catch(() => {});
+    }
   })()
     .catch((error) => console.warn("ADE background bootstrap refresh failed:", error))
     .finally(() => {
       refreshingBootstrap = false;
     });
 }
+function syncClientRefreshTimer(count) {
+  if (count > 0 && !clientRefreshTimer) {
+    const tick = () => {
+      refreshBootstrapInBackground(eventHub.activeProjects());
+      const lastProbe = Math.max(lastProbeStartedAt, 0);
+      if (!probingAgents && now() - lastProbe >= AGENT_PROBE_INTERVAL_MS) {
+        probingAgents = true;
+        agentStatus()
+          .catch(() => {})
+          .finally(() => {
+            probingAgents = false;
+          });
+      }
+    };
+    tick();
+    clientRefreshTimer = setInterval(tick, CLIENT_REFRESH_MS);
+    clientRefreshTimer.unref?.();
+    computerWatchTimer = setInterval(() => {
+      for (const project of state.projects) {
+        const fingerprint = JSON.stringify(computerView(project));
+        if (computerFingerprints.get(project.id) !== fingerprint) {
+          computerFingerprints.set(project.id, fingerprint);
+          eventHub.emit(`computer:${project.id}`);
+        }
+      }
+      for (const projectId of computerFingerprints.keys()) {
+        if (!state.projects.some((project) => project.id === projectId))
+          computerFingerprints.delete(projectId);
+      }
+    }, 1000);
+    computerWatchTimer.unref?.();
+  } else if (!count && clientRefreshTimer) {
+    clearInterval(clientRefreshTimer);
+    clientRefreshTimer = null;
+    if (computerWatchTimer) clearInterval(computerWatchTimer);
+    computerWatchTimer = null;
+    computerFingerprints.clear();
+  }
+}
+eventHub.onClientsChanged(syncClientRefreshTimer);
 const safeProject = (p) => ({ ...p });
 async function allocatePort() {
   // Ask the OS for an ephemeral port, but do not return it until nothing
@@ -1066,20 +1174,57 @@ export async function handle(req, res) {
       );
       return json(res, 200, { ok: true });
     }
+    if (req.method === "GET" && parts[0] === "events" && parts.length === 1) {
+      eventHub.connect(req, res, url.searchParams.get("project") ?? "");
+      return;
+    }
     if (req.method === "GET" && parts[0] === "bootstrap") {
       const agents = await bootstrapAgents();
-      // Return the persisted workspace snapshot immediately. Git inspection,
-      // diffs, and dev-script re-scan update the next 2-second poll instead
-      // of holding the project list behind subprocesses.
-      json(res, 200, {
-        projects: state.projects.map(safeProject),
-        sessions: state.sessions,
-        processes: state.processes,
-        agents,
-        now: now(),
-      });
-      refreshBootstrapInBackground();
+      state.agents = agents;
+      json(res, 200, { ...bootstrapPayload(), now: now() });
+      if (!eventHub.clientCount()) refreshBootstrapInBackground();
       return;
+    }
+    if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
+      const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const projectId = url.searchParams.get("project");
+      if (!query) return json(res, 200, { ids: [] });
+      const ids = state.sessions
+        .filter((session) => !projectId || session.projectId === projectId)
+        .filter((session) =>
+          [
+            session.request,
+            session.summary,
+            ...(session.messages ?? []).map((message) => message.text),
+          ].some((text) =>
+            String(text ?? "")
+              .toLowerCase()
+              .includes(query),
+          ),
+        )
+        .map((session) => session.id);
+      return json(res, 200, { ids });
+    }
+    if (req.method === "GET" && parts[0] === "sessions" && parts.length === 2) {
+      const session = state.sessions.find((item) => item.id === parts[1]);
+      if (!session) return json(res, 404, { error: "Session not found." });
+      const { logs: _logs, ...detail } = session;
+      return json(res, 200, { session: detail });
+    }
+    if (
+      req.method === "GET" &&
+      parts[0] === "sessions" &&
+      parts.length === 3 &&
+      parts[2] === "logs"
+    ) {
+      const session = state.sessions.find((item) => item.id === parts[1]);
+      if (!session) return json(res, 404, { error: "Session not found." });
+      const rawAfter = url.searchParams.get("after") ?? "0";
+      const after = Number(rawAfter);
+      if (!Number.isSafeInteger(after) || after < 0)
+        return json(res, 400, { error: "Invalid log cursor." });
+      await sessionLogs.flush(session.id);
+      return json(res, 200, await sessionLogs.read(session.id, after));
     }
     if (req.method === "GET" && parts[0] === "browse") {
       // Read-only directory listing for ADE's built-in folder picker. Same
@@ -1205,12 +1350,14 @@ export async function handle(req, res) {
         });
       for (const p of state.processes.filter((x) => x.projectId === parts[1]))
         stopChild(children.get(p.id));
+      const removedSessions = state.sessions.filter((s) => s.projectId === parts[1]);
       // The project's browser and its stored profile are ADE metadata too.
       await computers.stop(parts[1]).catch(() => {});
       await controls.delete(parts[1]);
       await browserContexts.clearProfile(parts[1]).catch(() => {});
       state.projects.splice(idx, 1);
       state.sessions = state.sessions.filter((s) => s.projectId !== parts[1]);
+      await Promise.all(removedSessions.map((session) => sessionLogs.remove(session.id)));
       state.processes = state.processes.filter((x) => x.projectId !== parts[1]);
       await save();
       return json(res, 200, {
@@ -2012,6 +2159,11 @@ export function start() {
  * opens them.
  */
 export async function stop() {
+  if (clientRefreshTimer) clearInterval(clientRefreshTimer);
+  clientRefreshTimer = null;
+  if (computerWatchTimer) clearInterval(computerWatchTimer);
+  computerWatchTimer = null;
+  eventHub.close();
   await browserStream.close();
   await browserHub.closeAll();
   await browserContexts.close();

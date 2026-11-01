@@ -46,7 +46,7 @@ export interface LocalProcess {
   args?: string[];
   port: number;
   status: "running" | "starting" | "stopped";
-  output: string[];
+  output?: string[];
   startedAt?: number;
   updatedAt?: number;
 }
@@ -220,6 +220,24 @@ export interface Session {
   pendingPermissions?: PendingPermission[];
 }
 
+export type SessionSummary = Pick<
+  Session,
+  | "id"
+  | "projectId"
+  | "agentId"
+  | "createdBy"
+  | "request"
+  | "criteria"
+  | "status"
+  | "summary"
+  | "createdAt"
+  | "updatedAt"
+  | "completedAt"
+  | "model"
+  | "failureKind"
+  | "pendingPermissions"
+> & { lastUserMessageAt?: number };
+
 export interface AdeState {
   hydrated: boolean;
   serviceAvailable: boolean;
@@ -227,7 +245,7 @@ export interface AdeState {
   activeProjectId: string;
   projects: Project[];
   processes: LocalProcess[];
-  sessions: Session[];
+  sessions: SessionSummary[];
   agents: Agent[];
   /** ADE is exposed beyond loopback and this browser has not proven the token yet. */
   authRequired: boolean;

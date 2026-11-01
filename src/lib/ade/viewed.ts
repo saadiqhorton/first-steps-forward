@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { Session } from "@/lib/ade/types";
+import type { SessionSummary } from "@/lib/ade/types";
 import {
   filterSessions as filterSessionsJs,
   isUnread as isUnreadJs,
@@ -10,25 +10,31 @@ export const VIEWED_KEY = "ade-session-viewed";
 
 export type ConversationFilter = "all" | "needs" | "working" | "unread";
 
-export function isUnread(session: Session, viewed: Record<string, number>): boolean {
+export function isUnread(
+  session: Pick<SessionSummary, "id" | "createdAt" | "updatedAt">,
+  viewed: Record<string, number>,
+): boolean {
   return isUnreadJs(session, viewed);
 }
 
 /** Ready to review, blocked, or waiting on a permission answer. */
-export function needsAttention(session: Session): boolean {
+export function needsAttention(
+  session: Pick<SessionSummary, "status" | "pendingPermissions">,
+): boolean {
   return needsAttentionJs(session);
 }
 
 export function filterSessions(
-  sessions: Session[],
+  sessions: SessionSummary[],
   o: {
     filter: ConversationFilter;
     query: string;
     showCompleted: boolean;
     viewed: Record<string, number>;
+    searchMatches?: Set<string> | undefined;
   },
-): Session[] {
-  return filterSessionsJs(sessions, o) as Session[];
+): SessionSummary[] {
+  return filterSessionsJs(sessions, o) as SessionSummary[];
 }
 
 function readViewed(): Record<string, number> {

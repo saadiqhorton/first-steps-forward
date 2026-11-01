@@ -7,7 +7,7 @@ import { SignInDialog } from "@/components/ade/SignInDialog";
 import { WorkflowCards } from "@/components/ade/workflows/WorkflowCards";
 import type { Agent, Workflow } from "@/lib/ade/types";
 import { workflowsQuery } from "@/lib/ade/queries";
-import { agentModels, uploadAttachment, useAde } from "@/lib/ade/store";
+import { agentModels, uploadAttachment, useAde, useAdeState } from "@/lib/ade/store";
 import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 
 const NO_WORKFLOWS: Workflow[] = [];
@@ -23,15 +23,18 @@ export function NewTaskForm({
   initialSelection?: Partial<Pick<AgentSelection, "agentId" | "permission">>;
   prefillWorkflowId?: string;
 }) {
-  const { state, startTask } = useAde();
+  const { startTask } = useAde();
+  const projects = useAdeState((state) => state.projects);
+  const agents = useAdeState((state) => state.agents);
+  const sessions = useAdeState((state) => state.sessions);
   const navigate = useNavigate();
-  const project = state.projects.find((p) => p.id === projectId);
+  const project = projects.find((p) => p.id === projectId);
   const [selection, setSelection] = useState<AgentSelection>(() => ({
     // The project's default agent, else the first ready one — never a hardcoded id.
     agentId:
       initialSelection?.agentId ??
-      (project?.defaultAgent || state.agents.find((a) => a.installed && a.signedIn)?.id) ??
-      state.agents[0]?.id ??
+      (project?.defaultAgent || agents.find((a) => a.installed && a.signedIn)?.id) ??
+      agents[0]?.id ??
       "",
     model: "",
     effort: "",
@@ -47,13 +50,11 @@ export function NewTaskForm({
   const [ackDirty, setAckDirty] = useState(false);
   const workflows = useQuery(workflowsQuery()).data ?? NO_WORKFLOWS;
   const appliedPrefill = useRef<string | null>(null);
-  const agent = state.agents.find((a) => a.id === selection.agentId);
+  const agent = agents.find((a) => a.id === selection.agentId);
   const usable = !!agent?.installed && agent.signedIn;
   const overlapping =
     !!project &&
-    state.sessions.some(
-      (s) => s.projectId === project.id && ["working", "verifying"].includes(s.status),
-    );
+    sessions.some((s) => s.projectId === project.id && ["working", "verifying"].includes(s.status));
   const dirty = !!project && project.uncommittedFiles.length > 0;
 
   const applyWorkflow = useCallback((workflow: Workflow) => {
@@ -110,11 +111,11 @@ export function NewTaskForm({
   // agent that no longer exists — falls back to the first ready agent. A
   // selection the user made is never overridden, even if it is not usable.
   useEffect(() => {
-    if (state.agents.some((a) => a.id === selection.agentId)) return;
-    const fallback = state.agents.find((a) => a.installed && a.signedIn)?.id ?? state.agents[0]?.id;
+    if (agents.some((a) => a.id === selection.agentId)) return;
+    const fallback = agents.find((a) => a.installed && a.signedIn)?.id ?? agents[0]?.id;
     if (!fallback) return;
     setSelection((prev) => ({ ...prev, agentId: fallback, model: "", effort: "", speed: "" }));
-  }, [state.agents, selection.agentId]);
+  }, [agents, selection.agentId]);
 
   useEffect(() => {
     if (!prefillWorkflowId || workflows.length === 0) return;
@@ -196,7 +197,7 @@ export function NewTaskForm({
     }
   };
 
-  if (!state.projects.length || !project)
+  if (!projects.length || !project)
     return (
       <main className="min-w-0 flex-1 px-4 py-6 @lg:px-7 @lg:py-8 @container">
         <h1 className="heading-display text-2xl @lg:text-3xl">Add a project first</h1>

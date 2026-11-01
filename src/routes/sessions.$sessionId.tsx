@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Link, createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
-import { useAde } from "@/lib/ade/store";
+import { useAdeState } from "@/lib/ade/store";
 
 export const Route = createFileRoute("/sessions/$sessionId")({
   head: () => ({ meta: [{ title: "Work session — ADE" }] }),
@@ -19,7 +19,7 @@ export const Route = createFileRoute("/sessions/$sessionId")({
 
 function SessionRedirect() {
   const { sessionId } = Route.useParams();
-  const { state } = useAde();
+  const state = useAdeState((state) => ({ hydrated: state.hydrated, sessions: state.sessions }));
   const navigate = useNavigate();
   const session = state.sessions.find((s) => s.id === sessionId);
 

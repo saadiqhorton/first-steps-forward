@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { Plus } from "lucide-react";
@@ -6,8 +7,8 @@ import { AnimatePresence } from "motion/react";
 import { GlideIndicator, MotionItem } from "@/components/ade/motion";
 import { StatusPill } from "@/components/ade/StatusPill";
 import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
-import { needsYou, useAde } from "@/lib/ade/store";
-import type { Session } from "@/lib/ade/types";
+import { needsYou, searchSessions, useAdeState, useNow } from "@/lib/ade/store";
+import type { Session, SessionSummary } from "@/lib/ade/types";
 import { sessionTitle } from "@/lib/ade/sessionTitle";
 import {
   filterSessions,
@@ -24,20 +25,15 @@ const FILTERS: { id: ConversationFilter; label: string }[] = [
   { id: "unread", label: "Unread" },
 ];
 
-function titleOf(session: Session): string {
+function titleOf(session: SessionSummary): string {
   const request = session.request?.trim() ?? "";
   const summary = session.summary?.trim() ?? "";
   if (request) return sessionTitle(request);
   return summary || "Untitled";
 }
 
-function latestUserAt(session: Session): number | undefined {
-  let latest: number | undefined;
-  for (const m of session.messages) {
-    if (m.role !== "user") continue;
-    if (latest === undefined || m.at > latest) latest = m.at;
-  }
-  return latest;
+function latestUserAt(session: Session | SessionSummary): number | undefined {
+  return "lastUserMessageAt" in session ? session.lastUserMessageAt : undefined;
 }
 
 function formatElapsed(now: number, from: number): string {
@@ -52,20 +48,34 @@ export function ConversationList() {
   const { sessionId: activeSessionId } = useParams({ strict: false });
   const search = useSearch({ from: "/p/$projectId/conversations" });
   const navigate = useNavigate({ from: "/p/$projectId/conversations" });
-  const { state } = useAde();
+  const { sessions, agents } = useAdeState((state) => ({
+    sessions: state.sessions,
+    agents: state.agents,
+  }));
+  const now = useNow();
   const viewed = useViewed();
   const [filter, setFilter] = useState<ConversationFilter>("all");
   const [query, setQuery] = useState("");
+  const searchResult = useQuery({
+    queryKey: ["session-search", projectId, query.trim()],
+    queryFn: () => searchSessions(projectId, query.trim()),
+    staleTime: 15_000,
+    enabled: query.trim().length > 0,
+  });
+  const searchMatches = useMemo(
+    () => (searchResult.data ? new Set(searchResult.data.ids) : undefined),
+    [searchResult.data],
+  );
 
   const showCompleted = search.completed !== false;
 
   const projectSessions = useMemo(
-    () => state.sessions.filter((s) => s.projectId === projectId),
-    [state.sessions, projectId],
+    () => sessions.filter((s) => s.projectId === projectId),
+    [sessions, projectId],
   );
 
   const counts = useMemo(() => {
-    const opts = { query, showCompleted, viewed };
+    const opts = { query, showCompleted, viewed, searchMatches };
     const count = (f: ConversationFilter) =>
       filterSessions(projectSessions, { ...opts, filter: f }).length;
     return {
@@ -74,11 +84,11 @@ export function ConversationList() {
       working: count("working"),
       unread: count("unread"),
     };
-  }, [projectSessions, query, showCompleted, viewed]);
+  }, [projectSessions, query, showCompleted, viewed, searchMatches]);
 
   const filtered = useMemo(
-    () => filterSessions(projectSessions, { filter, query, showCompleted, viewed }),
-    [projectSessions, filter, query, showCompleted, viewed],
+    () => filterSessions(projectSessions, { filter, query, showCompleted, viewed, searchMatches }),
+    [projectSessions, filter, query, showCompleted, viewed, searchMatches],
   );
 
   const setShowCompleted = (checked: boolean) => {
@@ -135,7 +145,7 @@ export function ConversationList() {
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <AnimatePresence initial={false}>
           {filtered.map((session) => {
-            const agent = state.agents.find((a) => a.id === session.agentId);
+            const agent = agents.find((a) => a.id === session.agentId);
             const active = session.id === activeSessionId;
             const unread = isUnread(session, viewed);
             const turnStart = latestUserAt(session);
@@ -179,7 +189,7 @@ export function ConversationList() {
                         <StatusPill status={session.status} needsYou={needsYou(session)} />
                         {showElapsed && (
                           <span className="font-mono text-[10px] tabular-nums text-teal">
-                            {formatElapsed(state.now, turnStart)}
+                            {formatElapsed(now, turnStart)}
                           </span>
                         )}
                       </div>

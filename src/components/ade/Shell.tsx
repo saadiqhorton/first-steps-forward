@@ -26,7 +26,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { RightTab } from "@/lib/ade/navigation";
-import { useAde } from "@/lib/ade/store";
+import { useAdeState } from "@/lib/ade/store";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { AgentsDialog } from "./AgentsDialog";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
@@ -160,9 +160,11 @@ function PaneSlot({ el }: { el: HTMLDivElement }) {
 
 export function Shell({ children }: { children: ReactNode }) {
   const [rightHost, setRightHost] = useState<HTMLDivElement | null>(null);
-  const { state } = useAde();
-  const activeProject =
-    state.projects.find((project) => project.id === state.activeProjectId) ?? state.projects[0];
+  const { projects, activeProjectId } = useAdeState((state) => ({
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+  }));
+  const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
   return (
     <RightPaneHostContext.Provider value={rightHost}>
       <BrowserPreviewProvider projectId={activeProject?.id ?? null}>
@@ -179,7 +181,11 @@ function ShellInner({
   children: ReactNode;
   onRightHostChange: (host: HTMLDivElement | null) => void;
 }) {
-  const { state } = useAde();
+  const state = useAdeState((state) => ({
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+    sessions: state.sessions,
+  }));
   const navigate = useNavigate();
   const router = useRouter();
   const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });

@@ -5,17 +5,25 @@ import { projectColor } from "@/components/ade/projectColor";
 import { ProjectsMenu } from "@/components/ade/ProjectsMenu";
 import { useShell } from "@/components/ade/shellContext";
 import { ThemeSwitch } from "@/components/arc/theme-switch/theme-switch";
-import { useAde } from "@/lib/ade/store";
+import { useAdeState } from "@/lib/ade/store";
 import { useTheme } from "@/lib/theme";
 
 export function TopBar({ isDesktop }: { isDesktop: boolean }) {
-  const { state } = useAde();
+  const { activeProjectId, hydrated, projects, serviceAvailable, sessions } = useAdeState(
+    (state) => ({
+      activeProjectId: state.activeProjectId,
+      hydrated: state.hydrated,
+      projects: state.projects,
+      serviceAvailable: state.serviceAvailable,
+      sessions: state.sessions,
+    }),
+  );
   const { openDialog } = useShell();
   const { theme, setTheme } = useTheme();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   const activeFromRoute = pathname.match(/^\/p\/([^/]+)/)?.[1] ?? null;
-  const activeId = activeFromRoute ?? state.activeProjectId;
+  const activeId = activeFromRoute ?? activeProjectId;
 
   return (
     <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-3 sm:px-4">
@@ -29,10 +37,10 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
 
       {isDesktop ? (
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-          {state.projects.map((p) => {
+          {projects.map((p) => {
             const colors = projectColor(p.id);
             const active = p.id === activeId;
-            const busy = state.sessions.some(
+            const busy = sessions.some(
               (s) => s.projectId === p.id && (s.status === "working" || s.status === "verifying"),
             );
             const initial = (p.name.trim().charAt(0) || "?").toUpperCase();
@@ -109,7 +117,7 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
           iconOnly
           onThemeChange={(next) => setTheme(next)}
         />
-        {state.hydrated && !state.serviceAvailable && (
+        {hydrated && !serviceAvailable && (
           <span className="hidden font-mono text-[10px] text-amber sm:inline">
             Local service disconnected
           </span>
