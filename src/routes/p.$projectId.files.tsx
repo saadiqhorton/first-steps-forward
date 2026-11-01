@@ -22,7 +22,6 @@ const FileTab = lazy(() =>
 
 export const Route = createFileRoute("/p/$projectId/files")({
   head: () => ({ meta: [{ title: "Files — ADE" }] }),
-  ssr: false,
   component: FilesPage,
 });
 
@@ -40,7 +39,6 @@ function tabsStorageKey(projectId: string) {
 }
 
 function readTabs(projectId: string): TabsState {
-  if (typeof window === "undefined") return { open: [], active: "home" };
   try {
     const raw = sessionStorage.getItem(tabsStorageKey(projectId));
     if (!raw) return { open: [], active: "home" };

@@ -31,7 +31,6 @@ const conversationsSearchSchema = z.object({
 export type ConversationsSearch = z.infer<typeof conversationsSearchSchema>;
 
 export const Route = createFileRoute("/p/$projectId/conversations")({
-  ssr: false,
   validateSearch: (search: Record<string, unknown>): ConversationsSearch => {
     const completedRaw = search["completed"];
     const completed =

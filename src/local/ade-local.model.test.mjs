@@ -43,7 +43,9 @@ process.env.HOME = home;
 // tests would write into the real ~/.ade workspace.
 process.env.USERPROFILE = home;
 const {
-  handleLocalApi,
+  handle,
+  start,
+  setListenAddress,
   devServerArgs,
   detectFramework,
   refreshDevProcess,
@@ -51,19 +53,17 @@ const {
   streamOriginAllowed,
 } = await import("./ade-local.mjs");
 const { checksFor } = await import("./project-scripts.mjs");
+const { callApi } = await import("./api-request.test-helper.mjs");
+await start();
 
-const apiRequest = (urlPath, body) => ({
-  url: `http://127.0.0.1:3000${urlPath}`,
-  method: body === undefined ? "GET" : "POST",
-  headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-  // The built server passes a srvx NodeRequest: it exposes NO .socket; the
-  // client address lives under runtime.node.req (see the srvx-shape test
-  // below). handleLocalApi must still resolve loopback from it.
-  runtime: { node: { req: { socket: { remoteAddress: "::ffff:127.0.0.1" } } } },
-  text: async () => JSON.stringify(body ?? {}),
-});
+/** @param {Parameters<typeof callApi>[1]} request */
+const api = (request) => callApi(handle, request);
 const call = async (urlPath, body) => {
-  const res = await handleLocalApi(apiRequest(urlPath, body));
+  const res = await api({
+    url: `http://127.0.0.1:3000${urlPath}`,
+    body,
+    remoteAddress: "::ffff:127.0.0.1",
+  });
   return { status: res.status, json: await res.json() };
 };
 
@@ -150,101 +150,75 @@ test("built-in folder browser lists directories one level at a time", async () =
 });
 
 test("unknown agents have no model listing", async () => {
-  const res = await handleLocalApi({
+  const res = await api({
     url: "http://127.0.0.1:3000/api/agents/claudette/models",
-    method: "GET",
-    headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "::1" } } } },
-    text: async () => "",
+    remoteAddress: "::1",
   });
   assert.equal(res.status, 404);
 });
 
-test("self-hosted requests resolve the client address the way srvx presents it", async () => {
-  const srvxRequest = (overrides = {}) => ({
-    url: "http://127.0.0.1:3000/api/agents/unknown/models",
-    method: "GET",
-    headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-    text: async () => "",
-    ...overrides,
-  });
-  // srvx NodeRequest shape: the raw socket only exists under runtime.node.req.
-  const viaRuntime = await handleLocalApi(
-    srvxRequest({ runtime: { node: { req: { socket: { remoteAddress: "::ffff:127.0.0.1" } } } } }),
-  );
-  assert.equal(viaRuntime.status, 404);
-  // The .ip mirror counts as the address too.
-  assert.equal((await handleLocalApi(srvxRequest({ ip: "::1" }))).status, 404);
-  // A plain fetch Request (no runtime, no ip) has no provable address and
-  // must fail closed rather than being trusted as loopback.
-  assert.equal((await handleLocalApi(srvxRequest())).status, 403);
+test("the peer address comes from the socket, and a socket without one fails closed", async () => {
+  const peer = (remoteAddress) =>
+    api({ url: "http://127.0.0.1:3000/api/agents/unknown/models", remoteAddress });
+  for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1"])
+    assert.equal((await peer(address)).status, 404, `${address} should be accepted as loopback`);
+  // No provable address must never be trusted as loopback.
+  assert.equal((await peer(null)).status, 403);
   // A real remote peer stays rejected.
-  const remote = await handleLocalApi(
-    srvxRequest({ runtime: { node: { req: { socket: { remoteAddress: "203.0.113.8" } } } } }),
-  );
-  assert.equal(remote.status, 403);
+  assert.equal((await peer("203.0.113.8")).status, 403);
 });
 
 test("loopback guard still rejects non-local hosts", async () => {
-  const res = await handleLocalApi({
+  const res = await api({
     url: "http://example.com/api/sessions/s-ready/model",
-    method: "POST",
-    headers: { entries: () => [["host", "example.com"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "::1" } } } },
-    text: async () => "{}",
+    body: {},
+    remoteAddress: "::1",
   });
   assert.equal(res.status, 403);
 });
 
-test("non-loopback peers cannot submit requests or poison the captured manifest base URL", async () => {
-  const denied = await handleLocalApi({
+test("agents get the listen address as their base URL, never a request's Host", async () => {
+  const project = { id: "peer-check", name: "peer", path: home };
+  setListenAddress({ address: "127.0.0.1", family: "IPv4", port: 3000 });
+  assert.equal(computerContext(project).env.ADE_API, "http://127.0.0.1:3000");
+  const denied = await api({
     url: "http://127.0.0.1:3000/api/projects",
-    method: "POST",
-    headers: { entries: () => [["host", "attacker.example:9443"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "203.0.113.8" } } } },
-    text: async () => "{}",
+    headers: { host: "attacker.example:9443" },
+    body: {},
+    remoteAddress: "203.0.113.8",
   });
   assert.equal(denied.status, 403);
-  const project = { id: "peer-check", name: "peer", path: home };
-  assert.equal(computerContext(project).env.ADE_API, "http://127.0.0.1:3000");
-  const spoofedHost = await handleLocalApi({
+  const spoofedHost = await api({
     url: "http://attacker.example:9443/api/agents/unknown/models",
-    method: "GET",
-    headers: { entries: () => [["host", "attacker.example:9443"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "::1" } } } },
-    text: async () => "",
+    remoteAddress: "::1",
   });
   assert.equal(spoofedHost.status, 403);
+  // A loopback request under another loopback name changes nothing either.
+  await api({ url: "http://localhost:9999/api/agents/unknown/models" });
   assert.equal(computerContext(project).env.ADE_API, "http://127.0.0.1:3000");
 
-  for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
-    const response = await handleLocalApi({
-      url: "http://127.0.0.1:3000/api/agents/unknown/models",
-      method: "GET",
-      headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-      runtime: { node: { req: { socket: { remoteAddress: address } } } },
-      text: async () => "",
-    });
-    assert.equal(response.status, 404, `${address} should be accepted as loopback`);
-  }
+  // Wildcard binds are reached through 127.0.0.1; ::1 keeps its own address.
+  setListenAddress({ address: "::", family: "IPv6", port: 4100 });
+  assert.equal(computerContext(project).env.ADE_API, "http://127.0.0.1:4100");
+  setListenAddress({ address: "::1", family: "IPv6", port: 4100 });
+  assert.equal(computerContext(project).env.ADE_API, "http://[::1]:4100");
+  // A specific LAN bind has no loopback address: no URL rather than one that needs the token.
+  setListenAddress({ address: "192.168.1.50", family: "IPv4", port: 4100 });
+  assert.equal(computerContext(project), null);
+  setListenAddress({ address: "127.0.0.1", family: "IPv4", port: 3000 });
 });
 
 test("private-LAN peers get no implicit trust without ADE_HOST and ADE_TOKEN", async () => {
-  const lan = (remoteAddress, host = "192.168.1.50:3000") => ({
-    url: `http://${host}/api/agents/unknown/models`,
-    method: "GET",
-    headers: { entries: () => [["host", host]] },
-    runtime: { node: { req: { socket: { remoteAddress } } } },
-    text: async () => "",
-  });
+  const lan = (remoteAddress, host = "192.168.1.50:3000") =>
+    api({ url: `http://${host}/api/agents/unknown/models`, remoteAddress });
   delete process.env.ADE_HOST;
   delete process.env.ADE_TOKEN;
   for (const remote of ["192.168.1.77", "10.0.0.8", "100.64.1.2", "fd12::5"])
-    assert.equal((await handleLocalApi(lan(remote))).status, 403, `${remote} must be refused`);
+    assert.equal((await lan(remote)).status, 403, `${remote} must be refused`);
   // Even the machine itself, addressed by a LAN name, is not a loopback Host.
-  assert.equal((await handleLocalApi(lan("127.0.0.1"))).status, 403);
+  assert.equal((await lan("127.0.0.1")).status, 403);
   // Loopback Host from a loopback peer still passes.
-  assert.equal((await handleLocalApi(lan("127.0.0.1", "127.0.0.1:3000"))).status, 404);
+  assert.equal((await lan("127.0.0.1", "127.0.0.1:3000")).status, 404);
 });
 
 test("the agent-browser stream accepts no-Origin upgrades only from a loopback socket", () => {
@@ -279,133 +253,76 @@ test("the agent-browser stream accepts no-Origin upgrades only from a loopback s
 });
 
 test("opt-in exposure is token-gated, loopback stays exempt, and login sets the cookie", async () => {
-  const lanRequest = (overrides = {}) => ({
-    url: "http://192.168.1.50:3000/api/agents/unknown/models",
-    method: "GET",
-    headers: { entries: () => [["host", "192.168.1.50:3000"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "203.0.113.8" } } } },
-    text: async () => "",
-    ...overrides,
-  });
-  const bearerHeaders = () => ({
-    entries: () => [
-      ["host", "192.168.1.50:3000"],
-      ["authorization", "Bearer lan-secret"],
-    ],
-  });
+  const lanRequest = (overrides = {}) =>
+    api({
+      url: "http://192.168.1.50:3000/api/agents/unknown/models",
+      remoteAddress: "203.0.113.8",
+      ...overrides,
+    });
   process.env.ADE_HOST = "192.168.1.50";
   try {
     // No ADE_TOKEN → the address is never treated as exposed.
-    assert.equal((await handleLocalApi(lanRequest())).status, 403);
+    assert.equal((await lanRequest()).status, 403);
     process.env.ADE_TOKEN = "lan-secret";
-    const denied = await handleLocalApi(lanRequest());
+    const denied = await lanRequest();
     assert.equal(denied.status, 401);
     const deniedBody = await denied.json();
     assert.equal(deniedBody.authRequired, true);
     // A Host header naming some other authority is refused even with the
     // right token (DNS-rebinding fence on a specific bind).
-    const rebound = await handleLocalApi(
-      lanRequest({
-        url: "http://example.com/api/agents/unknown/models",
-        headers: {
-          entries: () => [
-            ["host", "example.com"],
-            ["authorization", "Bearer lan-secret"],
-          ],
-        },
-      }),
-    );
+    const rebound = await lanRequest({
+      url: "http://example.com/api/agents/unknown/models",
+      headers: { authorization: "Bearer lan-secret" },
+    });
     assert.equal(rebound.status, 401);
     // Bearer and cookie both authorize.
-    assert.equal((await handleLocalApi(lanRequest({ headers: bearerHeaders() }))).status, 404);
     assert.equal(
-      (
-        await handleLocalApi(
-          lanRequest({
-            headers: {
-              entries: () => [
-                ["host", "192.168.1.50:3000"],
-                ["cookie", "ade_auth=lan-secret"],
-              ],
-            },
-          }),
-        )
-      ).status,
+      (await lanRequest({ headers: { authorization: "Bearer lan-secret" } })).status,
       404,
     );
+    assert.equal((await lanRequest({ headers: { cookie: "ade_auth=lan-secret" } })).status, 404);
     // Loopback peers stay exempt without any token — but only under their
     // own loopback Host name (the strict original rules).
     assert.equal(
-      (
-        await handleLocalApi({
-          url: "http://127.0.0.1:3000/api/agents/unknown/models",
-          method: "GET",
-          headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-          runtime: { node: { req: { socket: { remoteAddress: "::1" } } } },
-          text: async () => "",
-        })
-      ).status,
+      (await api({ url: "http://127.0.0.1:3000/api/agents/unknown/models", remoteAddress: "::1" }))
+        .status,
       404,
     );
     // A loopback reverse proxy (`tailscale serve`) forwards with a preserved
     // non-loopback Host and X-Forwarded-Proto; its browser Origin (https,
     // different authority) must be accepted.
-    const proxied = await handleLocalApi({
+    const proxied = await api({
       url: "http://hackpad-tailnet:3000/api/agents/unknown/models",
-      method: "GET",
-      headers: {
-        entries: () => [
-          ["host", "hackpad-tailnet:3000"],
-          ["x-forwarded-proto", "https"],
-          ["origin", "https://hackpad-tailnet.ts.net"],
-        ],
-      },
-      runtime: { node: { req: { socket: { remoteAddress: "127.0.0.1" } } } },
-      text: async () => "",
+      headers: { "x-forwarded-proto": "https", origin: "https://hackpad-tailnet.ts.net" },
     });
     assert.equal(proxied.status, 404);
     // ...but a browser-shaped request without X-Forwarded-Proto stays
     // unauthorized (401) in exposed mode — the Host fence governs who is
     // allowed, not the status code.
-    const browserShaped = await handleLocalApi({
+    const browserShaped = await lanRequest({
       url: "http://hackpad-tailnet:3000/api/agents/unknown/models",
-      method: "GET",
-      headers: { entries: () => [["host", "hackpad-tailnet:3000"]] },
-      runtime: { node: { req: { socket: { remoteAddress: "203.0.113.8" } } } },
-      text: async () => "",
     });
     assert.equal(browserShaped.status, 401);
     // Login: wrong token 401; right token sets the HttpOnly session cookie.
-    const badLogin = await handleLocalApi({
+    const badLogin = await lanRequest({
       url: "http://192.168.1.50:3000/api/auth",
-      method: "POST",
-      headers: { entries: () => [["host", "192.168.1.50:3000"]] },
-      runtime: { node: { req: { socket: { remoteAddress: "203.0.113.8" } } } },
-      text: async () => JSON.stringify({ token: "nope" }),
+      body: { token: "nope" },
     });
     assert.equal(badLogin.status, 401);
-    const login = await handleLocalApi({
+    const login = await lanRequest({
       url: "http://192.168.1.50:3000/api/auth",
-      method: "POST",
-      headers: { entries: () => [["host", "192.168.1.50:3000"]] },
-      runtime: { node: { req: { socket: { remoteAddress: "203.0.113.8" } } } },
-      text: async () => JSON.stringify({ token: "lan-secret" }),
+      body: { token: "lan-secret" },
     });
     assert.equal(login.status, 200);
     assert.match(String(login.headers.get("set-cookie")), /ade_auth=lan-secret/);
     assert.match(String(login.headers.get("set-cookie")), /HttpOnly/);
-    // The exempt token exchange must not be usable to poison the captured
-    // dev-control base URL with a forged loopback Host header: the capture
-    // only accepts provably local requests, so the remote peer's 401 leaves
-    // the manifest URL untouched.
-    const poisoned = await handleLocalApi({
+    // The exempt token exchange with a forged loopback Host header is still a
+    // remote peer: 401, and the agents' base URL is untouched.
+    const forged = await lanRequest({
       url: "http://127.0.0.1:9999/api/auth",
-      method: "POST",
-      headers: { entries: () => [["host", "127.0.0.1:9999"]] },
-      runtime: { node: { req: { socket: { remoteAddress: "203.0.113.8" } } } },
-      text: async () => JSON.stringify({ token: "nope" }),
+      body: { token: "nope" },
     });
-    assert.equal(poisoned.status, 401);
+    assert.equal(forged.status, 401);
     assert.equal(
       computerContext({ id: "peer-check", name: "peer", path: home }).env.ADE_API,
       "http://127.0.0.1:3000",
@@ -415,23 +332,16 @@ test("opt-in exposure is token-gated, loopback stays exempt, and login sets the 
     process.env.ADE_HOST = "0.0.0.0";
     assert.equal(
       (
-        await handleLocalApi(
-          lanRequest({
-            url: "http://hackpad-tailnet:3000/api/agents/unknown/models",
-            headers: {
-              entries: () => [
-                ["host", "hackpad-tailnet:3000"],
-                ["authorization", "Bearer lan-secret"],
-              ],
-            },
-          }),
-        )
+        await lanRequest({
+          url: "http://hackpad-tailnet:3000/api/agents/unknown/models",
+          headers: { authorization: "Bearer lan-secret" },
+        })
       ).status,
       404,
     );
     // Loopback hostnames must never be treated as an exposed bind.
     process.env.ADE_HOST = "localhost";
-    assert.equal((await handleLocalApi(lanRequest())).status, 403);
+    assert.equal((await lanRequest()).status, 403);
   } finally {
     delete process.env.ADE_HOST;
     delete process.env.ADE_TOKEN;
@@ -440,37 +350,30 @@ test("opt-in exposure is token-gated, loopback stays exempt, and login sets the 
 
 test("oversized request bodies are refused without being fully read", async () => {
   const huge = "x".repeat(2 * 1024 * 1024);
-  const declared = await handleLocalApi({
+  let read = false;
+  const declared = await api({
     url: "http://192.168.1.50:3000/api/auth",
-    method: "POST",
-    headers: {
-      get: (name) => (name === "content-length" ? String(huge.length) : null),
-      entries: () => [
-        ["host", "192.168.1.50:3000"],
-        ["content-length", String(huge.length)],
-      ],
-    },
-    runtime: { node: { req: { socket: { remoteAddress: "203.0.113.8" } } } },
-    text: async () => JSON.stringify({ token: huge }),
+    headers: { "content-length": String(huge.length) },
+    body: (async function* () {
+      read = true;
+      yield JSON.stringify({ token: huge });
+    })(),
+    remoteAddress: "203.0.113.8",
   });
   assert.equal(declared.status, 413);
+  assert.equal(read, false, "a declared oversize body is refused before reading");
   let cancelled = false;
-  const stream = new ReadableStream({
-    // A pull-based attacker body: every read yields another large chunk, so
-    // the reader hits the cap mid-stream and must actually cancel.
-    pull(controller) {
-      controller.enqueue(new TextEncoder().encode("x".repeat(700_000)));
-    },
-    cancel() {
-      cancelled = true;
-    },
-  });
-  const streamed = await handleLocalApi({
+  const streamed = await api({
     url: "http://127.0.0.1:3000/api/auth",
-    method: "POST",
-    headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "127.0.0.1" } } } },
-    body: stream,
+    // A pull-based attacker body without a declared length: every read yields
+    // another large chunk, so the reader hits the cap mid-stream and must stop.
+    body: (async function* () {
+      try {
+        for (;;) yield "x".repeat(700_000);
+      } finally {
+        cancelled = true;
+      }
+    })(),
   });
   assert.equal(streamed.status, 413);
   assert.equal(cancelled, true);

@@ -31,23 +31,17 @@ process.env.HOME = home;
 // os.homedir() reads USERPROFILE on Windows, not HOME; without this the
 // tests would write into the real ~/.ade workspace.
 process.env.USERPROFILE = home;
-const { handleLocalApi } = await import("./ade-local.mjs");
+const { handle, start } = await import("./ade-local.mjs");
+const { callApi } = await import("./api-request.test-helper.mjs");
+await start();
 
 async function call(pathname, data, remoteAddress = "127.0.0.1", host = "127.0.0.1:3000") {
-  const request = {
+  const response = await callApi(handle, {
     url: `http://127.0.0.1:3000${pathname}`,
-    method: data === undefined ? "GET" : "POST",
-    headers: {
-      entries: () => [
-        ["host", host],
-        ["origin", "http://127.0.0.1:3000"],
-      ],
-      get: () => null,
-    },
-    runtime: { node: { req: { socket: { remoteAddress } } } },
-    text: async () => JSON.stringify(data ?? {}),
-  };
-  const response = await handleLocalApi(request);
+    headers: { host, origin: "http://127.0.0.1:3000" },
+    body: data,
+    remoteAddress,
+  });
   return { status: response.status, body: await response.json() };
 }
 
@@ -272,12 +266,10 @@ test("host terminal rejects private-LAN peers when no token gate is configured",
   delete process.env.ADE_TOKEN;
   // No Origin header, so only the peer/Host rule can refuse these.
   const lanCall = async (remoteAddress) => {
-    const response = await handleLocalApi({
+    const response = await callApi(handle, {
       url: "http://192.168.1.50:3000/api/terminal",
-      method: "POST",
-      headers: { entries: () => [["host", "192.168.1.50:3000"]], get: () => null },
-      runtime: { node: { req: { socket: { remoteAddress } } } },
-      text: async () => JSON.stringify({ projectId: "project-1", cols: 80, rows: 24 }),
+      body: { projectId: "project-1", cols: 80, rows: 24 },
+      remoteAddress,
     });
     return response.status;
   };

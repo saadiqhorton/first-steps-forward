@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { createServer } from "node:http";
 import { WebSocket } from "ws";
 import { createControlRegistry } from "./browser-control.mjs";
 import { createBrowserStreamServer } from "./browser-stream-server.mjs";
@@ -111,8 +112,28 @@ async function until(check, label, timeoutMs = 2000) {
   }
 }
 
+const bases = new WeakMap();
+/** Serves the stream the way ADE does: upgrades on the HTTP server that serves the UI. */
+async function listen(t, server) {
+  const http = createServer((req, res) => {
+    res.writeHead(404);
+    res.end();
+  });
+  http.on("upgrade", (req, socket, head) => {
+    if (server.handleUpgrade(req, socket, head)) return;
+    socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+  });
+  await new Promise((resolve) => http.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    http.closeAllConnections();
+    return new Promise((resolve) => http.close(resolve));
+  });
+  bases.set(server, `ws://127.0.0.1:${http.address().port}`);
+}
+
 function streamUrl(server, project, viewer, extra = {}) {
-  const url = new URL(server.url(project));
+  const url = new URL(server.url(project), bases.get(server));
   url.searchParams.set("viewer", viewer);
   for (const [key, value] of Object.entries(extra)) url.searchParams.set(key, String(value));
   return url.toString();
@@ -146,8 +167,8 @@ async function closedWith(client) {
 
 test("rejects a bad token and a disallowed origin with 4401", async (t) => {
   const { server } = setup(t);
-  await server.start();
-  const badToken = new URL(server.url("p1"));
+  await listen(t, server);
+  const badToken = new URL(server.url("p1"), bases.get(server));
   badToken.searchParams.set("token", "nope");
   badToken.searchParams.set("viewer", "A");
   const badTokenClient = await open(badToken.toString());
@@ -157,10 +178,17 @@ test("rejects a bad token and a disallowed origin with 4401", async (t) => {
   assert.equal((await closedWith(badOrigin)).code, 4401);
 });
 
-test("listens on loopback only", async (t) => {
+test("issues an origin-relative /preview-stream URL and leaves other upgrades alone", async (t) => {
   const { server } = setup(t);
-  await server.start();
-  assert.equal(server.address().address, "127.0.0.1");
+  const url = new URL(server.url("p 1"), "http://ade.test");
+  assert.equal(url.origin, "http://ade.test");
+  assert.equal(url.pathname, "/preview-stream");
+  assert.equal(url.searchParams.get("project"), "p 1");
+  assert.match(url.searchParams.get("token"), /^[0-9a-f]{48}$/);
+  await listen(t, server);
+  const other = new WebSocket(`${bases.get(server)}/other`, { headers: { Origin: ORIGIN } });
+  const [error] = await once(other, "error");
+  assert.match(error.message, /404/);
 });
 
 test("passes the upgrade request to the origin check", async (t) => {
@@ -174,7 +202,7 @@ test("passes the upgrade request to the origin check", async (t) => {
     },
   });
   t.after(() => server.close());
-  await server.start();
+  await listen(t, server);
   const client = await open(streamUrl(server, "p1", "A"));
   assert.equal((await closedWith(client)).code, 4401);
   assert.match(seen[0], /127\.0\.0\.1$/);
@@ -182,7 +210,7 @@ test("passes the upgrade request to the origin check", async (t) => {
 
 test("closes with 4503 and a JSON reason when the browser is unavailable", async (t) => {
   const { server } = setup(t);
-  await server.start();
+  await listen(t, server);
   const client = await open(streamUrl(server, "down", "A"));
   const close = await closedWith(client);
   assert.equal(close.code, 4503);
@@ -194,7 +222,7 @@ test("closes with 4503 and a JSON reason when the browser is unavailable", async
 test("on connect sends viewport, control and nav, and starts a clamped screencast", async (t) => {
   const sessions = new Map();
   const { server } = setup(t, { sessions });
-  await server.start();
+  await listen(t, server);
   const client = await open(
     streamUrl(server, "p1", "A", { maxWidth: 99999, maxHeight: 500, quality: 40 }),
   );
@@ -224,7 +252,7 @@ test("on connect sends viewport, control and nav, and starts a clamped screencas
 test("forwards JPEG frames and acks Chromium only after the viewer acks", async (t) => {
   const sessions = new Map();
   const { server } = setup(t, { sessions });
-  await server.start();
+  await listen(t, server);
   const client = await open(streamUrl(server, "p1", "A"));
   await until(() => sessions.get("p1")?.screencasts.length === 1, "screencast");
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
@@ -243,7 +271,7 @@ test("forwards JPEG frames and acks Chromium only after the viewer acks", async 
 test("gates input to the owner and broadcasts control to the second viewer", async (t) => {
   const sessions = new Map();
   const { server } = setup(t, { sessions });
-  await server.start();
+  await listen(t, server);
   const a = await open(streamUrl(server, "p1", "A"));
   const b = await open(streamUrl(server, "p1", "B"));
   await until(() => sessions.get("p1")?.screencasts.length === 2, "two screencasts");
@@ -303,7 +331,7 @@ test("gates input to the owner and broadcasts control to the second viewer", asy
 test("a copy key sends the copied text to that viewer only, and file pickers ride on control", async (t) => {
   const sessions = new Map();
   const { server } = setup(t, { sessions });
-  await server.start();
+  await listen(t, server);
   const a = await open(streamUrl(server, "p1", "A"));
   const b = await open(streamUrl(server, "p1", "B"));
   await until(() => sessions.get("p1")?.screencasts.length === 2, "two screencasts");
@@ -327,7 +355,7 @@ test("a copy key sends the copied text to that viewer only, and file pickers rid
 test("ignores malformed and oversized messages", async (t) => {
   const sessions = new Map();
   const { server } = setup(t, { sessions });
-  await server.start();
+  await listen(t, server);
   const a = await open(streamUrl(server, "p1", "A"));
   await until(() => sessions.get("p1")?.screencasts.length === 1, "screencast");
   a.send({ type: "takeControl" });
@@ -345,7 +373,7 @@ test("ignores malformed and oversized messages", async (t) => {
 test("releases control when the owner's last socket closes, and releases held keys", async (t) => {
   const sessions = new Map();
   const { server, controls } = setup(t, { sessions });
-  await server.start();
+  await listen(t, server);
   const a = await open(streamUrl(server, "p1", "A"));
   const b = await open(streamUrl(server, "p1", "B"));
   await until(() => sessions.get("p1")?.screencasts.length === 2, "two screencasts");
@@ -375,7 +403,7 @@ test("releases control when the owner's last socket closes, and releases held ke
 test("a slow viewer is dropped with 1013 after 64 unacked frames, and every frame is acked", async (t) => {
   const sessions = new Map();
   const { server } = setup(t, { sessions });
-  await server.start();
+  await listen(t, server);
   const client = await open(streamUrl(server, "p1", "A"));
   await until(() => sessions.get("p1")?.screencasts.length === 1, "screencast");
   const session = sessions.get("p1");

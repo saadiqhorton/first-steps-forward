@@ -11,18 +11,17 @@
 
 /** True when this origin exposes the async Clipboard API (https or loopback). */
 export function hasAsyncClipboard(): boolean {
-  if (typeof navigator === "undefined" || typeof window === "undefined") return false;
   if (!window.isSecureContext) return false;
   return typeof navigator.clipboard?.writeText === "function";
 }
 
 /** True when the page is on an origin where the browser withholds the Clipboard API. */
 export function isInsecureOrigin(): boolean {
-  return typeof window !== "undefined" && !window.isSecureContext;
+  return !window.isSecureContext;
 }
 
 function copyWithSelection(text: string): boolean {
-  if (typeof document === "undefined" || !document.body) return false;
+  if (!document.body) return false;
   const active = document.activeElement;
   const previous = document.getSelection();
   const saved = previous && previous.rangeCount > 0 ? previous.getRangeAt(0) : null;

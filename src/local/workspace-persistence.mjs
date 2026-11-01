@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Preserve append-only session history when a dev-server reload has another in-memory snapshot. */
+/** Preserve append-only session history another ADE process saved since this one loaded. */
 export function mergeWorkspaceMessages(current, saved) {
   for (const previous of saved.sessions ?? []) {
     let session = current.sessions.find((item) => item.id === previous.id);
@@ -38,7 +38,10 @@ export async function reconcileWorkspaceMessages(file, current) {
   mergeWorkspaceMessages(current, saved);
 }
 
-/** Serialize read/merge/write across Vite and SSR module instances sharing this file. */
+/**
+ * Serialize read/merge/write across ADE processes sharing this file: a dev and a
+ * production ADE (or a dev server mid-restart) may run against the same ~/.ade.
+ */
 export async function saveWorkspace(file, current) {
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const lock = `${file}.lock`;

@@ -38,7 +38,6 @@ const FILTERS: { id: WorkflowFilter; label: string }[] = [
 
 export const Route = createFileRoute("/p/$projectId/workflows")({
   head: () => ({ meta: [{ title: "Workflows — ADE" }] }),
-  ssr: false,
   validateSearch: (search: Record<string, unknown>): WorkflowsSearch => {
     const raw = search["new"];
     const isNew = raw === true || raw === "true" || raw === "1" || raw === 1 ? true : undefined;

@@ -39,18 +39,12 @@ process.env.USERPROFILE = home;
 process.env.GIT_CONFIG_COUNT = "1";
 process.env.GIT_CONFIG_KEY_0 = `url.${path.join(home, "remote")}/.insteadOf`;
 process.env.GIT_CONFIG_VALUE_0 = "https://github.com/";
-const { handleLocalApi } = await import("./ade-local.mjs");
+const { handle, start } = await import("./ade-local.mjs");
+const { callApi } = await import("./api-request.test-helper.mjs");
+await start();
 
 const call = async (urlPath, body) => {
-  const method = body === undefined ? "GET" : "POST";
-  const request = {
-    url: `http://127.0.0.1:3000${urlPath}`,
-    method,
-    headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "127.0.0.1" } } } },
-    text: async () => (body === undefined ? "" : JSON.stringify(body)),
-  };
-  const response = await handleLocalApi(request);
+  const response = await callApi(handle, { url: `http://127.0.0.1:3000${urlPath}`, body });
   return { status: response.status, body: await response.json() };
 };
 

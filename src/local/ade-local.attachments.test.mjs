@@ -70,8 +70,10 @@ process.env.HOME = home;
 // tests would write into the real ~/.ade workspace.
 process.env.USERPROFILE = home;
 
-const { handleLocalApi, _setAgentsForTest, _sessionBusyForTest } = await import("./ade-local.mjs");
+const { handle, start, _setAgentsForTest, _sessionBusyForTest } = await import("./ade-local.mjs");
+const { callApi } = await import("./api-request.test-helper.mjs");
 _setAgentsForTest(seedAgents);
+await start();
 
 // A stop returns before the interrupted turn has fully wound down; a new
 // session in the same project is refused until the slot is released.
@@ -84,15 +86,11 @@ const settled = async (id) => {
 };
 
 const callJson = async (urlPath, body) => {
-  const method = body === undefined ? "GET" : "POST";
-  const req = {
+  const res = await callApi(handle, {
     url: `http://127.0.0.1:3000${urlPath}`,
-    method,
-    headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "::ffff:127.0.0.1" } } } },
-    text: async () => (body === undefined ? "" : JSON.stringify(body)),
-  };
-  const res = await handleLocalApi(req);
+    body,
+    remoteAddress: "::ffff:127.0.0.1",
+  });
   const ct = res.headers.get("content-type") ?? "";
   if (ct.includes("application/json")) {
     return { status: res.status, json: await res.json(), bytes: null };

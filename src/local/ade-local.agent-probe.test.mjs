@@ -52,14 +52,13 @@ process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
 
-const { handleLocalApi } = await import("./ade-local.mjs");
+const { handle, start } = await import("./ade-local.mjs");
+const { callApi } = await import("./api-request.test-helper.mjs");
+await start();
 const call = async (urlPath) => {
-  const res = await handleLocalApi({
+  const res = await callApi(handle, {
     url: `http://127.0.0.1:3000${urlPath}`,
-    method: "GET",
-    headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "::ffff:127.0.0.1" } } } },
-    text: async () => "{}",
+    remoteAddress: "::ffff:127.0.0.1",
   });
   return { status: res.status, json: await res.json() };
 };
@@ -120,13 +119,11 @@ test("a restart inside the interval trusts the cached fetchedAt", { skip }, asyn
     JSON.stringify({ fetchedAt: Date.now(), agents: cachedAgents }),
   );
   const fresh = await import("./ade-local.mjs?restart");
+  await fresh.start();
   const before = versionProbes();
-  const res = await fresh.handleLocalApi({
+  const res = await callApi(fresh.handle, {
     url: "http://127.0.0.1:3000/api/bootstrap",
-    method: "GET",
-    headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "::ffff:127.0.0.1" } } } },
-    text: async () => "{}",
+    remoteAddress: "::ffff:127.0.0.1",
   });
   assert.equal(res.status, 200);
   await settle();

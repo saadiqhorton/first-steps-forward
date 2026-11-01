@@ -5,7 +5,6 @@ import { useAde } from "@/lib/ade/store";
 import { markViewed } from "@/lib/ade/viewed";
 
 export const Route = createFileRoute("/p/$projectId/conversations/$sessionId")({
-  ssr: false,
   head: () => ({ meta: [{ title: "Work session — ADE" }] }),
   component: ProjectSessionPage,
   notFoundComponent: () => (
