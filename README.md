@@ -4,7 +4,27 @@ ADE is an open-source workspace for local coding-agent CLIs. It does not require
 
 ## Run locally
 
-Requirements: Node.js 22+, npm, Git, and whichever coding-agent CLIs/providers you plan to use. The agent browser needs nothing else: ADE downloads its own headless Chrome the first time a project uses it.
+Requirements: Node.js 22+ and Git. Install whichever coding-agent CLI you plan to use. The terminal and browser are optional.
+
+### Quick start
+
+Run ADE without cloning the repository or installing its development dependencies:
+
+```sh
+npx @saadiqhorton/ade
+```
+
+Open the printed address (by default `http://127.0.0.1:3000`). To choose a port or open it automatically:
+
+```sh
+npx @saadiqhorton/ade --port 3100 --open
+```
+
+Check this machine's setup with `npx @saadiqhorton/ade doctor`. The built-in terminal is optional; when its platform binary is unavailable, the rest of ADE still works. `ade browser-setup` explains or installs host packages needed by Chrome on supported Linux systems.
+
+### Run from source
+
+For development, clone the repository and install its development dependencies:
 
 ```sh
 npm install

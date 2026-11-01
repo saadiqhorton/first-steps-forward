@@ -6,27 +6,14 @@
 // unauthenticated. Loopback clients (the agent CLIs, local curls) stay exempt
 // from the token either way.
 import { fileURLToPath } from "node:url";
-import { isLoopbackHost, resolveBindHost } from "../src/local/bind-host.mjs";
-import { startAdeServer } from "../src/local/server.mjs";
+import { launchAde } from "../src/local/launch.mjs";
 
-let host;
 try {
-  host = resolveBindHost();
+  await launchAde({
+    port: Number(process.env.PORT ?? 3000),
+    staticDir: fileURLToPath(new URL("../.output/public", import.meta.url)),
+  });
 } catch (error) {
   console.error(error.message);
   process.exit(1);
-}
-const server = await startAdeServer({
-  host,
-  port: Number(process.env.PORT ?? 3000),
-  staticDir: fileURLToPath(new URL("../.output/public", import.meta.url)),
-});
-const { port } = /** @type {import("node:net").AddressInfo} */ (server.address());
-const url = `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
-if (isLoopbackHost(host)) {
-  console.log(`ADE is listening on ${url}`);
-} else {
-  console.log(
-    `ADE is listening on ${url} — token required from non-loopback clients (Authorization: Bearer <ADE_TOKEN>). Plain HTTP travels unencrypted; prefer a Tailscale address, or run \`tailscale serve --bg https / http://127.0.0.1:${port}\` for HTTPS.`,
-  );
 }
