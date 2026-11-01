@@ -26,7 +26,7 @@ npx @saadiqhorton/ade --port 3100 --open
 npx @saadiqhorton/ade --remote
 ```
 
-ADE prints a sign-in link; open it once on each device and that device stays signed in. With [Tailscale](https://tailscale.com/download) connected the link is HTTPS and only devices on your tailnet can reach it (ADE runs `tailscale serve` while it is up and nothing stays in your Tailscale settings afterward). Without Tailscale, the link works on the same Wi-Fi over plain HTTP, so use it at home, not on public networks. The access token in the link is kept in `~/.ade/remote-token`; delete that file to sign every device out. The built-in terminal, file editor, and CLI installs stay available only on the computer running ADE.
+ADE prints a sign-in link for devices on the same Wi-Fi; open it once on each device and that device stays signed in. The link is plain HTTP, so use it on your home network, not on public Wi-Fi. Nothing else is needed. If [Tailscale](https://tailscale.com) is already connected, ADE also prints a link that works from your other Tailscale devices wherever they are (HTTPS through `tailscale serve` while ADE runs, when your tailnet allows it). The access token in the links is kept in `~/.ade/remote-token`; delete that file to sign every device out. The built-in terminal, file editor, and CLI installs stay available only on the computer running ADE.
 
 Check this machine's setup with `npx @saadiqhorton/ade doctor`. The built-in terminal is optional; when its platform binary is unavailable, the rest of ADE still works. `ade browser-setup` explains or installs host packages needed by Chrome on supported Linux systems.
 
