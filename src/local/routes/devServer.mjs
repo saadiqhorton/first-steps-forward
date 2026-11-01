@@ -1,24 +1,19 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { processRunsIn as processMatches, stopProcess as stopChild } from "../spawn.mjs";
+
+/** `/api/projects/:id/dev/*` and `/api/processes/:id/*`: start, stop and read the dev server. */
 export async function devServer(ctx) {
   const {
     req,
     res,
     parts,
-    path,
-    processMatches,
-    stopChild,
     state,
     children,
     devStartClaims,
-    id,
     now,
     save,
     startDevServer,
-    devView,
     refreshDevProcess,
     json,
-    start,
-    stop,
   } = ctx;
   if (req.method === "GET" && parts[0] === "projects" && parts[2] === "dev") {
     const project = state.projects.find((x) => x.id === parts[1]);
@@ -158,3 +153,9 @@ export async function devServer(ctx) {
   }
   return ctx.handled || res.writableEnded;
 }
+/** Compact agent-facing view of a dev record: port only while running. */
+const devView = (proc) => ({
+  status: proc.status,
+  port: proc.status === "running" ? proc.port : 0,
+  command: proc.command,
+});

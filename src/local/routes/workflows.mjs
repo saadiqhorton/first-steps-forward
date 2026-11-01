@@ -1,19 +1,10 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { listWorkflows, upsertWorkflow, deleteWorkflow as removeWorkflow } from "../workflows.mjs";
+import { adapters } from "../adapters/index.mjs";
+import { body } from "../http.mjs";
+
+/** `/api/workflows`: list, save and delete workflows. */
 export async function workflows(ctx) {
-  const {
-    req,
-    res,
-    parts,
-    adapters,
-    listWorkflows,
-    upsertWorkflow,
-    removeWorkflow,
-    state,
-    id,
-    save,
-    json,
-    body,
-  } = ctx;
+  const { req, res, parts, state, save, json } = ctx;
   if (parts[0] === "workflows") {
     const agentIds = Object.keys(adapters);
     if (req.method === "GET" && parts.length === 1)

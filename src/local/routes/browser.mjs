@@ -1,16 +1,18 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { COMPUTER_ERROR_STATUS } from "../computer.mjs";
+import { INCOGNITO_PROFILE_ID } from "../browser-contexts.mjs";
+import { HumanControlError } from "../browser-control.mjs";
+import { resolveAttachments } from "../attachments.mjs";
+import { body, PayloadTooLarge } from "../http.mjs";
+
+const OBSERVE_BROWSER_ACTIONS = new Set(["status", "snapshot", "screenshot", "wait_for"]);
+const OBSERVE_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
+
+/** `/api/projects/:id/computer|browser/*`: the project's agent browser and its tools. */
 export async function browser(ctx) {
   const {
     req,
     res,
-    url,
     parts,
-    which,
-    run,
-    COMPUTER_ERROR_STATUS,
-    INCOGNITO_PROFILE_ID,
-    HumanControlError,
-    resolveAttachments,
     DATA_DIR,
     state,
     browserContexts,
@@ -18,16 +20,9 @@ export async function browser(ctx) {
     browserHub,
     computers,
     browserStream,
-    OBSERVE_BROWSER_ACTIONS,
-    OBSERVE_COMPUTER_ACTIONS,
-    id,
     save,
     computerView,
     json,
-    PayloadTooLarge,
-    body,
-    start,
-    stop,
   } = ctx;
   if (parts[0] === "projects" && parts[2] === "computer") {
     const project = state.projects.find((x) => x.id === parts[1]);

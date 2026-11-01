@@ -1,4 +1,26 @@
-import { connect, createServer } from "node:net";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { processRunsIn as processMatches } from "./spawn.mjs";
+import { adapters } from "./adapters/index.mjs";
+import { getDiff, projectInfo } from "./project-git.mjs";
+import { createSessionTurns, shrinkLogLine, TurnRefused } from "./session-turns.mjs";
+import { adeRoot, createComputerManager, SCREEN } from "./computer.mjs";
+import { createBrowserHub } from "./browser-page.mjs";
+import { createBrowserInstaller } from "./browser-install.mjs";
+import { createBrowserContexts, INCOGNITO_PROFILE_ID } from "./browser-contexts.mjs";
+import { diagnoseLaunchFailure } from "./browser-host.mjs";
+import { TOOLS as COMPUTER_TOOLS } from "./computer-tools-defs.mjs";
+import { createBrowserStreamServer } from "./browser-stream-server.mjs";
+import { createControlRegistry } from "./browser-control.mjs";
+import { saveWorkspace } from "./workspace-persistence.mjs";
+import { createEventHub } from "./events.mjs";
+import { createSessionLogs } from "./session-logs.mjs";
+import { SourceError } from "./project-sources.mjs";
+import { body, json, PayloadTooLarge } from "./http.mjs";
+import { createDevServers } from "./dev-server.mjs";
+import { createAgentStatus } from "./agent-status.mjs";
 import { terminal } from "./routes/terminal.mjs";
 import { editor } from "./routes/editor.mjs";
 import { events } from "./routes/events.mjs";
@@ -10,77 +32,27 @@ import { browser } from "./routes/browser.mjs";
 import { devServer } from "./routes/devServer.mjs";
 import { agents } from "./routes/agents.mjs";
 import { workflows } from "./routes/workflows.mjs";
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { promises as fs } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import {
-  findOnPath as which,
-  processRunsIn as processMatches,
-  runCommand as run,
-  spawnCommand as spawn,
-  stopProcess as stopChild,
-} from "./spawn.mjs";
-import { adapters } from "./adapters/index.mjs";
-import { describeAgent } from "./adapters/kit.mjs";
-import { getDiff, projectInfo } from "./project-git.mjs";
-import { checksFor, packageManager } from "./project-scripts.mjs";
-import {
-  addLog,
-  addMessage,
-  createSessionTurns,
-  shrinkLogLine,
-  TurnRefused,
-} from "./session-turns.mjs";
-import { adeRoot, COMPUTER_ERROR_STATUS, createComputerManager, SCREEN } from "./computer.mjs";
-import { createBrowserHub } from "./browser-page.mjs";
-import { createBrowserInstaller } from "./browser-install.mjs";
-import { createBrowserContexts, INCOGNITO_PROFILE_ID } from "./browser-contexts.mjs";
-import { diagnoseLaunchFailure } from "./browser-host.mjs";
-import { TOOLS as COMPUTER_TOOLS } from "./computer-tools-defs.mjs";
-import { createBrowserStreamServer } from "./browser-stream-server.mjs";
-import { createControlRegistry, HumanControlError } from "./browser-control.mjs";
-import { MODEL_ID, clearModelsCache } from "./models.mjs";
-import { optionCapabilities, validateOptions } from "./capabilities.mjs";
-import {
-  compareVersions,
-  detectInstallMethod,
-  latestVersion,
-  createHarnessJobs,
-} from "./harness.mjs";
-import { listWorkflows, upsertWorkflow, deleteWorkflow as removeWorkflow } from "./workflows.mjs";
-import { saveWorkspace } from "./workspace-persistence.mjs";
-import { createEventHub } from "./events.mjs";
-import { createSessionLogs } from "./session-logs.mjs";
-import {
-  SourceError,
-  cloneRepository,
-  createProjectFolder,
-  expandUserPath,
-  makeDirectory,
-  parseRepoSource,
-} from "./project-sources.mjs";
-import {
-  decodeBase64,
-  readAttachment,
-  resolveAttachments,
-  saveAttachment,
-} from "./attachments.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
 const sessionLogs = createSessionLogs(path.join(DATA_DIR, "session-logs"));
 const eventHub = createEventHub();
 const state = { projects: [], sessions: [], processes: [], agents: [], workflows: [] };
-const children = new Map();
+const { children, devStartClaims, startDevServer, devServerStatus, refreshDevProcess } =
+  createDevServers({ state, save });
+export { refreshDevProcess };
+const {
+  harnessJobs,
+  agentStatus,
+  bootstrapAgents,
+  probeAgentsIfDue,
+  listAgentModels,
+  resolveSessionOptions,
+} = createAgentStatus({ state, dataDir: DATA_DIR, emit: (scope) => eventHub.emit(scope) });
 const authChildren = new Map();
-// Process ids whose dev-server port has been confirmed to accept a
-// connection; a process that dies before that never actually listened.
-const listenedProcs = new Set();
 // Loopback base URL of the server this module is mounted on, recorded when it
 // starts listening (see setListenAddress); null until then.
 let listenBaseUrl = null;
-const devStartClaims = new Set();
 // One agent computer (headless Chrome) per project; see computer.mjs.
 const browserInstaller = createBrowserInstaller({ baseDir: DATA_DIR });
 const browserContexts = createBrowserContexts({
@@ -123,14 +95,6 @@ const browserStream = createBrowserStreamServer({
   controls,
   originAllowed: (origin, req) => streamOriginAllowed(origin, req),
 });
-const OBSERVE_BROWSER_ACTIONS = new Set(["status", "snapshot", "screenshot", "wait_for"]);
-const OBSERVE_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
-const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
-let probingAgents = false;
-// A probe spawns ~17 processes, so the bootstrap poll only starts one this long after the last.
-// Explicit refreshes (agentStatus called directly) ignore it.
-const AGENT_PROBE_INTERVAL_MS = 60_000;
-let lastProbeStartedAt = 0;
 let refreshingBootstrap = false;
 let clientRefreshTimer = null;
 let computerWatchTimer = null;
@@ -265,138 +229,6 @@ async function load() {
     if (changed) await save();
   } catch {}
 }
-async function executable(bin) {
-  const res = await run(bin, ["--version"], { timeout: 5000 });
-  return res.code === 0 ? (res.stdout || res.stderr).trim().split(/\r?\n/)[0].slice(0, 100) : null;
-}
-// The global npm root only changes when npm itself does, so one lookup serves every probe.
-// A failed lookup is retried, and a finished harness job clears it.
-let npmRootLookup = null;
-function npmRoot() {
-  npmRootLookup ??= (async () => {
-    const res = await run("npm", ["root", "-g"], { timeout: 5000 });
-    if (res.code !== 0) return null;
-    const root = (res.stdout || "").trim().split(/\r?\n/)[0]?.trim();
-    return root || null;
-  })()
-    .catch(() => null)
-    .then((root) => {
-      if (!root) npmRootLookup = null;
-      return root;
-    });
-  return npmRootLookup;
-}
-const harnessDetectDeps = {
-  which,
-  npmRoot,
-  realpath: (p) => fs.realpath(p),
-};
-const harnessJobs = createHarnessJobs({
-  onChange: (job) => eventHub.emit(`harness:${job.agentId}`),
-  spawn,
-  onFinished: () => {
-    clearModelsCache(DATA_DIR, Object.keys(adapters));
-    npmRootLookup = null;
-    agentStatus().catch(() => {});
-  },
-});
-
-async function agentStatus() {
-  lastProbeStartedAt = now();
-  const results = await Promise.all(
-    Object.values(adapters).map(async (adapter) => {
-      const version = await executable(adapter.bin);
-      const auth = version ? await adapter.detectAuth(run) : { signedIn: false };
-      const install = await detectInstallMethod(adapter, harnessDetectDeps);
-      const row = {
-        ...describeAgent(adapter),
-        installed: !!version,
-        // "codex-cli 0.158.0" and "2.1.307 (Claude Code)" both report the number.
-        ...(version
-          ? { version: version.match(/\d+(?:\.\d+)+\S*/)?.[0] ?? version.replace(/^.*?\s/, "") }
-          : {}),
-        ...auth,
-        carriesConversation: true,
-        installMethod: install.method,
-        ...(install.path ? { installPath: install.path } : {}),
-      };
-      return row;
-    }),
-  );
-  state.agents = results;
-  // The cache is stamped with when this probe finished. The latest-version writes below reuse it:
-  // stamping them with their own, later time would push the next probe back each time one lands.
-  const fetchedAt = Date.now();
-  await writeAgentsStatus(results, fetchedAt);
-  eventHub.emit("agents");
-  // Background, non-blocking latest-version checks — next bootstrap poll picks them up.
-  for (const agent of results) {
-    // A CLI that updates itself in place is never behind in a way ADE can fix.
-    if (adapters[agent.id]?.harness.selfUpdates && agent.installMethod !== "npm") continue;
-    void (async () => {
-      const latest = await latestVersion(adapters[agent.id], run);
-      if (latest == null) return;
-      const current = state.agents.find((a) => a.id === agent.id);
-      if (!current) return;
-      current.latestVersion = latest;
-      if (current.version && compareVersions(current.version, latest) < 0)
-        current.updateAvailable = true;
-      else delete current.updateAvailable;
-      await writeAgentsStatus(state.agents, fetchedAt);
-      eventHub.emit("agents");
-    })();
-  }
-  return results;
-}
-// Write-then-rename: a reader (another ADE instance, or this one restarting) must never see a
-// truncated file, which would parse as "no cache" and re-probe every CLI.
-async function writeAgentsStatus(agents, fetchedAt) {
-  const tmp = `${AGENTS_STATUS_FILE}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
-    await fs.writeFile(tmp, JSON.stringify({ fetchedAt, agents }), { mode: 0o600 });
-    await fs.rename(tmp, AGENTS_STATUS_FILE);
-  } catch {
-    await fs.rm(tmp, { force: true }).catch(() => {});
-  }
-}
-
-/**
- * Fast path for the UI's 2-second bootstrap poll: return the last probed
- * agent status immediately (persisted under ~/.ade) and refresh the real
- * probes in the background — the next poll picks them up. Only the very
- * first bootstrap after the store is wiped pays the full probe latency.
- * A single background probe runs at a time, and none starts within
- * AGENT_PROBE_INTERVAL_MS of the last (this process's, or the cached file's
- * `fetchedAt` after a restart) so polls can't stampede CLIs.
- */
-async function bootstrapAgents() {
-  let cached = null;
-  try {
-    cached = JSON.parse(await fs.readFile(AGENTS_STATUS_FILE, "utf8"));
-  } catch {}
-  if (cached?.agents) {
-    // What an agent is comes from its adapter, never from an older cache;
-    // only detection (installed, version, sign-in) is reused until the
-    // background probe refreshes it. Agents without an adapter are dropped.
-    state.agents = cached.agents
-      .filter((agent) => adapters[agent.id])
-      .map((agent) => ({ ...agent, ...describeAgent(adapters[agent.id]) }));
-  }
-  // Never make the project list wait on CLI version/auth probes. If there's
-  // no cache yet, return the current (possibly empty) agent list; the normal
-  // bootstrap poll picks up the probe result when it finishes.
-  const lastProbe = Math.max(lastProbeStartedAt, Number(cached?.fetchedAt) || 0);
-  if (!probingAgents && now() - lastProbe >= AGENT_PROBE_INTERVAL_MS) {
-    probingAgents = true;
-    agentStatus()
-      .catch(() => {})
-      .finally(() => {
-        probingAgents = false;
-      });
-  }
-  return state.agents;
-}
 function refreshBootstrapInBackground(activeProjectIds = []) {
   if (refreshingBootstrap) return;
   refreshingBootstrap = true;
@@ -449,15 +281,7 @@ function syncClientRefreshTimer(count) {
   if (count > 0 && !clientRefreshTimer) {
     const tick = () => {
       refreshBootstrapInBackground(eventHub.activeProjects());
-      const lastProbe = Math.max(lastProbeStartedAt, 0);
-      if (!probingAgents && now() - lastProbe >= AGENT_PROBE_INTERVAL_MS) {
-        probingAgents = true;
-        agentStatus()
-          .catch(() => {})
-          .finally(() => {
-            probingAgents = false;
-          });
-      }
+      probeAgentsIfDue();
     };
     tick();
     clientRefreshTimer = setInterval(tick, CLIENT_REFRESH_MS);
@@ -486,161 +310,6 @@ function syncClientRefreshTimer(count) {
 }
 eventHub.onClientsChanged(syncClientRefreshTimer);
 const safeProject = (p) => ({ ...p });
-async function allocatePort() {
-  // Ask the OS for an ephemeral port, but do not return it until nothing
-  // answers there: WSL's mirrored networking (verified) keeps a just-closed
-  // loopback socket connectable for up to ~500 ms, and a false connect would
-  // make waitForListening report "running" before the dev server binds.
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const port = await new Promise((resolve, reject) => {
-      const server = createServer();
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => {
-        const allocated = server.address().port;
-        server.close(() => resolve(allocated));
-      });
-    });
-    const deadline = Date.now() + 1500;
-    while (await probeConnection(port)) {
-      if (Date.now() >= deadline) break;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    if (!(await probeConnection(port))) return port;
-    // Still connectable after 1.5 s: something really owns it — fresh port.
-  }
-  throw new Error("Could not allocate a free loopback port for the dev server.");
-}
-function probeConnection(port) {
-  return new Promise((resolve) => {
-    if (!port) return resolve(false);
-    const socket = connect({ port, host: "127.0.0.1" });
-    const finish = (ok) => {
-      socket.destroy();
-      resolve(ok);
-    };
-    socket.setTimeout(1000, () => finish(false));
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-  });
-}
-/**
- * Only a port that actually accepts a connection proves the dev server is
- * up. Bounded poll: returns false if the process dies first or nothing
- * listens within the window, so the caller can surface the captured stderr
- * tail and reset the port instead of reporting a stale "running".
- */
-async function waitForListening(proc, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!children.has(proc.id)) return false;
-    if (await probeConnection(proc.port)) {
-      listenedProcs.add(proc.id);
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  return false;
-}
-/**
- * Launch path shared by POST /processes/:id/start and the project-scoped
- * dev/start endpoint: framework-mapped flags, fresh port, listen-verified
- * "running", and an honest failure that resets the port.
- */
-async function startDevServer(proc, project) {
-  // Map launch flags to the framework actually in the project: next
-  // rejects --host outright (it takes -H/--hostname), vite and other
-  // --host users take --host/--port, unknown scripts get only the port
-  // plus PORT and HOST=127.0.0.1 in the environment. Launch flags are
-  // computed per start from the stored base args, so restarts never
-  // stack them.
-  const { pkg } = await readDevCommand(project);
-  const framework = detectFramework(pkg, pkg?.scripts?.dev ?? "");
-  proc.port = await allocatePort();
-  listenedProcs.delete(proc.id);
-  const launch = {
-    args: [...baseLaunchArgs(proc.args), ...devServerArgs(framework, proc.port, proc.bin)],
-    // Unknown scripts: --port plus PORT and HOST in the environment. HOST is
-    // best effort (some servers ignore it and bind wider) — the listen probe
-    // then still gates reporting "running", but it connects to 127.0.0.1 and
-    // cannot tell a loopback-only bind from a wide one; say so honestly.
-    ...(framework === "unknown" ? { env: { PORT: String(proc.port), HOST: "127.0.0.1" } } : {}),
-  };
-  spawnProcess(proc, project, launch);
-  // "running" is only reported once the port accepts a connection;
-  // otherwise surface the captured stderr tail and reset the port.
-  const up = await waitForListening(proc);
-  if (up) {
-    proc.status = "running";
-  } else {
-    const allocatedPort = proc.port;
-    const alive = children.has(proc.id);
-    if (alive) stopChild(children.get(proc.id));
-    // Either way it never listened, so the allocated port is unusable:
-    // reset it here (and again in the close handler) so a failed start
-    // never reports a stale port.
-    proc.port = 0;
-    proc.output.push(
-      alive
-        ? `The dev server did not accept a connection on port ${allocatedPort} within 10 seconds; ADE stopped it. Its output is above.`
-        : "The dev server exited before it could listen; its error output is above.",
-    );
-    proc.status = "stopped";
-  }
-  proc.updatedAt = now();
-  await save();
-  return proc;
-}
-/** Compact agent-facing view of a dev record: port only while running. */
-const devView = (proc) => ({
-  status: proc.status,
-  port: proc.status === "running" ? proc.port : 0,
-  command: proc.command,
-});
-/** Resolve and validate effort/speed/permission against the model's capability row. */
-async function resolveSessionOptions(agentId, modelId, options) {
-  const listed = await listAgentModels(agentId);
-  const modelRow =
-    modelId && listed?.available
-      ? (listed.models?.find((m) => m.id === modelId) ?? { id: modelId })
-      : undefined;
-  return validateOptions(adapters[agentId], options, modelRow);
-}
-
-function syncOptionFields(session, value, cleared) {
-  for (const key of ["effort", "speed", "permission"]) {
-    if (cleared.has(key)) delete session[key];
-    else if (value[key] !== undefined) session[key] = value[key];
-  }
-}
-
-/**
- * An agent's model listing at its detected version. An installed, signed-in
- * agent may be asked for its list when ADE has none for that version yet.
- */
-function listAgentModels(agentId) {
-  const agent = state.agents.find((a) => a.id === agentId);
-  return adapters[agentId].listModels({
-    run,
-    version: agent?.version ?? "",
-    cacheDir: DATA_DIR,
-    canProbe: !!(agent?.installed && agent.signedIn),
-  });
-}
-/**
- * Current dev-server state from the ADE-managed process record, rebuilt on
- * every manifest so start/stop between turns is always reflected. Awareness
- * only: the agent is told the workspace owns start/stop (see constraints).
- */
-function devServerStatus(project) {
-  const proc = state.processes.find((p) => p.projectId === project.id);
-  if (!proc)
-    return project.devScriptNote
-      ? "status unknown (package.json could not be read)"
-      : "no dev script detected";
-  if (proc.status === "running") return `running on 127.0.0.1:${proc.port}`;
-  if (proc.status === "starting") return "starting";
-  return proc.startedAt ? "stopped" : "stopped (never started this session)";
-}
 /**
  * Records where the serving HTTP server listens, so agents get a base URL that
  * reaches it from this machine. A wildcard bind is reachable on 127.0.0.1; a
@@ -690,217 +359,6 @@ function agentComputerFor(project) {
     tools: COMPUTER_TOOLS.map((tool) => tool.name).join(", "),
     note: "You have your own browser (headless Chrome on this machine) that the user watches live in ADE. To view or test the project: dev_server_start, then computer_open_url with the localhost URL it reports, then use browser_snapshot refs or screenshots, clicks, and typing to verify behavior like a human QA tester.",
   };
-}
-/**
- * Strip dev-server flags an earlier start may have left in the stored base
- * args (an older ADE persisted them into proc.args): the flags themselves
- * plus the value each one was appended with, so restarts never stack them.
- */
-function baseLaunchArgs(args) {
-  const out = [];
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (arg === "--" || arg === "127.0.0.1") continue;
-    if (["--host", "-H", "--hostname", "--port", "-p"].includes(arg)) {
-      i += 1;
-      continue;
-    }
-    out.push(arg);
-  }
-  return out;
-}
-function spawnProcess(proc, project, launch = {}) {
-  const args = launch.args ?? proc.args;
-  const child = spawn(proc.bin, args, {
-    cwd: project.path,
-    env: { ...process.env, ...(launch.env ?? {}) },
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: false,
-    detached: process.platform !== "win32",
-  });
-  proc.pid = child.pid;
-  // "starting" until the port proves it accepts connections (see
-  // waitForListening); the start route flips it to "running" or back.
-  proc.status = "starting";
-  proc.startedAt = now();
-  proc.output = [`$ ${proc.bin} ${args.join(" ")}`];
-  children.set(proc.id, child);
-  const line = (data) => {
-    proc.output = [...proc.output, ...data.toString().split(/\r?\n/).filter(Boolean)].slice(-300);
-    proc.updatedAt = now();
-    save().catch(() => {});
-  };
-  child.stdout.on("data", line);
-  child.stderr.on("data", line);
-  child.on("error", (e) => {
-    proc.status = "stopped";
-    delete proc.pid;
-    // A process that never listened leaves no usable port behind.
-    if (!listenedProcs.has(proc.id)) proc.port = 0;
-    proc.output.push(e.message);
-    children.delete(proc.id);
-    save().catch(() => {});
-  });
-  child.on("close", (code) => {
-    proc.status = "stopped";
-    delete proc.pid;
-    if (!listenedProcs.has(proc.id)) proc.port = 0;
-    proc.exitCode = code;
-    proc.output.push(`Process exited (${code ?? "signal"})`);
-    children.delete(proc.id);
-    save().catch(() => {});
-  });
-  return proc;
-}
-/**
- * Read package.json fresh on every call (never cached): detect the dev
- * script and its package manager, or return a distinct note when the file
- * is unreadable or malformed instead of silently reporting "no script".
- */
-async function readDevCommand(project) {
-  try {
-    const pkg = JSON.parse(await fs.readFile(path.join(project.path, "package.json"), "utf8"));
-    const manager = await packageManager(project, pkg);
-    return { pkg, devCommand: pkg.scripts?.dev ? `${manager} run dev` : "", note: null };
-  } catch (error) {
-    return {
-      pkg: {},
-      devCommand: "",
-      note: `package.json could not be read or parsed (${error.message}); the dev script cannot be detected until the file is valid JSON.`,
-    };
-  }
-}
-/**
- * Re-evaluate scripts.dev for a project — called on every bootstrap poll —
- * and create or refresh its single ADE-managed dev-server record, keeping
- * the record id stable across rescans. Returns whether state changed so
- * the caller can persist cheaply.
- */
-export async function refreshDevProcess(project) {
-  const { devCommand, note } = await readDevCommand(project);
-  const existing = state.processes.find((p) => p.projectId === project.id);
-  if (note) {
-    const changed = project.devScriptNote !== note;
-    if (changed) project.devScriptNote = note;
-    return { proc: existing ?? null, changed };
-  }
-  let changed = false;
-  if (project.devScriptNote !== undefined) {
-    delete project.devScriptNote;
-    changed = true;
-  }
-  if (!devCommand) {
-    // No dev script: retire a stopped record, but never one currently running.
-    if (existing && existing.status !== "running" && !children.has(existing.id)) {
-      state.processes = state.processes.filter((p) => p.id !== existing.id);
-      return { proc: null, changed: true };
-    }
-    return { proc: existing ?? null, changed };
-  }
-  if (existing) {
-    if (existing.command !== devCommand) {
-      existing.command = devCommand;
-      existing.output = [...(existing.output ?? []), `dev script changed: ${devCommand}`].slice(
-        -300,
-      );
-      changed = true;
-    }
-    // While the record is not running, args always mirror the re-derived
-    // devCommand: an older start route persisted mutated args into proc.args
-    // (orphan positionals like "run dev -- 3000") and those must never leak
-    // into the next launch argv. A running record keeps the args its live
-    // child was started with.
-    const [bin, ...args] = devCommand.split(" ");
-    if (existing.status !== "running" && !children.has(existing.id)) {
-      if (existing.bin !== bin || (existing.args ?? []).join(" ") !== args.join(" ")) {
-        existing.bin = bin;
-        existing.args = args;
-        changed = true;
-      }
-    }
-    return { proc: existing, changed };
-  }
-  const proc = {
-    id: id(),
-    projectId: project.id,
-    name: "Development server",
-    command: devCommand,
-    bin: devCommand.split(" ")[0],
-    args: devCommand.split(" ").slice(1),
-    port: 0,
-    status: "stopped",
-    output: [],
-  };
-  state.processes.push(proc);
-  return { proc, changed: true };
-}
-/**
- * The dev-server flag family the project's framework accepts: `next` rejects
- * --host outright (it takes -H/--hostname and -p), vite and other --host
- * users take --host/--port, and unknown scripts get only the port — the most
- * widely supported flag — with PORT and HOST=127.0.0.1 set in the environment
- * as belt-and-braces (servers that honor neither may bind wider; the listen
- * probe cannot tell, see startDevServer).
- */
-export function detectFramework(pkg, devScript = "") {
-  const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
-  if (deps.next || /\bnext\s+dev\b/.test(devScript)) return "next";
-  if (deps.vite || /\bvite\b/.test(devScript)) return "vite";
-  return "unknown";
-}
-export function devServerArgs(framework, port, manager = "npm") {
-  const flags =
-    framework === "next"
-      ? ["-H", "127.0.0.1", "-p"]
-      : framework === "vite"
-        ? ["--host", "127.0.0.1", "--port"]
-        : ["--port"];
-  // npm run requires `--` to forward flags to the script; pnpm/yarn/bun pass
-  // `--` literally into the script argv, which makes vite/next ignore --port.
-  return manager === "npm" ? ["--", ...flags, String(port)] : [...flags, String(port)];
-}
-// A browser disconnect ends the response before it is written. Waiting reads
-// listen for that so a closed tab does not hold a PTY poll open.
-function terminalWaitSignal(req, res) {
-  if (req.signal) return req.signal;
-  if (!res || typeof res.on !== "function") return undefined;
-  const controller = new AbortController();
-  res.on("close", () => {
-    if (!res.writableEnded) controller.abort();
-  });
-  return controller.signal;
-}
-function json(res, status, body) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json; charset=utf-8");
-  res.setHeader("cache-control", "no-store");
-  res.end(JSON.stringify(body));
-}
-function isAttachmentUploadPath(pathname) {
-  const cleaned = String(pathname ?? "").replace(/\/$/, "");
-  return cleaned === "/api/attachments" || cleaned === "/attachments";
-}
-
-class PayloadTooLarge extends Error {
-  constructor() {
-    super("Request body too large.");
-    this.status = 413;
-  }
-}
-// API request bodies are small JSON (attachments up to 14 MB). A larger body is
-// refused before it is read, or as soon as it outgrows the limit: an exposed
-// instance must not let an unauthenticated peer stream an unbounded body into memory.
-async function body(req) {
-  const url = new URL(req.url, "http://127.0.0.1");
-  const attachmentUpload = req.method === "POST" && isAttachmentUploadPath(url.pathname);
-  const limit = attachmentUpload ? 14 * 1024 * 1024 : 1_000_000;
-  if (Number(req.headers["content-length"]) > limit) throw new PayloadTooLarge();
-  let raw = "";
-  for await (const chunk of req) {
-    raw += chunk;
-    if (raw.length > limit) throw new PayloadTooLarge();
-  }
-  return raw ? JSON.parse(raw) : {};
 }
 function isLoopbackAddress(address) {
   if (!address) return false;
@@ -993,30 +451,20 @@ function localRequest(req) {
   const bindHost = EXPOSE_HOST().toLowerCase();
   return bindHost === "0.0.0.0" || bindHost === "::" || host === bindHost;
 }
-// Registers an existing directory as a project and answers the request. Shared
-// by "add a folder", "clone a repository" and "create a folder".
-async function registerProject(res, real, name) {
-  if (state.projects.some((p) => p.path === real))
-    return json(res, 409, { error: "This project is already added." });
-  const project = {
-    id: id(),
-    name: String(name || path.basename(real)),
-    path: real,
-    branch: "",
-    ahead: 0,
-    uncommittedFiles: [],
-    defaultAgent: "codex",
-    addedAt: now(),
-  };
-  await projectInfo(project);
-  state.projects.push(project);
-  // Same detection path as the bootstrap re-scan: an unreadable or
-  // malformed package.json records a distinct note instead of silently
-  // reporting no dev script.
-  const { proc } = await refreshDevProcess(project);
-  await save();
-  return json(res, 201, { project, process: proc });
-}
+// In dispatch order: where two modules could match the same path, the earlier one answers.
+const routes = [
+  terminal,
+  editor,
+  events,
+  sessionReads,
+  projects,
+  attachments,
+  sessionActions,
+  browser,
+  devServer,
+  agents,
+  workflows,
+];
 /**
  * The API router: every `/api/*` request, from the dev server or the
  * production server (src/local/server.mjs). Call start() first.
@@ -1067,112 +515,50 @@ export async function handle(req, res) {
       );
       return json(res, 200, { ok: true });
     }
-    const routeContext = {
-      path,
-      spawn,
-      adapters,
-      optionCapabilities,
+    // Route modules get the shared state and services; anything stateless they import.
+    const ctx = {
+      req,
+      res,
+      url,
+      parts,
       state,
-      authChildren,
+      save,
       id,
+      now,
+      DATA_DIR,
+      eventHub,
+      bootstrapPayload,
+      bootstrapAgents,
+      refreshBootstrapInBackground,
+      sessionLogs,
+      turns,
+      UNSUPPORTED_RISK,
+      resolveSessionOptions,
+      authChildren,
       harnessJobs,
       agentStatus,
       listAgentModels,
-      start,
-      decodeBase64,
-      readAttachment,
-      saveAttachment,
-      DATA_DIR,
-      body,
-      which,
-      run,
-      COMPUTER_ERROR_STATUS,
-      INCOGNITO_PROFILE_ID,
-      HumanControlError,
-      resolveAttachments,
       browserContexts,
       controls,
       browserHub,
       computers,
       browserStream,
-      OBSERVE_BROWSER_ACTIONS,
-      OBSERVE_COMPUTER_ACTIONS,
-      save,
       computerView,
-      PayloadTooLarge,
-      stop,
-      processMatches,
-      stopChild,
       children,
       devStartClaims,
-      now,
       startDevServer,
-      devView,
       refreshDevProcess,
-      connect,
-      eventHub,
-      bootstrapPayload,
-      bootstrapAgents,
-      refreshBootstrapInBackground,
-      fs,
-      os,
-      getDiff,
-      checksFor,
-      cloneRepository,
-      createProjectFolder,
-      expandUserPath,
-      makeDirectory,
-      parseRepoSource,
-      sessionLogs,
-      turns,
-      addMessage,
-      MODEL_ID,
-      UNSUPPORTED_RISK,
-      resolveSessionOptions,
-      syncOptionFields,
-      projectInfo,
-      terminalWaitSignal,
-      listWorkflows,
-      upsertWorkflow,
-      removeWorkflow,
-      req,
-      res,
-      url,
-      parts,
       handled: false,
-      registerProject: async (...args) => {
-        await registerProject(...args);
-        routeContext.handled = true;
-        return true;
-      },
       json: (...args) => {
         json(...args);
-        routeContext.handled = true;
+        ctx.handled = true;
         return true;
       },
     };
-    routeContext.handled = false;
-    if (await terminal(routeContext)) return;
-    routeContext.handled = false;
-    if (await editor(routeContext)) return;
-    routeContext.handled = false;
-    if (await events(routeContext)) return;
-    routeContext.handled = false;
-    if (await sessionReads(routeContext)) return;
-    routeContext.handled = false;
-    if (await projects(routeContext)) return;
-    routeContext.handled = false;
-    if (await attachments(routeContext)) return;
-    routeContext.handled = false;
-    if (await sessionActions(routeContext)) return;
-    routeContext.handled = false;
-    if (await browser(routeContext)) return;
-    routeContext.handled = false;
-    if (await devServer(routeContext)) return;
-    routeContext.handled = false;
-    if (await agents(routeContext)) return;
-    routeContext.handled = false;
-    if (await workflows(routeContext)) return;
+    for (const route of routes) {
+      ctx.handled = false;
+      if (await route(ctx)) return;
+    }
     return json(res, 404, { error: "Not found." });
   } catch (error) {
     if (
