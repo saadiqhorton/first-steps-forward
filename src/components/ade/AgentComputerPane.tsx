@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Globe, LoaderCircle, RotateCw } from "lucide-react";
-import type { AgentComputer, Project, Session } from "@/lib/ade/types";
-import { computerControl, computerProfile, computerStatus } from "@/lib/ade/store";
+import type { AgentComputer, Project, SessionSummary } from "@/lib/ade/types";
+import {
+  computerControl,
+  computerProfile,
+  computerStatus,
+  useSession,
+  useSessionLogs,
+} from "@/lib/ade/store";
 import { copyText } from "@/lib/ade/clipboard";
 import { summarizeChecks } from "./ChecksList";
 import { BrowserChromeRow } from "./browser/BrowserChromeRow";
@@ -9,7 +16,6 @@ import { BrowserSurface } from "./browser/BrowserSurface";
 import { useBrowserPreview } from "./browser/browserPreviewContext";
 import type { RightDock, ComputerTone } from "./rightPaneTypes";
 
-const POLL_MS = 2000;
 const PROFILE_OPTIONS: Array<{ value: AgentComputer["profile"]; label: string; title: string }> = [
   {
     value: "default",
@@ -34,13 +40,21 @@ export function AgentComputerPane({
   onToneChange,
 }: {
   project: Project;
-  session?: Session | undefined;
+  session?: SessionSummary | undefined;
   dock?: RightDock;
   /** The tab is on screen; a stopped browser starts once per project when it first is. */
   active?: boolean;
   onToneChange?: (tone: ComputerTone) => void;
 }) {
-  const [computer, setComputer] = useState<AgentComputer | null>(null);
+  const queryClient = useQueryClient();
+  const computerQuery = useQuery({
+    queryKey: ["computer", project.id],
+    queryFn: () => computerStatus(project.id),
+    staleTime: Infinity,
+  });
+  const computer = computerQuery.data ?? null;
+  const sessionDetail = useSession(session?.id ?? "").data;
+  const sessionLogs = useSessionLogs(session?.id ?? "");
   const [error, setError] = useState("");
   const browser = useBrowserPreview();
   // Control is shared with the browser preview and the agent's tools, so it lives in the provider.
@@ -73,31 +87,31 @@ export function AgentComputerPane({
 
   const refresh = useCallback(async () => {
     try {
-      setComputer(await computerStatus(project.id));
+      await queryClient.fetchQuery({
+        queryKey: ["computer", project.id],
+        queryFn: () => computerStatus(project.id),
+        staleTime: 0,
+      });
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [project.id]);
+  }, [project.id, queryClient]);
 
-  useEffect(() => {
-    setComputer(null);
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [refresh]);
-
-  const apply = useCallback(async (next: Promise<AgentComputer>) => {
-    setBusy(true);
-    try {
-      setComputer(await next);
-      setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+  const apply = useCallback(
+    async (next: Promise<AgentComputer>) => {
+      setBusy(true);
+      try {
+        queryClient.setQueryData(["computer", project.id], await next);
+        setError("");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [project.id, queryClient],
+  );
   const run = (op: "start" | "stop" | "clear") => apply(computerControl(project.id, op));
 
   // Launching takes about a second, so opening the tab starts the browser. Only once per project:
@@ -150,9 +164,9 @@ export function AgentComputerPane({
               ? "Unpacking Chrome for Testing. This happens once."
               : "ADE downloads its own copy of Chrome for Testing once, then reuses it for every project."
             : (computer.detail ?? "The browser will appear here in a moment.");
-  const checks = session ? summarizeChecks(session.checks) : null;
-  const added = session?.changes.reduce((n, c) => n + c.added, 0) ?? 0;
-  const removed = session?.changes.reduce((n, c) => n + c.removed, 0) ?? 0;
+  const checks = sessionDetail ? summarizeChecks(sessionDetail.checks) : null;
+  const added = sessionDetail?.changes.reduce((n, c) => n + c.added, 0) ?? 0;
+  const removed = sessionDetail?.changes.reduce((n, c) => n + c.removed, 0) ?? 0;
 
   const mediaInfoClasses =
     dock === "bottom"
@@ -405,7 +419,9 @@ export function AgentComputerPane({
           </div>
           <div className="flex justify-between gap-3 px-3 py-2 font-mono text-[10px] text-dim">
             <span className="min-w-0 truncate">Agent output</span>
-            <span className="shrink-0">{session ? `${session.logs.length} lines` : "—"}</span>
+            <span className="shrink-0">
+              {session ? `${sessionLogs.data?.lines.length ?? 0} lines` : "—"}
+            </span>
           </div>
         </div>
       </div>

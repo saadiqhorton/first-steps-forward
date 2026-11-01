@@ -59,11 +59,12 @@ function passesFilter(session, filter, viewed) {
  * }} session
  * @param {string} query
  */
-function passesQuery(session, query) {
+function passesQuery(session, query, searchMatches) {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   if ((session.request ?? "").toLowerCase().includes(q)) return true;
   if ((session.summary ?? "").toLowerCase().includes(q)) return true;
+  if (searchMatches) return searchMatches.has(session.id);
   const messages = session.messages ?? [];
   for (const m of messages) {
     if ((m.text ?? "").toLowerCase().includes(q)) return true;
@@ -74,15 +75,15 @@ function passesQuery(session, query) {
 /**
  * @template {{ id: string, status: string, updatedAt: number, createdAt: number, request?: string, summary?: string, messages?: Array<{ text?: string }> }} S
  * @param {S[]} sessions
- * @param {{ filter: ConversationFilter, query: string, showCompleted: boolean, viewed: Record<string, number> }} o
+ * @param {{ filter: ConversationFilter, query: string, showCompleted: boolean, viewed: Record<string, number>, searchMatches?: Set<string> }} o
  * @returns {S[]}
  */
 export function filterSessions(sessions, o) {
-  const { filter, query, showCompleted, viewed } = o;
+  const { filter, query, showCompleted, viewed, searchMatches } = o;
   return sessions
     .filter((s) => passesCompleted(s, showCompleted))
     .filter((s) => passesFilter(s, filter, viewed))
-    .filter((s) => passesQuery(s, query))
+    .filter((s) => passesQuery(s, query, searchMatches))
     .slice()
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }

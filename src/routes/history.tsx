@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { readLastProject } from "@/lib/ade/navigation";
-import { useAde } from "@/lib/ade/store";
+import { useAdeState } from "@/lib/ade/store";
 
 export const Route = createFileRoute("/history")({
   head: () => ({
@@ -19,7 +19,7 @@ export const Route = createFileRoute("/history")({
 });
 
 function HistoryRedirect() {
-  const { state } = useAde();
+  const state = useAdeState((state) => ({ hydrated: state.hydrated, projects: state.projects }));
   const navigate = useNavigate();
 
   useEffect(() => {

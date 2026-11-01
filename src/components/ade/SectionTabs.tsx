@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { GlideIndicator } from "@/components/ade/motion";
 import { documentsQuery, entriesQuery, workflowsQuery } from "@/lib/ade/queries";
-import { useAde } from "@/lib/ade/store";
+import { useAdeState } from "@/lib/ade/store";
 import { needsAttention } from "@/lib/ade/viewed";
 
 type Section = "conversations" | "files" | "workflows";
@@ -16,12 +16,16 @@ function sectionFromPath(pathname: string, projectId: string): Section | null {
 }
 
 export function SectionTabs() {
-  const { state } = useAde();
+  const { activeProjectId, projects, sessions } = useAdeState((state) => ({
+    activeProjectId: state.activeProjectId,
+    projects: state.projects,
+    sessions: state.sessions,
+  }));
   const router = useRouter();
   const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const match = pathname.match(/^\/p\/([^/]+)/);
-  const projectId = match?.[1] ?? state.activeProjectId;
+  const projectId = match?.[1] ?? activeProjectId;
   const routeSection = projectId ? sectionFromPath(pathname, projectId) : null;
   // Optimistic selection so the highlight moves on click, not after the route settles.
   const [pendingSection, setPendingSection] = useState<Section | null>(null);
@@ -42,11 +46,9 @@ export function SectionTabs() {
     void queryClient.prefetchQuery(entriesQuery(projectId));
   }, [projectId, router, queryClient]);
 
-  if (!projectId || !state.projects.some((p) => p.id === projectId)) return null;
+  if (!projectId || !projects.some((p) => p.id === projectId)) return null;
 
-  const needsInput = state.sessions.filter(
-    (s) => s.projectId === projectId && needsAttention(s),
-  ).length;
+  const needsInput = sessions.filter((s) => s.projectId === projectId && needsAttention(s)).length;
 
   const linkClass = (active: boolean) =>
     `relative isolate inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] transition-colors ${

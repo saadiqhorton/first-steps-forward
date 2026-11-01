@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Link, createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { SessionView } from "@/components/ade/SessionView";
-import { useAde } from "@/lib/ade/store";
+import { useAdeState } from "@/lib/ade/store";
 import { markViewed } from "@/lib/ade/viewed";
 
 export const Route = createFileRoute("/p/$projectId/conversations/$sessionId")({
@@ -21,7 +21,7 @@ export const Route = createFileRoute("/p/$projectId/conversations/$sessionId")({
 
 function ProjectSessionPage() {
   const { projectId, sessionId } = Route.useParams();
-  const { state } = useAde();
+  const state = useAdeState((state) => ({ hydrated: state.hydrated, sessions: state.sessions }));
   const navigate = useNavigate();
   const session = state.sessions.find((s) => s.id === sessionId);
 

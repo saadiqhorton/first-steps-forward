@@ -239,10 +239,16 @@ test("boot recovery stops an interrupted turn and forgets what died with it", { 
 
 test("boot shrinks stored logs and the next save drops the old megabytes", { skip }, async () => {
   const stored = session("s-biglog").logs;
-  assert.equal(stored[0], "$ codex exec");
-  assert.deepEqual(JSON.parse(stored[1]), { type: "agent_end", willRetry: false });
+  assert.equal(stored, undefined);
   const onDisk = () => readFileSync(path.join(home, ".ade", "workspace.json"), "utf8");
   await waitFor(() => !onDisk().includes("mmmmmmmmmm"), "the shrunk workspace to be saved");
+  const logFile = path.join(home, ".ade", "session-logs", "s-biglog.jsonl");
+  const lines = readFileSync(logFile, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(lines[0].text, "$ codex exec");
+  assert.deepEqual(JSON.parse(lines[1].text), { type: "agent_end", willRetry: false });
 });
 
 test("a Codex turn runs to ready with the agent's reply", { skip }, async () => {
@@ -370,16 +376,18 @@ test("a megabyte Pi line is stored as small valid JSON and the reply stays", { s
   const id = await start("p-huge", "huge", { agentId: "pi" });
   const done = await waitFor(() => settled(id), "the turn");
   assert.equal(done.status, "ready");
-  assert.ok(done.logs.length > 2);
-  for (const line of done.logs) assert.ok(line.length < 8192, `a ${line.length}-char line`);
-  const events = done.logs.filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+  const logResponse = await call(`/api/sessions/${id}/logs?after=0`);
+  const logs = logResponse.json.lines.map((line) => line.text);
+  assert.ok(logs.length > 2);
+  for (const line of logs) assert.ok(line.length < 8192, `a ${line.length}-char line`);
+  const events = logs.filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
   const agentEnd = events.find((event) => event.type === "agent_end");
   assert.ok(agentEnd && !("messages" in agentEnd));
   const toolEnd = events.find((event) => event.type === "tool_execution_end");
   assert.match(toolEnd.result, /^A{500}…\[\+299500 chars\]$/);
   // A short line is stored exactly as the CLI wrote it.
   assert.ok(
-    done.logs.includes(
+    logs.includes(
       JSON.stringify({
         type: "message_end",
         message: { role: "assistant", content: [{ type: "text", text: "Done." }] },
@@ -395,7 +403,8 @@ test("a failure inside a megabyte Pi line is still classified", { skip }, async 
   assert.equal(done.status, "blocked");
   assert.equal(done.failureKind, "provider_quota");
   assert.ok(systemTexts(done).some((t) => t.includes("try again in 20s")));
-  assert.ok(done.logs.every((line) => line.length < 8192));
+  const logResponse = await call(`/api/sessions/${id}/logs?after=0`);
+  assert.ok(logResponse.json.lines.every((line) => line.text.length < 8192));
 });
 
 test("OpenCode: a model error on stderr after exit 0 blocks the turn", { skip }, async () => {

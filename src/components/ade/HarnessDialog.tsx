@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentId, HarnessJob } from "@/lib/ade/types";
-import { harnessJob, useAde } from "@/lib/ade/store";
+import { useQuery } from "@tanstack/react-query";
+import type { AgentId } from "@/lib/ade/types";
+import { harnessJob, useAde, useAdeState } from "@/lib/ade/store";
 
 /**
  * Confirm-then-run dialog for CLI install/update harness jobs. Shows the exact
@@ -15,44 +16,30 @@ export function HarnessDialog({
   kind: "install" | "update";
   onClose: () => void;
 }) {
-  const { state, harnessCommand, startHarness, refresh } = useAde();
-  const agent = state.agents.find((a) => a.id === agentId);
+  const { harnessCommand, startHarness, refresh } = useAde();
+  const agent = useAdeState((state) => state.agents.find((a) => a.id === agentId));
   const command = harnessCommand(agentId, kind);
   const [started, setStarted] = useState(false);
-  const [job, setJob] = useState<HarnessJob | null>(null);
+  const jobQuery = useQuery({
+    queryKey: ["harness", agentId],
+    queryFn: () => harnessJob(agentId),
+    staleTime: Infinity,
+    enabled: started,
+  });
+  const job = jobQuery.data ?? null;
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const outputRef = useRef<HTMLPreElement>(null);
 
+  const refreshed = useRef(false);
   useEffect(() => {
-    if (!started) return;
-    let cancelled = false;
-    let refreshed = false;
-    let timer: number | undefined;
-    const poll = async () => {
-      try {
-        const next = await harnessJob(agentId);
-        if (cancelled) return;
-        setJob(next);
-        if (next.status === "succeeded" || next.status === "failed") {
-          if (timer !== undefined) window.clearInterval(timer);
-          timer = undefined;
-        }
-        if (next.status === "succeeded" && !refreshed) {
-          refreshed = true;
-          await refresh();
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    };
-    void poll();
-    timer = window.setInterval(() => void poll(), 1000);
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) window.clearInterval(timer);
-    };
-  }, [started, agentId, refresh]);
+    if (jobQuery.error)
+      setError(jobQuery.error instanceof Error ? jobQuery.error.message : String(jobQuery.error));
+    if (job?.status === "succeeded" && !refreshed.current) {
+      refreshed.current = true;
+      void refresh();
+    }
+  }, [job, jobQuery.error, refresh]);
 
   useEffect(() => {
     outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight });
@@ -73,8 +60,8 @@ export function HarnessDialog({
     try {
       setBusy(true);
       setError("");
-      const startedJob = await startHarness(agentId, kind);
-      setJob(startedJob);
+      await startHarness(agentId, kind);
+      refreshed.current = false;
       setStarted(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

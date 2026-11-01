@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import { ArrowUp, GitBranch, Sparkles, X } from "lucide-react";
 import { AgentPicker, agentChipLabel, type AgentSelection } from "@/components/ade/AgentPicker";
+import { useAdeState } from "@/lib/ade/store";
 import type { Workflow } from "@/lib/ade/types";
 import {
   ComposerAttachButton,
@@ -19,8 +20,6 @@ import {
   type AttachmentDraft,
 } from "@/components/ade/ComposerAttachments";
 import { warnUser } from "@/components/ade/NoticeDialog";
-import { useAde } from "@/lib/ade/store";
-
 const PICKER_MAX_WIDTH = 960;
 const PICKER_EDGE = 16;
 const PICKER_GAP = 8;
@@ -71,7 +70,7 @@ export function Composer({
   workflow?: Workflow | null;
   onWorkflowRemove?: () => void;
 }) {
-  const { state } = useAde();
+  const agents = useAdeState((state) => state.agents);
   const [text, setText] = useState(initialText ?? "");
   const [drafts, setDrafts] = useState<AttachmentDraft[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -85,7 +84,7 @@ export function Composer({
   const pickerWrapRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const chipRef = useRef<HTMLButtonElement>(null);
-  const chip = agentChipLabel(selection, state.agents);
+  const chip = agentChipLabel(selection, agents);
   const labelId = useId();
   const disabled = !!disabledReason || sending;
   const workflowPrompt = workflow?.prompt.trim() ?? "";

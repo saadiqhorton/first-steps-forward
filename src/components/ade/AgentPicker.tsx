@@ -10,7 +10,7 @@ import { Check, Search } from "lucide-react";
 import { REASON_TEXT } from "@/components/ade/ModelPicker";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import { HarnessDialog } from "@/components/ade/HarnessDialog";
-import { agentModels, optionCapabilities, useAde } from "@/lib/ade/store";
+import { agentModels, optionCapabilities, useAdeState } from "@/lib/ade/store";
 import { readLastModel, resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 import type {
   Agent,
@@ -140,7 +140,7 @@ export function AgentPicker({
   onClose: () => void;
   agentLocked?: string;
 }) {
-  const { state } = useAde();
+  const agents = useAdeState((state) => state.agents);
   const panelRef = useRef<HTMLDivElement>(null);
   // Tagged with its agent: right after a switch, the previous agent's list
   // must never be read as the new agent's.
@@ -349,7 +349,7 @@ export function AgentPicker({
   };
 
   const columnItems = (col: Column): string[] => {
-    if (col === "agent") return state.agents.map((a) => a.id);
+    if (col === "agent") return agents.map((a) => a.id);
     if (col === "model") return filteredModelRows.map((r) => r.id);
     if (col === "effort") return effortRows.map((r) => r.id);
     if (col === "speed") return speedRows.map((r) => r.id);
@@ -477,7 +477,7 @@ export function AgentPicker({
                 {agentLocked}
               </p>
             )}
-            {state.agents.map((agent, i) => {
+            {agents.map((agent, i) => {
               const status = agentStatus(agent);
               const selected = value.agentId === agent.id;
               const locked = !!agentLocked;

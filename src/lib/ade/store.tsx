@@ -1,14 +1,16 @@
 import {
   createContext,
   useContext,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type Dispatch,
-  type ReactNode,
   type SetStateAction,
+  type ReactNode,
 } from "react";
+import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AdeState,
   AgentComputer,
@@ -21,6 +23,7 @@ import type {
   Project,
   ProjectDocument,
   Session,
+  SessionSummary,
   Workflow,
 } from "./types";
 import { NoticeDialogHost, warnUser } from "@/components/ade/NoticeDialog";
@@ -88,6 +91,9 @@ type Api = {
   refresh: () => Promise<void>;
 };
 const Ctx = createContext<Api | null>(null);
+const ActiveProjectCtx = createContext<readonly [string, Dispatch<SetStateAction<string>>] | null>(
+  null,
+);
 type RequestError = Error & { status?: number; authRequired?: boolean };
 async function request<T>(url: string, method = "GET", data?: unknown): Promise<T> {
   const init: RequestInit = { method };
@@ -104,6 +110,67 @@ async function request<T>(url: string, method = "GET", data?: unknown): Promise<
     throw error;
   }
   return value as T;
+}
+
+type BootstrapData = {
+  projects: Project[];
+  processes: AdeState["processes"];
+  sessions: SessionSummary[];
+  agents: AdeState["agents"];
+  now: number;
+};
+export const bootstrapQuery = () =>
+  queryOptions({
+    queryKey: ["bootstrap"] as const,
+    queryFn: () => request<BootstrapData>("/api/bootstrap"),
+    staleTime: Infinity,
+  });
+export const sessionQuery = (id: string) =>
+  queryOptions({
+    queryKey: ["session", id] as const,
+    queryFn: async () =>
+      (await request<{ session: Omit<Session, "logs"> }>(`/api/sessions/${id}`)).session,
+    staleTime: Infinity,
+    enabled: !!id,
+  });
+export function useSession(id: string) {
+  return useQuery(sessionQuery(id));
+}
+export function useSessionLogs(id: string) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ["session-logs", id] as const,
+    queryFn: async () => {
+      const previous = queryClient.getQueryData<{
+        lines: { n: number; text: string }[];
+        next: number;
+        reset: boolean;
+      }>(["session-logs", id]);
+      const after = previous?.next ?? 0;
+      const latest = await request<{
+        lines: { n: number; text: string }[];
+        next: number;
+        reset: boolean;
+      }>(`/api/sessions/${id}/logs?after=${after}`);
+      return latest.reset || !previous
+        ? latest
+        : { ...latest, lines: [...previous.lines, ...latest.lines].slice(-500) };
+    },
+    staleTime: Infinity,
+    enabled: !!id,
+  });
+}
+export function useNow() {
+  const serverNow = useAdeState((state) => state.now);
+  const [now, setNow] = useState(() => serverNow);
+  useEffect(() => {
+    const offset = serverNow - Date.now();
+    const update = () => setNow(Date.now() + offset);
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [serverNow]);
+  return now;
 }
 // Stable identity (outside the provider memo whose value changes on every
 // 2-second polling refresh) so dependent effects do not refetch constantly.
@@ -168,68 +235,155 @@ export const listDocuments = async (projectId: string) => {
   );
   return data.documents;
 };
+export const searchSessions = (projectId: string, query: string) =>
+  request<{ ids: string[] }>(
+    `/api/sessions?project=${encodeURIComponent(projectId)}&q=${encodeURIComponent(query)}`,
+  );
 
 // Every way of adding a project ends the same: refresh, then focus it.
 async function adoptProject(
   data: { project: Project },
   refresh: () => Promise<void>,
-  setState: Dispatch<SetStateAction<AdeState>>,
+  setActiveProjectId: Dispatch<SetStateAction<string>>,
 ) {
   await refresh();
-  setState((s) => ({ ...s, activeProjectId: data.project.id }));
+  setActiveProjectId(data.project.id);
   return data.project;
 }
 
 export function AdeProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AdeState>(empty);
+  const queryClient = useQueryClient();
+  const bootstrap = useQuery(bootstrapQuery());
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const activeProjectId = bootstrap.data?.projects.some((p) => p.id === selectedProjectId)
+    ? selectedProjectId
+    : (bootstrap.data?.projects[0]?.id ?? selectedProjectId);
+  const authRequired = (bootstrap.error as RequestError | null)?.authRequired === true;
+  const state = useMemo<AdeState>(
+    () => ({
+      ...empty,
+      ...bootstrap.data,
+      hydrated: bootstrap.isFetched,
+      serviceAvailable: bootstrap.isSuccess && !authRequired,
+      authRequired,
+      activeProjectId,
+      projects: bootstrap.data?.projects ?? [],
+      processes: bootstrap.data?.processes ?? [],
+      sessions: bootstrap.data?.sessions ?? [],
+      agents: bootstrap.data?.agents ?? [],
+    }),
+    [bootstrap.data, bootstrap.isFetched, bootstrap.isSuccess, authRequired, activeProjectId],
+  );
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const activeProjectValue = useMemo(
+    () => [selectedProjectId, setSelectedProjectId] as const,
+    [selectedProjectId],
+  );
   // One in-flight complete() per session; a second click joins the first
   // promise instead of firing a duplicate POST (which the server answers 409).
   const completeCalls = useRef(new Map<string, Promise<void>>());
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
-      const data = await request<
-        Omit<AdeState, "hydrated" | "activeProjectId" | "serviceAvailable"> & {
-          projects: Project[];
-        }
-      >("/api/bootstrap");
-      setState((previous) => ({
-        ...data,
-        hydrated: true,
-        serviceAvailable: true,
-        authRequired: false,
-        activeProjectId: data.projects.some((p) => p.id === previous.activeProjectId)
-          ? previous.activeProjectId
-          : (data.projects[0]?.id ?? ""),
-      }));
+      await queryClient.fetchQuery({ ...bootstrapQuery(), staleTime: 0 });
     } catch (error) {
-      // 401 + authRequired means ADE is exposed beyond loopback and this
-      // browser has not proven the token yet: show the token gate instead
-      // of the "service unavailable" state.
-      const authRequired = (error as RequestError).authRequired === true;
-      setState((previous) => ({
-        ...previous,
-        hydrated: true,
-        serviceAvailable: !authRequired,
-        authRequired,
-      }));
-      if (!authRequired) console.error("ADE local service unavailable", error);
+      if (
+        (error as RequestError).authRequired !== true &&
+        (!(error instanceof Error) ||
+          (error.name !== "CancelledError" && error.message !== "CancelledError"))
+      )
+        console.error("ADE local service unavailable", error);
     }
-  };
+  }, [queryClient]);
   useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 2000);
-    return () => window.clearInterval(timer);
-  }, []);
+    let ready = false;
+    let errors = 0;
+    let fallback: number | undefined;
+    const invalidateAll = () => void queryClient.invalidateQueries();
+    const pauseFallback = () => {
+      if (!fallback || document.hidden) return;
+      window.clearInterval(fallback);
+      fallback = undefined;
+    };
+    const resumeFallback = () => {
+      if (fallback || document.hidden) return;
+      fallback = window.setInterval(() => void queryClient.invalidateQueries(), 15_000);
+      void queryClient.invalidateQueries();
+    };
+    const visibility = () => {
+      if (document.hidden) pauseFallback();
+      else if (errors >= 3 || typeof EventSource === "undefined") resumeFallback();
+    };
+    document.addEventListener("visibilitychange", visibility);
+    if (typeof EventSource === "undefined") {
+      errors = 3;
+      resumeFallback();
+      return () => {
+        document.removeEventListener("visibilitychange", visibility);
+        if (fallback) window.clearInterval(fallback);
+      };
+    }
+    const query = activeProjectId ? `?project=${encodeURIComponent(activeProjectId)}` : "";
+    const source = new EventSource(`/api/events${query}`);
+    const readyTimeout = window.setTimeout(() => {
+      if (!ready) resumeFallback();
+    }, 10_000);
+    source.addEventListener("ready", () => {
+      ready = true;
+      errors = 0;
+      if (readyTimeout) window.clearTimeout(readyTimeout);
+      pauseFallback();
+    });
+    const onEvent = (event: MessageEvent<string>) => {
+      let detail: { scope?: string } = {};
+      try {
+        detail = JSON.parse(event.data);
+      } catch {
+        // Ignore malformed invalidations; reconnect/fallback will refresh state.
+      }
+      const scope = detail.scope ?? "";
+      if (scope === "bootstrap") void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      else if (scope.startsWith("session:")) {
+        void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+        void queryClient.invalidateQueries({ queryKey: ["session", scope.slice(8)] });
+      } else if (scope.startsWith("logs:"))
+        void queryClient.invalidateQueries({ queryKey: ["session-logs", scope.slice(5)] });
+      else if (scope.startsWith("computer:")) {
+        const id = scope.slice(9);
+        void queryClient.invalidateQueries({ queryKey: ["computer", id] });
+        void queryClient.invalidateQueries({ queryKey: ["browser", id] });
+      } else if (scope === "agents")
+        void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      else if (scope.startsWith("harness:"))
+        void queryClient.invalidateQueries({ queryKey: ["harness", scope.slice(8)] });
+    };
+    for (const type of ["bootstrap", "session", "logs", "computer", "agents", "harness"])
+      source.addEventListener(type, onEvent as EventListener);
+    source.onerror = () => {
+      errors += 1;
+      if (ready) invalidateAll();
+      ready = false;
+      if (errors >= 3) resumeFallback();
+    };
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      if (fallback) window.clearInterval(fallback);
+      if (readyTimeout) window.clearTimeout(readyTimeout);
+      source.close();
+    };
+  }, [activeProjectId, queryClient]);
   const api = useMemo<Api>(
     () => ({
-      state,
+      get state() {
+        return stateRef.current;
+      },
       refresh,
-      selectProject: (id) => setState((s) => ({ ...s, activeProjectId: id })),
+      selectProject: (id) => setSelectedProjectId(id),
       addProject: async (name, path) =>
         adoptProject(
           await request<{ project: Project }>("/api/projects", "POST", { name, path }),
           refresh,
-          setState,
+          setSelectedProjectId,
         ),
       cloneProject: async (url, parent, name) =>
         adoptProject(
@@ -239,7 +393,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
             name,
           }),
           refresh,
-          setState,
+          setSelectedProjectId,
         ),
       createProject: async (name, parent, git) =>
         adoptProject(
@@ -249,7 +403,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
             git,
           }),
           refresh,
-          setState,
+          setSelectedProjectId,
         ),
       removeProject: async (id) => {
         await request(`/api/projects/${id}/remove`, "POST");
@@ -310,7 +464,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         await refresh();
       },
       harnessCommand: (agentId, kind) => {
-        const agent = state.agents.find((a) => a.id === agentId);
+        const agent = stateRef.current.agents.find((a) => a.id === agentId);
         return agent?.harness?.[kind] ?? "";
       },
       startHarness: async (agentId, kind) => {
@@ -331,13 +485,15 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         await refresh();
       },
     }),
-    [state],
+    [refresh],
   );
   return (
-    <Ctx.Provider value={api}>
-      {state.authRequired ? <TokenGate onUnlocked={() => refresh()} /> : children}
-      <NoticeDialogHost />
-    </Ctx.Provider>
+    <ActiveProjectCtx.Provider value={activeProjectValue}>
+      <Ctx.Provider value={api}>
+        {state.authRequired ? <TokenGate onUnlocked={() => refresh()} /> : children}
+        <NoticeDialogHost />
+      </Ctx.Provider>
+    </ActiveProjectCtx.Provider>
   );
 }
 export function useAde() {
@@ -345,29 +501,57 @@ export function useAde() {
   if (!value) throw new Error("useAde must be used inside AdeProvider");
   return value;
 }
+/** Subscribe to one bootstrap slice; React Query structural sharing avoids unrelated renders. */
+export function useAdeState<T>(selector: (state: AdeState) => T): T {
+  const projectSelection = useContext(ActiveProjectCtx);
+  if (!projectSelection) throw new Error("useAdeState must be used inside AdeProvider");
+  const [selectedProjectId] = projectSelection;
+  const query = useQuery({
+    ...bootstrapQuery(),
+    select: (data) =>
+      selector({
+        ...empty,
+        ...data,
+        hydrated: true,
+        serviceAvailable: true,
+        authRequired: false,
+        activeProjectId: data.projects.some((p) => p.id === selectedProjectId)
+          ? selectedProjectId
+          : (data.projects[0]?.id ?? selectedProjectId),
+      }),
+  });
+  if (query.data !== undefined) return query.data;
+  return selector({
+    ...empty,
+    hydrated: query.isFetched,
+    serviceAvailable: query.error ? (query.error as RequestError).authRequired !== true : false,
+    authRequired: (query.error as RequestError | null)?.authRequired === true,
+    activeProjectId: selectedProjectId,
+  });
+}
 export function useActiveProject() {
-  const { state } = useAde();
-  return (
-    state.projects.find((p) => p.id === state.activeProjectId) ??
-    state.projects[0] ??
-    ({
-      id: "",
-      name: "No project selected",
-      path: "",
-      branch: "",
-      ahead: 0,
-      uncommittedFiles: [],
-      defaultAgent: "",
-      addedAt: 0,
-    } satisfies Project)
+  return useAdeState(
+    (state) =>
+      state.projects.find((p) => p.id === state.activeProjectId) ??
+      state.projects[0] ??
+      ({
+        id: "",
+        name: "No project selected",
+        path: "",
+        branch: "",
+        ahead: 0,
+        uncommittedFiles: [],
+        defaultAgent: "",
+        addedAt: 0,
+      } satisfies Project),
   );
 }
 export const ACTIVE: Session["status"][] = ["working", "verifying", "ready", "blocked"];
-export function isActive(s: Session) {
+export function isActive(s: Pick<SessionSummary, "status">) {
   return ACTIVE.includes(s.status);
 }
 /** The running turn is paused on an agent question only the user can answer. */
-export function needsYou(s: Session) {
+export function needsYou(s: Pick<SessionSummary, "status" | "pendingPermissions">) {
   return (s.pendingPermissions?.length ?? 0) > 0;
 }
 export function timeAgo(now: number, t?: number) {

@@ -72,7 +72,7 @@ export async function saveWorkspace(file, current) {
       JSON.stringify(
         {
           projects: current.projects,
-          sessions: current.sessions,
+          sessions: current.sessions.map(({ logs, ...session }) => session),
           processes: current.processes,
           workflows: current.workflows ?? [],
         },

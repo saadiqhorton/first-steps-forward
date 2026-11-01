@@ -89,6 +89,7 @@ export function addLog(session, text) {
 /** Add a message; an agent's output arriving in quick succession joins its last message. */
 export function addMessage(session, role, text, extra = {}) {
   if (!text.trim()) return;
+  if (role === "user") session.lastUserMessageAt = now();
   const last = session.messages.at(-1);
   if (role === "agent" && last?.role === "agent" && now() - last.at < 1200) {
     last.text += text;
@@ -125,8 +126,20 @@ const SAFETY_PREAMBLE =
  * @param {Record<string, AgentAdapter>} deps.adapters agent adapters by id
  * @param {string} deps.dataDir ADE's data folder
  * @param {(project: Project) => TurnContext} deps.turnContext dev server, agent browser and tool wiring for a project
+ * @param {{ append: (id: string, text: string) => Promise<unknown>, flush: (id: string) => Promise<void> }} [deps.logs]
+ * @param {(scope: string) => void} [deps.emit]
+ * @param {(session: Session) => void} [deps.turnEnded]
  */
-export function createSessionTurns({ state, save, adapters, dataDir, turnContext }) {
+export function createSessionTurns({
+  state,
+  save,
+  adapters,
+  dataDir,
+  turnContext,
+  logs,
+  emit = () => {},
+  turnEnded = () => {},
+}) {
   /** @type {Map<string, { controller: AbortController, child?: import("node:child_process").ChildProcess }>} */
   const slots = new Map();
   /** Permission requests waiting on the user: request id → answer. */
@@ -134,9 +147,25 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
 
   const projectOf = (session) => state.projects.find((p) => p.id === session.projectId);
   const busy = (session) => slots.has(session.id);
+  const persist = async (session) => {
+    emit(`session:${session.id}`);
+    await logs?.flush(session.id);
+    await save();
+  };
+  const recordLog = (session, text) => {
+    if (logs)
+      void logs
+        .append(session.id, text)
+        .catch((error) => console.warn(`ADE could not append log for ${session.id}:`, error));
+    else addLog(session, text);
+    if (logs) session.updatedAt = now();
+    emit(`session:${session.id}`);
+    emit(`logs:${session.id}`);
+  };
   /** @param {Session} session @param {string} status */
   const setStatus = (session, status) => {
     session.status = status;
+    emit(`session:${session.id}`);
   };
   /** Take the session's slot, or null when a run already holds it. Synchronous by design. */
   const claim = (session) => {
@@ -183,7 +212,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
     session.steerNow = prompt;
     setStatus(session, "working");
     interrupt(session);
-    addLog(session, "Switching to your message.");
+    recordLog(session, "Switching to your message.");
   };
 
   /** Add the original request to the first turn after switching providers. */
@@ -224,13 +253,14 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
       settle();
     }
     free(session, slot);
-    await save();
+    await persist(session);
+    turnEnded(session);
   }
 
   /** @param {{ prompt: string, continuing: boolean, attachments: object[] }} input */
   async function begin(session, slot, input) {
     setStatus(session, "working");
-    await save();
+    await persist(session);
     void runTurn(session, slot, input);
   }
 
@@ -334,7 +364,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
         `${agent?.name ?? session.agentId} is not available or not authenticated. Check the Agents page.`,
       );
       free(session, slot);
-      await save();
+      await persist(session);
       return;
     }
     // Only this turn's own output decides its outcome, never earlier history.
@@ -350,12 +380,12 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
           // The adapter already parsed the raw line; what is kept only needs the failure wording,
           // which sits in short lines or in the first 500 characters of a field.
           const line = shrinkLogLine(event.line);
-          addLog(session, line);
+          recordLog(session, line);
           turn.texts.push(line);
         } else if (event.type === "notice" || event.type === "error") {
           addMessage(session, "system", event.text);
           turn.texts.push(event.text);
-          if (event.type === "notice") void save();
+          if (event.type === "notice") void persist(session);
         } else if (event.type === "conversation") session.agentSessionId = event.id;
         else if (event.type === "default-model") session.acpDefaultModel = event.id;
       },
@@ -369,7 +399,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
             session,
             JSON.stringify({ type: "permission", decision: "asked", title: request.title }),
           );
-          void save();
+          void persist(session);
         });
       },
       spawn(bin, args, { env = {}, stdin = "ignore" } = {}) {
@@ -394,7 +424,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
     let end = null;
     try {
       setStatus(session, "working");
-      await save();
+      await persist(session);
       await projectInfo(project);
       delete session.changeCountUnavailable;
       // Refresh the baseline at the start of every turn so it reflects the
@@ -435,7 +465,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
       if (turn.spawned) end = { ok: false, reason: "unfinished" };
       else if (slot.controller.signal.aborted) {
         if (session.status === "stopped")
-          addLog(session, "Turn not started: the session was stopped before the CLI launched.");
+          recordLog(session, "Turn not started: the session was stopped before the CLI launched.");
       } else {
         if (!SETTLED.includes(session.status)) setStatus(session, "blocked");
         addMessage(
@@ -526,7 +556,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
       };
       state.sessions.unshift(session);
       const slot = /** @type {NonNullable<ReturnType<typeof claim>>} */ (claim(session));
-      await save();
+      await persist(session);
       void runTurn(session, slot, {
         prompt: `${text}${formatAttachmentPrompt(files)}`,
         continuing: false,
@@ -550,16 +580,16 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
         if (when === "now") steer(session, prompt);
         else {
           (session.queuedMessages ??= []).push(prompt);
-          addLog(session, "Follow-up queued until the current CLI turn exits.");
+          recordLog(session, "Follow-up queued until the current CLI turn exits.");
         }
-        await save();
+        await persist(session);
         return session;
       }
       const slot = /** @type {NonNullable<ReturnType<typeof claim>>} */ (claim(session));
       if (!fresh) session.queuedMessages = [];
       delete session.agentStartFresh;
       setStatus(session, "working");
-      await save();
+      await persist(session);
       void runTurn(session, slot, {
         prompt,
         continuing: !fresh,
@@ -577,13 +607,13 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
       const prompt = waiting.join("\n\n");
       if (busy(session)) steer(session, prompt);
       else {
-        addLog(session, "Sending the waiting message.");
+        recordLog(session, "Sending the waiting message.");
         const slot = /** @type {NonNullable<ReturnType<typeof claim>>} */ (claim(session));
         const fresh = session.agentStartFresh === true;
         const freshPrompt = fresh ? agentHandoffPrompt(session, prompt) : prompt;
         delete session.agentStartFresh;
         setStatus(session, "working");
-        await save();
+        await persist(session);
         void runTurn(session, slot, {
           prompt: freshPrompt,
           continuing: !fresh,
@@ -591,7 +621,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
         });
         return session;
       }
-      await save();
+      await persist(session);
       return session;
     },
 
@@ -601,7 +631,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
       const waiting = (session.queuedMessages ?? []).length;
       session.queuedMessages = [];
       if (waiting) addMessage(session, "system", "The waiting message will not be sent.");
-      await save();
+      await persist(session);
       return session;
     },
 
@@ -614,14 +644,14 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
       dropPermissions(session);
       if (busy(session)) interrupt(session);
       else stopProcess(session.pid);
-      addLog(session, "Stopped by user. Existing worktree changes are kept.");
+      recordLog(session, "Stopped by user. Existing worktree changes are kept.");
       if (!alreadyStopped)
         addMessage(
           session,
           "system",
           "Stopped. Files are kept. Send a message when you want it to continue.",
         );
-      await save();
+      await persist(session);
       return session;
     },
 
@@ -646,7 +676,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
           option: option.name,
         }),
       );
-      await save();
+      await persist(session);
       return session;
     },
 
@@ -713,7 +743,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
         session,
         `agent switch: ${from?.short ?? session.createdBy} → ${target.short} (no agent turn started; conversation not carried)`,
       );
-      await save();
+      await persist(session);
       return session;
     },
 
@@ -760,8 +790,8 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
               status: r.code === 0 ? "passed" : "failed",
               detail: `${command} · exit ${r.code}\n${output}`,
             });
-            addLog(session, `$ ${command}\n${output}`);
-            await save();
+            recordLog(session, `$ ${command}\n${output}`);
+            await persist(session);
           }
         }
         session.updatedAt = now();
@@ -781,7 +811,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
         );
       setStatus(session, "complete");
       session.completedAt = now();
-      await save();
+      await persist(session);
       return session;
     },
 
@@ -789,7 +819,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
     async reopen(session) {
       setStatus(session, "ready");
       session.completedAt = undefined;
-      await save();
+      await persist(session);
       return session;
     },
 

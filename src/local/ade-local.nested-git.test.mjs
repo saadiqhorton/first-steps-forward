@@ -88,7 +88,11 @@ test("a nested Git repository supplies changes and repairs an empty completed-se
   const bootstrap = await get("/api/bootstrap");
   assert.equal(bootstrap.status, 200);
   const session = bootstrap.body.sessions.find((item) => item.id === "s1");
-  assert.deepEqual(session.changes.map((change) => change.path).sort(), [
+  assert.ok(session);
+  assert.equal("changes" in session, false);
+  const detail = await get("/api/sessions/s1");
+  assert.equal(detail.status, 200);
+  assert.deepEqual(detail.body.session.changes.map((change) => change.path).sort(), [
     "code/src/ui.py",
     "code/tests/test_ui.py",
   ]);

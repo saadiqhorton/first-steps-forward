@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import type { Agent } from "@/lib/ade/types";
-import { useActiveProject, useAde } from "@/lib/ade/store";
+import { useActiveProject, useAde, useAdeState } from "@/lib/ade/store";
 
 export function AgentsPanel() {
-  const { state, setDefaultAgent } = useAde();
+  const { setDefaultAgent } = useAde();
+  const agents = useAdeState((state) => state.agents);
   const project = useActiveProject();
   const [signing, setSigning] = useState<Agent | null>(null);
   return (
@@ -18,7 +19,7 @@ export function AgentsPanel() {
         </p>
       </div>
       <div className="space-y-3 px-4 @lg:px-7 pb-8">
-        {state.agents.map((a, i) => (
+        {agents.map((a, i) => (
           <section
             key={a.id}
             className="card-panel p-4 animate-rise"

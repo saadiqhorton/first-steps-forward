@@ -22,7 +22,7 @@ const seedSession = (id, status) => ({
   messages: [],
   changes: [],
   checks: [],
-  logs: [],
+  logs: id === "s-ready" ? ["legacy log line"] : [],
   createdAt: 1,
   updatedAt: 1,
 });
@@ -66,6 +66,40 @@ const call = async (urlPath, body) => {
   });
   return { status: res.status, json: await res.json() };
 };
+
+test("bootstrap contains only session summaries; detail and log endpoints load on demand", async () => {
+  const bootstrap = await call("/api/bootstrap");
+  assert.equal(bootstrap.status, 200);
+  const summary = bootstrap.json.sessions.find((item) => item.id === "s-ready");
+  assert.ok(summary);
+  assert.equal("messages" in summary, false);
+  assert.equal("logs" in summary, false);
+  assert.ok(bootstrap.json.processes.every((process) => !("output" in process)));
+
+  const detail = await call("/api/sessions/s-ready");
+  assert.equal(detail.status, 200);
+  assert.deepEqual(detail.json.session.messages, []);
+  assert.equal("logs" in detail.json.session, false);
+
+  const logLines = await call("/api/sessions/s-ready/logs?after=0");
+  assert.equal(logLines.status, 200);
+  assert.deepEqual(
+    logLines.json.lines.map((line) => line.text),
+    ["legacy log line"],
+  );
+  assert.equal(logLines.json.next, 1);
+
+  const persisted = JSON.parse(readFileSync(workspaceFile, "utf8"));
+  assert.equal("logs" in persisted.sessions.find((item) => item.id === "s-ready"), false);
+});
+
+test("SSE endpoint uses the normal peer and origin guard", async () => {
+  const denied = await api({
+    url: "http://127.0.0.1:3000/api/events",
+    remoteAddress: "203.0.113.9",
+  });
+  assert.equal(denied.status, 403);
+});
 
 test("session creation rejects a flag-like model id with 400 before any spawn", async () => {
   const res = await call("/api/sessions", {
