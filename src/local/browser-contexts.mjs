@@ -78,6 +78,8 @@ export function createBrowserContexts({
   const contexts = new Map();
   /** @type {Map<string, Promise<void>>} */
   const clearing = new Map();
+  /** Keys of the contexts that live on the shared browser (isolated and incognito ones). */
+  const shared = new Set();
   /** @type {Promise<import("playwright-core").Browser> | undefined} */
   let browser;
   /** @type {Promise<void> | undefined} */
@@ -125,6 +127,15 @@ export function createBrowserContexts({
     return browser;
   }
 
+  /** Closes the shared browser once no context lives on it, so its Chrome process exits. */
+  function releaseSharedBrowser() {
+    if (shared.size > 0 || !browser) return;
+    const released = browser;
+    // Unset first: a context requested while it shuts down launches a fresh browser.
+    browser = undefined;
+    released.then((instance) => instance.close()).catch(noop);
+  }
+
   function profileDirectory(profileId) {
     const encoded = encodeURIComponent(profileId);
     return path.join(
@@ -155,12 +166,20 @@ export function createBrowserContexts({
       const key = JSON.stringify([profileId, isolationKey ?? null]);
       const cached = contexts.get(key);
       if (cached) return cached;
+      const onSharedBrowser = isolationKey !== undefined || profileId === INCOGNITO_PROFILE_ID;
+      if (onSharedBrowser) shared.add(key);
+      const forget = () => {
+        // A newer context may already hold this key while the old one finishes closing.
+        if (contexts.get(key) !== pending) return;
+        contexts.delete(key);
+        if (shared.delete(key)) releaseSharedBrowser();
+      };
       const cleared = clearing.get(key)?.catch(noop) ?? Promise.resolve();
       const pending = cleared
         .then(() => createContext(profileId, isolationKey))
         .then(async (context) => {
           context.on("close", () => {
-            if (contexts.get(key) === pending) contexts.delete(key);
+            forget();
             onContextClose?.(context);
           });
           if (closing) {
@@ -170,9 +189,7 @@ export function createBrowserContexts({
           return context;
         });
       contexts.set(key, pending);
-      pending.catch(() => {
-        if (contexts.get(key) === pending) contexts.delete(key);
-      });
+      pending.catch(forget);
       return pending;
     },
 

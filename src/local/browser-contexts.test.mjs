@@ -39,7 +39,11 @@ function fakeLauncher({ failLaunch } = {}) {
         browser.contexts.push(context);
         return context;
       };
-      browser.close = async () => browser.emit("disconnected");
+      browser.closed = false;
+      browser.close = async () => {
+        browser.closed = true;
+        browser.emit("disconnected");
+      };
       calls.browsers.push(browser);
       return browser;
     },
@@ -136,6 +140,33 @@ test("incognito contexts share one launched browser, one context per isolation k
   assert.equal(await contexts.contextFor(INCOGNITO_PROFILE_ID, "project-a"), a);
   assert.equal(launcher.calls.launch.length, 1);
   assert.equal(launcher.calls.persistent.length, 0);
+});
+
+test("the shared browser closes with its last context and relaunches for the next one", async () => {
+  const { launcher, contexts } = setup();
+  const a = await contexts.contextFor(INCOGNITO_PROFILE_ID, "project-a");
+  const b = await contexts.contextFor(INCOGNITO_PROFILE_ID, "project-b");
+  const [browser] = launcher.calls.browsers;
+  await a.close();
+  assert.equal(browser.closed, false, "another context still lives on it");
+  await b.close();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(browser.closed, true, "no context left, so Chrome exits");
+
+  const again = await contexts.contextFor(INCOGNITO_PROFILE_ID, "project-a");
+  assert.notEqual(again, a);
+  assert.equal(launcher.calls.launch.length, 2);
+  assert.equal(launcher.calls.browsers[1].closed, false);
+});
+
+test("a persistent profile's context does not hold the shared browser open", async () => {
+  const { launcher, contexts } = setup();
+  const persistent = await contexts.contextFor("project-1");
+  const incognito = await contexts.contextFor(INCOGNITO_PROFILE_ID, "project-a");
+  await incognito.close();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(launcher.calls.browsers[0].closed, true);
+  assert.equal(persistent.closed, false);
 });
 
 test("an explicit ADE_BROWSER_SANDBOX=0 is the only way to drop the sandbox", async () => {

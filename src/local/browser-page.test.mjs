@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import {
   clampViewport,
+  createBrowserHub,
   editingCommand,
   keyEventParams,
   maskValues,
@@ -11,6 +13,7 @@ import {
   wheelEventParams,
   xdotoolChords,
 } from "./browser-page.mjs";
+import { createComputerManager } from "./computer.mjs";
 
 test("normalizeBrowserUrl adds https to bare hosts and http to loopback", () => {
   assert.equal(normalizeBrowserUrl("example.com/a?b=1"), "https://example.com/a?b=1");
@@ -155,4 +158,125 @@ test("xdotoolChords refuses empty input and unknown key names", () => {
   assert.throws(() => xdotoolChords(""), /keys is required/);
   assert.throws(() => xdotoolChords([]), /keys is required/);
   assert.throws(() => xdotoolChords("ctrl+Hyperdrive"), /Unknown key: Hyperdrive/);
+});
+
+// A context that answers every CDP command with an empty result, enough for BrowserSession.open.
+class FakeContext extends EventEmitter {
+  closed = false;
+  #page = Object.assign(new EventEmitter(), {
+    setDefaultTimeout() {},
+    setDefaultNavigationTimeout() {},
+    url: () => "about:blank",
+    title: async () => "",
+    isClosed: () => false,
+    mainFrame: () => ({}),
+  });
+  pages() {
+    return [this.#page];
+  }
+  async newPage() {
+    return this.#page;
+  }
+  async grantPermissions() {}
+  async newCDPSession() {
+    return Object.assign(new EventEmitter(), {
+      send: async (method) =>
+        ({
+          "Browser.getVersion": { userAgent: "Mozilla/5.0 Chrome/1.0" },
+          "Page.getNavigationHistory": { entries: [{}], currentIndex: 0 },
+          "Page.captureScreenshot": { data: "" },
+        })[method] ?? {},
+      detach: async () => {},
+    });
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.emit("close");
+  }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A hub over fake contexts that records every context it opened, per project. */
+function fakeHub(options) {
+  const opened = [];
+  const hub = createBrowserHub({
+    ...options,
+    async contextFor(projectId) {
+      const context = new FakeContext();
+      opened.push({ projectId, context });
+      return context;
+    },
+  });
+  return { hub, opened };
+}
+
+test("a hub closes an idle project, keeps one with a viewer, and reopens on the next call", async () => {
+  const { hub, opened } = fakeHub({ idleMs: 60 });
+  const idle = await hub.get("idle");
+  const watched = await hub.get("watched");
+  const stop = await watched.startScreencast({}, () => {});
+  assert.equal(watched.viewerCount, 1);
+
+  await sleep(300);
+  assert.equal(hub.peek("idle"), null, "the unused project was closed");
+  assert.equal(idle.closed, true);
+  assert.equal(opened[0].context.closed, true);
+  assert.equal(hub.peek("watched"), watched, "a project with a viewer stays open");
+  assert.equal(opened[1].context.closed, false);
+
+  // The viewer leaving starts the idle clock from then, not from when it attached.
+  await stop();
+  assert.equal(hub.peek("watched"), watched);
+  await sleep(300);
+  assert.equal(hub.peek("watched"), null);
+
+  const again = await hub.get("idle");
+  assert.notEqual(again, idle);
+  assert.equal(again.closed, false);
+  assert.equal(opened.length, 3, "reopening used a fresh context");
+  assert.equal(hub.peek("idle"), again);
+  await hub.closeAll();
+});
+
+test("every get() restarts the idle clock", async () => {
+  const { hub } = fakeHub({ idleMs: 200 });
+  const session = await hub.get("busy");
+  for (let i = 0; i < 4; i++) {
+    await sleep(80);
+    assert.equal(await hub.get("busy"), session, "still the same session while it is used");
+  }
+  await sleep(600);
+  assert.equal(hub.peek("busy"), null);
+});
+
+test("ADE_BROWSER_IDLE_MS sets the idle timeout", async () => {
+  const before = process.env.ADE_BROWSER_IDLE_MS;
+  process.env.ADE_BROWSER_IDLE_MS = "40";
+  try {
+    const { hub } = fakeHub();
+    await hub.get("p");
+    await sleep(300);
+    assert.equal(hub.peek("p"), null);
+  } finally {
+    if (before === undefined) delete process.env.ADE_BROWSER_IDLE_MS;
+    else process.env.ADE_BROWSER_IDLE_MS = before;
+  }
+});
+
+test("computer status goes running, then stopped when idle, then running on the next action", async () => {
+  const { hub } = fakeHub({ idleMs: 60 });
+  const computers = createComputerManager({
+    installer: { executable: async () => "/chrome", status: () => ({ state: "ready" }) },
+    hub,
+  });
+  assert.equal(computers.status("p").status, "stopped");
+  await computers.start("p");
+  assert.equal(computers.status("p").status, "running");
+  await sleep(300);
+  assert.equal(computers.status("p").status, "stopped");
+  await computers.start("p");
+  assert.equal(computers.status("p").status, "running");
+  await hub.closeAll();
 });
