@@ -39,8 +39,9 @@ release decision.
 The staged package uses `@lydell/node-pty` under the `node-pty` import name because it offers
 prebuilt binaries for common Linux, macOS, and Windows architectures. The terminal remains
 optional: if its native module cannot load, ADE reports that terminal access is unavailable and
-keeps the other features working. This choice is retained only if terminal tests and an
-end-to-end packaged terminal session pass.
+keeps the other features working. Evidence: the terminal tests pass against it, and in a packaged
+install (`npm i -g --prefix <tmp>` of the tarball, 18 MB with no build step) a terminal session
+opened over `/api/terminal` ran a command and returned its output.
 
 ## Consequences
 
