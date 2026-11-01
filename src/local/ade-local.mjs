@@ -1,4 +1,15 @@
 import { connect, createServer } from "node:net";
+import { terminal } from "./routes/terminal.mjs";
+import { editor } from "./routes/editor.mjs";
+import { events } from "./routes/events.mjs";
+import { sessionReads } from "./routes/sessionReads.mjs";
+import { projects } from "./routes/projects.mjs";
+import { attachments } from "./routes/attachments.mjs";
+import { sessionActions } from "./routes/sessionActions.mjs";
+import { browser } from "./routes/browser.mjs";
+import { devServer } from "./routes/devServer.mjs";
+import { agents } from "./routes/agents.mjs";
+import { workflows } from "./routes/workflows.mjs";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -1045,124 +1056,6 @@ export async function handle(req, res) {
   if ((["terminal", "editor"].includes(parts[0]) || harnessRoute) && !isLoopbackPeer(req))
     return json(res, 403, { error: "Host tools are available only on this machine." });
   try {
-    if (parts[0] === "terminal") {
-      const { loadTerminal } = await import("./terminal-loader.mjs");
-      let terminal;
-      try {
-        terminal = await loadTerminal();
-      } catch (error) {
-        return json(res, 503, { error: error.message });
-      }
-      if (req.method === "POST" && parts.length === 1) {
-        const data = await body(req);
-        const project = state.projects.find((item) => item.id === data.projectId);
-        if (!project) return json(res, 404, { error: "Select an existing project first." });
-        const size = terminal.terminalSize(data.cols, data.rows);
-        if (!size) return json(res, 400, { error: "Invalid terminal dimensions." });
-        let cwd;
-        try {
-          cwd = await fs.realpath(project.path);
-          if (!(await fs.stat(cwd)).isDirectory()) throw new Error("Not a directory");
-        } catch {
-          return json(res, 400, { error: "The project folder is unavailable." });
-        }
-        try {
-          return json(res, 201, terminal.openTerminal(cwd, size));
-        } catch (error) {
-          return json(res, 503, { error: error.message });
-        }
-      }
-      if (parts.length === 2 && req.method === "GET") {
-        const cursor = Number(url.searchParams.get("cursor") ?? "0");
-        if (!Number.isInteger(cursor) || cursor < 0)
-          return json(res, 400, { error: "Invalid output cursor." });
-        const waitParam = url.searchParams.get("wait");
-        const waitMs = waitParam == null || waitParam === "" ? 0 : Number(waitParam);
-        if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 10_000)
-          return json(res, 400, { error: "Invalid output wait." });
-        const output = await terminal.readTerminal(
-          parts[1],
-          cursor,
-          waitMs,
-          terminalWaitSignal(req, res),
-        );
-        return output
-          ? json(res, 200, output)
-          : json(res, 404, { error: "Terminal session ended." });
-      }
-      if (parts.length === 3 && req.method === "POST") {
-        const data = await body(req);
-        if (parts[2] === "input") {
-          if (typeof data.data !== "string" || !data.data.length || data.data.length > 8192)
-            return json(res, 400, { error: "Invalid terminal input." });
-          return terminal.writeTerminal(parts[1], data.data)
-            ? json(res, 200, { ok: true })
-            : json(res, 404, { error: "Terminal session ended." });
-        }
-        if (parts[2] === "resize") {
-          const size = terminal.terminalSize(data.cols, data.rows);
-          if (!size) return json(res, 400, { error: "Invalid terminal dimensions." });
-          return terminal.resizeTerminal(parts[1], size)
-            ? json(res, 200, { ok: true })
-            : json(res, 404, { error: "Terminal session ended." });
-        }
-        if (parts[2] === "close")
-          return terminal.closeTerminal(parts[1])
-            ? json(res, 200, { ok: true })
-            : json(res, 404, { error: "Terminal session ended." });
-      }
-      return json(res, 404, { error: "Not found." });
-    }
-    if (parts[0] === "editor") {
-      const editor = await import("./editor.mjs");
-      const project = state.projects.find((item) => item.id === parts[1]);
-      if (!project) return json(res, 404, { error: "Select an existing project first." });
-      try {
-        if (parts.length === 3 && req.method === "GET" && parts[2] === "entries")
-          return json(res, 200, {
-            entries: await editor.listEditorEntries(
-              project.path,
-              url.searchParams.get("path") ?? "",
-            ),
-          });
-        if (parts.length === 3 && req.method === "GET" && parts[2] === "search")
-          return json(res, 200, {
-            entries: await editor.searchEditorFiles(project.path, url.searchParams.get("q") ?? ""),
-          });
-        if (parts.length === 3 && req.method === "GET" && parts[2] === "file")
-          return json(
-            res,
-            200,
-            await editor.readEditorFile(project.path, url.searchParams.get("path") ?? ""),
-          );
-        if (parts.length === 3 && req.method === "GET" && parts[2] === "documents")
-          return json(res, 200, { documents: await editor.listDocuments(project.path) });
-        if (parts.length === 3 && req.method === "POST" && parts[2] === "file") {
-          const data = await body(req);
-          return json(
-            res,
-            200,
-            await editor.writeEditorFile(project.path, data.path, data.content, data.version),
-          );
-        }
-        if (parts.length === 3 && req.method === "POST" && parts[2] === "create") {
-          const data = await body(req);
-          return json(res, 201, await editor.createEditorFile(project.path, data.path));
-        }
-        if (parts.length === 3 && req.method === "POST" && parts[2] === "delete") {
-          const data = await body(req);
-          return json(res, 200, await editor.deleteEditorFile(project.path, data.path));
-        }
-      } catch (error) {
-        if (error instanceof editor.EditorError)
-          return json(res, error.status, { error: error.message });
-        throw error;
-      }
-      return json(res, 404, { error: "Not found." });
-    }
-    // Token exchange for exposed mode: browsers POST the token once and get an
-    // HttpOnly cookie; scripts use `Authorization: Bearer` directly. Loopback
-    // callers can also use this route (no-op there).
     if (isAuthExchange) {
       const data = await body(req);
       const token = String(data.token ?? "").trim();
@@ -1174,947 +1067,112 @@ export async function handle(req, res) {
       );
       return json(res, 200, { ok: true });
     }
-    if (req.method === "GET" && parts[0] === "events" && parts.length === 1) {
-      eventHub.connect(req, res, url.searchParams.get("project") ?? "");
-      return;
-    }
-    if (req.method === "GET" && parts[0] === "bootstrap") {
-      const agents = await bootstrapAgents();
-      state.agents = agents;
-      json(res, 200, { ...bootstrapPayload(), now: now() });
-      if (!eventHub.clientCount()) refreshBootstrapInBackground();
-      return;
-    }
-    if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
-      const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
-      const projectId = url.searchParams.get("project");
-      if (!query) return json(res, 200, { ids: [] });
-      const ids = state.sessions
-        .filter((session) => !projectId || session.projectId === projectId)
-        .filter((session) =>
-          [
-            session.request,
-            session.summary,
-            ...(session.messages ?? []).map((message) => message.text),
-          ].some((text) =>
-            String(text ?? "")
-              .toLowerCase()
-              .includes(query),
-          ),
-        )
-        .map((session) => session.id);
-      return json(res, 200, { ids });
-    }
-    if (req.method === "GET" && parts[0] === "sessions" && parts.length === 2) {
-      const session = state.sessions.find((item) => item.id === parts[1]);
-      if (!session) return json(res, 404, { error: "Session not found." });
-      const { logs: _logs, ...detail } = session;
-      return json(res, 200, { session: detail });
-    }
-    if (
-      req.method === "GET" &&
-      parts[0] === "sessions" &&
-      parts.length === 3 &&
-      parts[2] === "logs"
-    ) {
-      const session = state.sessions.find((item) => item.id === parts[1]);
-      if (!session) return json(res, 404, { error: "Session not found." });
-      const rawAfter = url.searchParams.get("after") ?? "0";
-      const after = Number(rawAfter);
-      if (!Number.isSafeInteger(after) || after < 0)
-        return json(res, 400, { error: "Invalid log cursor." });
-      await sessionLogs.flush(session.id);
-      return json(res, 200, await sessionLogs.read(session.id, after));
-    }
-    if (req.method === "GET" && parts[0] === "browse") {
-      // Read-only directory listing for ADE's built-in folder picker. Same
-      // loopback/origin guards as every other route; never exposes file
-      // contents, only directory names one level at a time.
-      const query = new URL(req.url, "http://127.0.0.1").searchParams;
-      const expanded = expandUserPath(query.get("path") || os.homedir(), os.homedir());
-      let real;
-      try {
-        real = await fs.realpath(expanded);
-      } catch {
-        return json(res, 400, { error: "That path does not exist." });
-      }
-      const stat = await fs.stat(real);
-      if (!stat.isDirectory()) return json(res, 400, { error: "That path is not a directory." });
-      const showHidden = query.get("hidden") === "1";
-      const dirents = await fs.readdir(real, { withFileTypes: true });
-      const dirs = dirents
-        .filter((entry) => entry.isDirectory() && (showHidden || !entry.name.startsWith(".")))
-        .map((entry) => ({ name: entry.name, path: path.join(real, entry.name) }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-      const parent = path.dirname(real);
-      return json(res, 200, {
-        path: real,
-        parent: parent === real ? null : parent,
-        dirs,
-      });
-    }
-    if (req.method === "GET" && parts[0] === "pick-folder") {
-      const choices =
-        process.platform === "darwin"
-          ? [["osascript", ["-e", "POSIX path of (choose folder)"]]]
-          : process.platform === "win32"
-            ? [
-                [
-                  "powershell",
-                  [
-                    "-NoProfile",
-                    "-Command",
-                    "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; if($d.ShowDialog() -eq 'OK'){$d.SelectedPath}",
-                  ],
-                ],
-              ]
-            : [
-                [
-                  "zenity",
-                  ["--file-selection", "--directory", "--title=Choose a project folder for ADE"],
-                ],
-                ["kdialog", ["--getexistingdirectory", os.homedir()]],
-              ];
-      for (const [bin, args] of choices) {
-        const picked = await run(bin, args, { timeout: 120000 });
-        if (picked.code === 0 && picked.stdout.trim())
-          return json(res, 200, { path: picked.stdout.trim() });
-        if (process.platform !== "linux") break;
-      }
-      return json(res, 501, {
-        error:
-          "No supported native folder picker was found. Enter the absolute local folder path instead.",
-      });
-    }
-    if (req.method === "POST" && parts[0] === "mkdir" && parts.length === 1) {
-      // Lets the folder picker make the destination folder it is about to use.
-      const data = await body(req);
-      const created = await makeDirectory({
-        parent: data.parent,
-        name: data.name,
-        home: os.homedir(),
-      });
-      return json(res, 201, { path: created });
-    }
-    if (req.method === "POST" && parts[0] === "projects" && parts.length === 1) {
-      const data = await body(req);
-      const requested = String(data.path ?? "").trim();
-      if (!requested) return json(res, 400, { error: "Choose a local folder path." });
-      const real = await fs.realpath(expandUserPath(requested, os.homedir()));
-      const stat = await fs.stat(real);
-      if (!stat.isDirectory()) return json(res, 400, { error: "That path is not a directory." });
-      return registerProject(res, real, data.name);
-    }
-    if (req.method === "POST" && parts[0] === "projects" && parts[1] === "clone") {
-      const data = await body(req);
-      const source = parseRepoSource(data.url);
-      if (!source.ok) return json(res, 400, { error: source.error });
-      const created = await cloneRepository({
-        run,
-        url: source.url,
-        parent: data.parent,
-        name: data.name?.trim?.() || source.name,
-        home: os.homedir(),
-      });
-      return registerProject(res, await fs.realpath(created), data.name || source.name);
-    }
-    if (req.method === "POST" && parts[0] === "projects" && parts[1] === "create") {
-      const data = await body(req);
-      const created = await createProjectFolder({
-        run,
-        parent: data.parent,
-        name: data.name,
-        git: data.git !== false,
-        home: os.homedir(),
-      });
-      return registerProject(res, await fs.realpath(created), data.name);
-    }
-    if (req.method === "POST" && parts[0] === "projects" && parts[2] === "default-agent") {
-      const project = state.projects.find((p) => p.id === parts[1]);
-      const data = await body(req);
-      if (!project || !Object.hasOwn(adapters, String(data.agentId)))
-        return json(res, 400, { error: "Choose a supported agent and project." });
-      project.defaultAgent = data.agentId;
-      await save();
-      return json(res, 200, project);
-    }
-    if (req.method === "POST" && parts[0] === "projects" && parts[2] === "remove") {
-      const idx = state.projects.findIndex((p) => p.id === parts[1]);
-      if (idx === -1) return json(res, 404, { error: "Project not found." });
-      const busy =
-        state.sessions.some((s) => s.projectId === parts[1] && turns.isBusy(s)) ||
-        state.processes.some((x) => x.projectId === parts[1] && children.has(x.id));
-      if (busy)
-        return json(res, 409, {
-          error: "Stop the running agent or dev process before removing this project.",
-        });
-      for (const p of state.processes.filter((x) => x.projectId === parts[1]))
-        stopChild(children.get(p.id));
-      const removedSessions = state.sessions.filter((s) => s.projectId === parts[1]);
-      // The project's browser and its stored profile are ADE metadata too.
-      await computers.stop(parts[1]).catch(() => {});
-      await controls.delete(parts[1]);
-      await browserContexts.clearProfile(parts[1]).catch(() => {});
-      state.projects.splice(idx, 1);
-      state.sessions = state.sessions.filter((s) => s.projectId !== parts[1]);
-      await Promise.all(removedSessions.map((session) => sessionLogs.remove(session.id)));
-      state.processes = state.processes.filter((x) => x.projectId !== parts[1]);
-      await save();
-      return json(res, 200, {
-        removed: parts[1],
-        note: "Only ADE metadata was removed. The project folder and its files were not touched.",
-      });
-    }
-    if (req.method === "GET" && parts[0] === "projects" && parts[2] === "diff") {
-      const project = state.projects.find((p) => p.id === parts[1]);
-      if (!project) return json(res, 404, { error: "Project not found." });
-      return json(res, 200, await getDiff(project));
-    }
-    if (req.method === "GET" && parts[0] === "projects" && parts[2] === "checks") {
-      const project = state.projects.find((p) => p.id === parts[1]);
-      if (!project) return json(res, 404, { error: "Project not found." });
-      return json(res, 200, { checks: await checksFor(project) });
-    }
-    if (req.method === "POST" && parts[0] === "attachments" && parts.length === 1) {
-      try {
-        const data = await body(req);
-        const bytes = decodeBase64(data.contentBase64);
-        const meta = await saveAttachment(DATA_DIR, {
-          name: data.name,
-          mime: data.mime,
-          bytes,
-        });
-        return json(res, 201, meta);
-      } catch (error) {
-        if (error?.status) return json(res, error.status, { error: error.message });
-        throw error;
-      }
-    }
-    if (req.method === "GET" && parts[0] === "attachments" && parts.length === 2) {
-      try {
-        const meta = await readAttachment(DATA_DIR, parts[1]);
-        res.statusCode = 200;
-        res.setHeader("content-type", meta.mime || "application/octet-stream");
-        res.setHeader("cache-control", "private, max-age=3600");
-        res.setHeader("content-disposition", `inline; filename="${encodeURIComponent(meta.name)}"`);
-        return res.end(meta.bytes);
-      } catch (error) {
-        if (error?.status) return json(res, error.status, { error: error.message });
-        throw error;
-      }
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts.length === 1) {
-      const data = await body(req);
-      // Sanitize the optional model before anything else so a malformed id is
-      // refused with an honest 400 without ever spawning a CLI.
-      const model = String(data.model ?? "").trim();
-      if (model && !MODEL_ID.test(model))
-        return json(res, 400, {
-          error:
-            "Model ids must start with a letter or digit and may then contain letters, digits, and . _ / : [ ] - + (max 256 characters), so they can never read as a CLI flag. Nothing was started.",
-        });
-      const project = state.projects.find((p) => p.id === data.projectId);
-      const agent = state.agents.find((a) => a.id === data.agentId);
-      if (!project || !agent) return json(res, 400, { error: "Select a valid project and agent." });
-      const optionCheck = await resolveSessionOptions(agent.id, model || undefined, {
-        effort: data.effort,
-        speed: data.speed,
-        permission: data.permission,
-      });
-      if (!optionCheck.ok) return json(res, 400, { error: optionCheck.error });
-      if (!agent.installed || !agent.signedIn)
-        return json(res, 400, {
-          error: `${agent.name} must be installed and authenticated using its supported sign-in flow first.`,
-        });
-      const request = String(data.request ?? "").trim();
-      if (request.length < 4)
-        return json(res, 400, { error: "Describe the task in at least four characters." });
-      if (UNSUPPORTED_RISK.test(`${request} ${data.criteria ?? ""}`))
-        return json(res, 403, {
-          error:
-            "This request appears to require a destructive or external action. ADE cannot mediate this CLI's per-action approval flow yet, so it will not start it. Use the agent CLI directly after reviewing the action's scope.",
-        });
-      await projectInfo(project);
-      if (project.missing)
-        return json(res, 409, {
-          error: `The folder ${project.path} no longer exists on disk. Remove the project from ADE (Remove button) and re-add it.`,
-        });
-      // Uncommitted work does not block a task: ADE records it as the
-      // baseline, tells the agent to preserve it, and flags those files as
-      // pre-existing in the diff view so the user can tell their edits from
-      // the agent's.
-      const baseline = project.uncommittedFiles.length ? await getDiff(project) : null;
-      const attachmentIds = Array.isArray(data.attachmentIds) ? data.attachmentIds : [];
-      let files = [];
-      try {
-        files = attachmentIds.length ? await resolveAttachments(DATA_DIR, attachmentIds) : [];
-      } catch (error) {
-        if (error?.status) return json(res, error.status, { error: error.message });
-        throw error;
-      }
-      const text = request + (data.criteria ? `\n\nAcceptance criteria: ${data.criteria}` : "");
-      const session = await turns.start({
-        project,
-        agentId: agent.id,
-        request,
-        criteria: String(data.criteria ?? ""),
-        text,
-        files,
-        model: model || undefined,
-        options: optionCheck.value,
-        baseline,
-      });
-      return json(res, 201, session);
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts.length === 3) {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s) {
-        const known = [
-          "messages",
-          "switch-agent",
-          "stop",
-          "permission",
-          "complete",
-          "reopen",
-          "checks",
-        ];
-        if (known.includes(parts[2])) return json(res, 404, { error: "Session not found." });
-      } else if (parts[2] === "messages") {
-        const data = await body(req);
-        if (data.when === "drop") return json(res, 200, await turns.drop(s));
-        if (data.when === "release") return json(res, 200, await turns.release(s));
-        const text = String(data.text ?? "").trim();
-        if (!text) return json(res, 400, { error: "Message cannot be empty." });
-        if (UNSUPPORTED_RISK.test(text))
-          return json(res, 403, {
-            error:
-              "ADE cannot mediate this destructive or external action's approval flow yet; the message was not sent.",
-          });
-        if (s.status === "complete")
-          return json(res, 409, { error: "Reopen this session before sending a message." });
-        const attachmentIds = Array.isArray(data.attachmentIds) ? data.attachmentIds : [];
-        let files = [];
-        try {
-          files = attachmentIds.length ? await resolveAttachments(DATA_DIR, attachmentIds) : [];
-        } catch (error) {
-          if (error?.status) return json(res, error.status, { error: error.message });
-          throw error;
-        }
-        // "now" stops the current turn (or checks) and runs this message as
-        // soon as it has stopped; otherwise it waits for the turn to end.
-        const when = data.when === "now" ? "now" : "later";
-        return json(res, 200, await turns.send(s, { text, files }, when));
-      } else if (parts[2] === "switch-agent") {
-        const data = await body(req);
-        if (s.status === "complete")
-          return json(res, 409, { error: "Reopen this session before switching agents." });
-        if (turns.isBusy(s))
-          return json(res, 409, {
-            error: "Stop or wait for the current CLI turn to finish before switching agents.",
-          });
-        const agentId = String(data.agentId ?? "");
-        if (!adapters[agentId])
-          return json(res, 400, {
-            error: `Unknown agent. Available: ${Object.keys(adapters).join(", ")}.`,
-          });
-        const model = String(data.model ?? "").trim();
-        if (model && !MODEL_ID.test(model))
-          return json(res, 400, {
-            error:
-              "Model ids must start with a letter or digit and may then contain letters, digits, and . _ / : [ ] - + (max 256 characters), so they can never read as a CLI flag. Nothing was changed.",
-          });
-        const optionInput = {};
-        const cleared = new Set();
-        for (const key of ["effort", "speed", "permission"]) {
-          const raw = data[key];
-          if (raw === undefined || raw === null || raw === "") cleared.add(key);
-          else optionInput[key] = raw;
-        }
-        const optionCheck = await resolveSessionOptions(agentId, model || undefined, optionInput);
-        if (!optionCheck.ok) return json(res, 400, { error: optionCheck.error });
-        const switched = await turns.switchAgent(s, agentId, {
-          model: model || undefined,
-          options: optionCheck.value,
-          cleared,
-        });
-        return json(res, 200, { ...switched, carriesConversation: false });
-      } else if (parts[2] === "stop") {
-        return json(res, 200, await turns.stop(s));
-      } else if (parts[2] === "permission") {
-        const data = await body(req);
-        return json(res, 200, await turns.answer(s, data.requestId, data.optionId));
-      } else if (parts[2] === "complete") {
-        return json(res, 200, await turns.complete(s));
-      } else if (parts[2] === "reopen") {
-        return json(res, 200, await turns.reopen(s));
-      } else if (parts[2] === "checks") {
-        return json(res, 200, await turns.runChecks(s));
-      }
-    }
-    if (req.method === "GET" && parts[0] === "sessions" && parts[2] === "diff") {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      const p = state.projects.find((x) => x.id === s?.projectId);
-      if (!p) return json(res, 404, { error: "Session not found." });
-      return json(res, 200, await getDiff(p));
-    }
-    // ---- Agent computer: each project's headless Chrome (see computer.mjs) ----
-    if (parts[0] === "projects" && parts[2] === "computer") {
-      const project = state.projects.find((x) => x.id === parts[1]);
-      if (!project) return json(res, 404, { error: "Project not found." });
-      if (req.method === "GET" && parts.length === 3) return json(res, 200, computerView(project));
-      if (req.method === "POST" && parts[3] === "start") {
-        // Returns at once; the UI polls status through installing/starting.
-        computers.start(project.id).catch(() => {});
-        return json(res, 202, computerView(project));
-      }
-      if (req.method === "POST" && parts[3] === "stop") {
-        await computers.stop(project.id);
-        // The control lock belonged to the browser that just closed.
-        await controls.delete(project.id);
-        return json(res, 200, computerView(project));
-      }
-      if (req.method === "POST" && (parts[3] === "profile" || parts[3] === "clear")) {
-        // Switch between the project's persistent profile and a throwaway incognito context,
-        // or delete the persistent profile's cookies, storage and cache. Both restart the
-        // browser if it was running.
-        const input = parts[3] === "profile" ? await body(req) : {};
-        const profile = input.profile === INCOGNITO_PROFILE_ID ? INCOGNITO_PROFILE_ID : "default";
-        const changing = parts[3] === "clear" || (project.browserProfile ?? "default") !== profile;
-        if (changing) {
-          const wasRunning = computers.status(project.id).status === "running";
-          await computers.stop(project.id);
-          await controls.delete(project.id);
-          if (parts[3] === "clear") await browserContexts.clearProfile(project.id);
-          else {
-            if (profile === "default") delete project.browserProfile;
-            else project.browserProfile = profile;
-            await save();
-          }
-          if (wasRunning) computers.start(project.id).catch(() => {});
-        }
-        return json(res, 200, computerView(project));
-      }
-      if (req.method === "POST" && parts[3] === "action") {
-        // Agent tools (MCP server / Pi extension): starts the browser on first use, then runs
-        // one screenshot/mouse/keyboard action on its page.
-        try {
-          const input = await body(req);
-          const control = controls.for(project.id);
-          const run = () => computers.action(project.id, input);
-          const { status, payload } = OBSERVE_COMPUTER_ACTIONS.has(input.action)
-            ? await control.observe(run)
-            : await control.agent(run);
-          return json(res, status, payload);
-        } catch (error) {
-          if (error instanceof PayloadTooLarge) throw error;
-          if (error instanceof HumanControlError)
-            return json(res, 409, { error: error.message, code: error.code });
-          return json(res, 503, { error: error.message });
-        }
-      }
-      if (req.method === "POST" && parts[3] === "control") {
-        // Take or hand back control of the browser; shared with the browser stream.
-        const input = await body(req);
-        const viewer = String(input.viewer ?? "");
-        if (!viewer) return json(res, 400, { error: "viewer is required." });
-        const control = controls.for(project.id);
-        try {
-          if (input.action === "take") return json(res, 200, control.take(viewer));
-          if (input.action === "release")
-            return json(
-              res,
-              200,
-              control.release(viewer, async () => {
-                // Best effort: release keys and buttons the viewer left held in the page.
-                browserHub.peek(project.id)?.releaseInput();
-              }),
-            );
-        } catch (error) {
-          if (error instanceof HumanControlError)
-            return json(res, 409, { error: error.message, code: error.code });
-          throw error;
-        }
-        return json(res, 400, { error: 'action must be "take" or "release".' });
-      }
-      return json(res, 404, { error: "Not found." });
-    }
-    // ---- Agent browser preview: live view of the project's browser (see browser-page.mjs) ----
-    if (parts[0] === "projects" && parts[2] === "browser") {
-      const project = state.projects.find((x) => x.id === parts[1]);
-      if (!project) return json(res, 404, { error: "Project not found." });
-      if (req.method === "GET" && parts.length === 3) {
-        const computer = computers.status(project.id);
-        const { owner, generation } = controls.for(project.id).state();
-        const control = { owner, generation };
-        if (computer.status !== "running") {
-          const reason =
-            computer.status === "stopped"
-              ? "The agent browser is off. Start it to watch the agent work."
-              : (computer.detail ?? "The agent browser is not running yet.");
-          return json(res, 200, { available: false, reason, control });
-        }
-        // Origin-relative: the page resolves it against the address it was loaded
-        // from, which is also correct behind an HTTPS proxy (wss:).
-        return json(res, 200, {
-          available: true,
-          streamUrl: browserStream.url(project.id),
-          control,
-        });
-      }
-      if (req.method === "POST" && parts[3] === "action") {
-        // Agent tools (browser_* in computer-tools-defs.mjs): one Playwright action.
-        const input = await body(req);
-        const name = String(input.action ?? "").replace(/^browser_/, "");
-        const control = controls.for(project.id);
-        const run = () => browserHub.get(project.id).then((s) => s.runAgentAction(input));
-        try {
-          const result = OBSERVE_BROWSER_ACTIONS.has(name)
-            ? await control.observe(run)
-            : await control.agent(run);
-          return json(res, 200, result);
-        } catch (error) {
-          const code = error?.code;
-          return json(res, COMPUTER_ERROR_STATUS[code] ?? 500, {
-            error: error?.message ?? String(error),
-            ...(code ? { code } : {}),
-          });
-        }
-      }
-      if (req.method === "POST" && parts[3] === "file-chooser") {
-        // The viewer in control answers the page's file picker with files it uploaded through
-        // /api/attachments. No attachments closes the picker without a file.
-        const input = await body(req);
-        const viewer = String(input.viewer ?? "");
-        const chooserId = String(input.chooserId ?? "");
-        if (!viewer || !chooserId)
-          return json(res, 400, { error: "viewer and chooserId are required." });
-        const session = browserHub.peek(project.id);
-        if (!session) return json(res, 409, { error: "The agent browser is not running." });
-        try {
-          const ids = Array.isArray(input.attachmentIds) ? input.attachmentIds : [];
-          const files = (await resolveAttachments(DATA_DIR, ids)).map((file) => ({
-            name: file.name,
-            mimeType: file.mime,
-            buffer: file.bytes,
-          }));
-          const answered = await controls
-            .for(project.id)
-            .human(viewer, () => session.answerFileChooser(chooserId, files));
-          if (!answered)
-            return json(res, 409, {
-              error: "That file picker is no longer open.",
-              code: "no_file_chooser",
-            });
-          return json(res, 200, { answered: true });
-        } catch (error) {
-          if (error instanceof HumanControlError)
-            return json(res, 409, { error: error.message, code: error.code });
-          if (error?.status) return json(res, error.status, { error: error.message });
-          throw error;
-        }
-      }
-      return json(res, 404, { error: "Not found." });
-    }
-    // ---- Project-scoped dev-server control (driven by the agent tools) ----
-    if (req.method === "GET" && parts[0] === "projects" && parts[2] === "dev") {
-      const project = state.projects.find((x) => x.id === parts[1]);
-      if (!project) return json(res, 404, { error: "Project not found." });
-      const proc = state.processes.find((x) => x.projectId === project.id);
-      const note = project.devScriptNote ? { devScriptNote: project.devScriptNote } : {};
-      if (!proc)
-        return json(res, 200, {
-          found: false,
-          ...note,
-          hint: "No dev-server record yet: POST this path + /start to re-scan package.json and start it.",
-        });
-      return json(res, 200, {
-        found: true,
-        ...devView(proc),
-        ...note,
-        outputTail: (proc.output ?? []).slice(-5),
-      });
-    }
-    if (
-      req.method === "POST" &&
-      parts[0] === "projects" &&
-      parts[2] === "dev" &&
-      parts[3] === "start"
-    ) {
-      const project = state.projects.find((x) => x.id === parts[1]);
-      if (!project) return json(res, 404, { error: "Project not found." });
-      if (devStartClaims.has(project.id)) {
-        const current = state.processes.find((x) => x.projectId === project.id);
-        return json(res, 409, {
-          error: "The dev server is already running for this project.",
-          ...(current
-            ? {
-                ...devView(current),
-                status: current.status === "running" ? "running" : "starting",
-              }
-            : { status: "starting", port: 0 }),
-        });
-      }
-      devStartClaims.add(project.id);
-      try {
-        // Inline re-scan FIRST: a scripts.dev scaffolded earlier this same
-        // turn must be detected without waiting for the next bootstrap poll.
-        const { proc, changed } = await refreshDevProcess(project);
-        if (changed) save().catch(() => {});
-        if (!proc)
-          return json(res, 404, {
-            error: "No dev script for this project, even after re-scanning package.json.",
-            guidance:
-              'Add a proper "dev" script to package.json and call this endpoint again, or tell the user. Never start a detached background server (no nohup, &, or disown) to work around this.',
-          });
-        if (proc.status === "running" || proc.status === "starting")
-          return json(res, 409, {
-            error: "The dev server is already running for this project.",
-            ...devView(proc),
-          });
-        await startDevServer(proc, project);
-        return json(res, 200, devView(proc));
-      } finally {
-        devStartClaims.delete(project.id);
-      }
-    }
-    if (
-      req.method === "POST" &&
-      parts[0] === "projects" &&
-      parts[2] === "dev" &&
-      parts[3] === "stop"
-    ) {
-      const project = state.projects.find((x) => x.id === parts[1]);
-      if (!project) return json(res, 404, { error: "Project not found." });
-      const proc = state.processes.find((x) => x.projectId === project.id);
-      if (!proc)
-        return json(res, 404, { error: "No dev-server record for this project; nothing to stop." });
-      // PID-reuse guard: with no live child, only signal a persisted pid that
-      // still matches the project's path — a recycled pid belongs to an
-      // unrelated process, and killing it would be worse than a stale record.
-      const child = children.get(proc.id);
-      if (!child && proc.pid && !(await processMatches(proc.pid, project.path)))
-        return json(res, 200, {
-          ...devView(proc),
-          note: "The stored pid no longer matches this project's dev process; nothing was signalled.",
-        });
-      // Works during "starting": the live child is in `children` and gets
-      // killed; its close handler resets the port if it never listened.
-      stopChild(child ?? proc.pid);
-      if (proc.status !== "stopped") {
-        proc.status = "stopped";
-        delete proc.pid;
-        proc.updatedAt = now();
-        await save();
-      }
-      // Idempotent: stopping an already-stopped record is a 200 no-op.
-      return json(res, 200, devView(proc));
-    }
-    if (req.method === "POST" && parts[0] === "processes" && parts[2] === "start") {
-      const proc = state.processes.find((x) => x.id === parts[1]);
-      const project = state.projects.find((x) => x.id === proc?.projectId);
-      if (!proc || !project) return json(res, 404, { error: "Process not found." });
-      // Both start routes claim per-project synchronously before the first await.
-      if (devStartClaims.has(project.id))
-        return json(res, 200, {
-          ...proc,
-          status: proc.status === "running" ? "running" : "starting",
-        });
-      if (proc.status === "running" || proc.status === "starting") return json(res, 200, proc);
-      devStartClaims.add(project.id);
-      try {
-        await startDevServer(proc, project);
-        return json(res, 200, proc);
-      } finally {
-        devStartClaims.delete(project.id);
-      }
-    }
-    if (req.method === "POST" && parts[0] === "processes" && parts[2] === "stop") {
-      const proc = state.processes.find((x) => x.id === parts[1]);
-      if (!proc) return json(res, 404, { error: "Process not found." });
-      // Same PID-reuse guard as dev/stop: never signal a persisted pid whose
-      // cwd no longer matches the project.
-      const child = children.get(proc.id);
-      const project = state.projects.find((x) => x.id === proc.projectId);
-      if (!child && proc.pid && !(await processMatches(proc.pid, project?.path))) {
-        delete proc.pid;
-        proc.status = "stopped";
-        proc.updatedAt = now();
-        await save();
-        return json(res, 200, {
-          ...proc,
-          note: "The stored pid no longer matches this project's dev process; nothing was signalled.",
-        });
-      }
-      stopChild(child ?? proc.pid);
-      proc.status = "stopped";
-      delete proc.pid;
-      proc.updatedAt = now();
-      await save();
-      return json(res, 200, proc);
-    }
-    if (req.method === "POST" && parts[0] === "agents" && parts[2] === "login") {
-      const agent = state.agents.find((a) => a.id === parts[1]);
-      if (!agent?.installed) return json(res, 400, { error: "Install this CLI first." });
-      // ADE starts only a sign-in the agent offers as a device flow; any
-      // other sign-in happens in the agent's own terminal UI.
-      const signIn = adapters[agent.id]?.signIn;
-      if (!signIn?.device)
-        return json(res, 400, {
-          error: `${signIn?.note ?? `${agent.name} signs in from its own CLI.`}${signIn?.command ? ` Run \`${signIn.command}\` in a terminal.` : ""}`,
-        });
-      const existing = authChildren.get(agent.id);
-      if (existing) return json(res, 200, { output: existing.output, running: true });
-      const child = spawn(signIn.device[0], signIn.device[1], {
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: false,
-      });
-      const job = { output: "", running: true };
-      authChildren.set(agent.id, job);
-      const collect = (d) => {
-        job.output += d.toString();
-      };
-      child.stdout.on("data", collect);
-      child.stderr.on("data", collect);
-      child.on("close", async (code) => {
-        job.running = false;
-        job.code = code;
-        await agentStatus();
-      });
-      return json(res, 200, { output: job.output, running: true });
-    }
-    if (req.method === "GET" && parts[0] === "agents" && parts[2] === "login") {
-      const job = authChildren.get(parts[1]);
-      return json(res, 200, {
-        ...(job ?? { output: "", running: false }),
-        agent: state.agents.find((a) => a.id === parts[1]),
-      });
-    }
-    if (req.method === "GET" && parts[0] === "agents" && parts[2] === "models") {
-      const agentId = parts[1];
-      if (!adapters[agentId])
-        return json(res, 404, {
-          error: `Unknown agent. Available: ${Object.keys(adapters).join(", ")}.`,
-        });
-      // Probes the CLI's own quota-free listing. The cache key includes the
-      // CLI version reported by the bootstrap status poll so an upgraded
-      // binary is never served a stale catalog.
-      return json(res, 200, await listAgentModels(agentId));
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "model") {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s) return json(res, 404, { error: "Session not found." });
-      const data = await body(req);
-      // Same sanitize as session creation. "" or null clears back to the
-      // agent's own configured default (an absent field means default).
-      const model = String(data.model ?? "").trim();
-      if (model && !MODEL_ID.test(model))
-        return json(res, 400, {
-          error:
-            "Model ids must start with a letter or digit and may then contain letters, digits, and . _ / : [ ] - + (max 256 characters), so they can never read as a CLI flag. Nothing was changed.",
-        });
-      if (s.status === "complete")
-        return json(res, 409, { error: "Reopen this session before changing its model." });
-      // OpenCode's proven set-override pattern: only rewrite when the value
-      // actually differs; applying at the next turn is inherent because
-      // each turn reads session.model when it starts the CLI.
-      const previousModel = s.model ?? null;
-      const changed = previousModel !== (model || null);
-      if (changed) {
-        if (model) s.model = model;
-        else delete s.model;
-        addMessage(
-          s,
-          "system",
-          model
-            ? `Model set to "${model}". It applies from the next CLI turn; a turn already running keeps its current model. The current conversation continues — per-CLI semantics of changing models mid-conversation are not verified; the CLI may treat context differently under the new model.`
-            : `Model cleared; the next turn uses ${s.agentId}'s configured default. A turn already running keeps its current model.`,
-        );
-        s.updatedAt = now();
-        await save();
-      }
-      // Accepted even while a turn runs: it takes effect on the next turn.
-      // The response reports both the old and new effective values.
-      return json(res, 200, { ...s, model: s.model ?? null, previousModel });
-    }
-    if (req.method === "POST" && parts[0] === "sessions" && parts[2] === "options") {
-      const s = state.sessions.find((x) => x.id === parts[1]);
-      if (!s) return json(res, 404, { error: "Session not found." });
-      const data = await body(req);
-      if (s.status === "complete")
-        return json(res, 409, {
-          error: "Reopen this session before changing its model or options.",
-        });
-      const modelProvided = Object.prototype.hasOwnProperty.call(data, "model");
-      let nextModel = s.model;
-      if (modelProvided) {
-        const model = String(data.model ?? "").trim();
-        if (model && !MODEL_ID.test(model))
-          return json(res, 400, {
-            error:
-              "Model ids must start with a letter or digit and may then contain letters, digits, and . _ / : [ ] - + (max 256 characters), so they can never read as a CLI flag. Nothing was changed.",
-          });
-        nextModel = model || undefined;
-      }
-      const cleared = new Set();
-      const optionInput = {};
-      for (const key of ["effort", "speed", "permission"]) {
-        if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
-        const raw = data[key];
-        if (raw === undefined || raw === null || raw === "") cleared.add(key);
-        else optionInput[key] = raw;
-      }
-      const optionCheck = await resolveSessionOptions(s.agentId, nextModel, optionInput);
-      if (!optionCheck.ok) return json(res, 400, { error: optionCheck.error });
-      const previousModel = s.model ?? null;
-      let changed = false;
-      if (modelProvided && previousModel !== (nextModel ?? null)) {
-        if (nextModel) s.model = nextModel;
-        else delete s.model;
-        changed = true;
-        addMessage(
-          s,
-          "system",
-          nextModel
-            ? `Model set to "${nextModel}". It applies from the next CLI turn; a turn already running keeps its current model. The current conversation continues — per-CLI semantics of changing models mid-conversation are not verified; the CLI may treat context differently under the new model.`
-            : `Model cleared; the next turn uses ${s.agentId}'s configured default. A turn already running keeps its current model.`,
-        );
-      }
-      const before = {
-        effort: s.effort,
-        speed: s.speed,
-        permission: s.permission,
-      };
-      syncOptionFields(s, optionCheck.value, cleared);
-      if (
-        before.effort !== s.effort ||
-        before.speed !== s.speed ||
-        before.permission !== s.permission
-      ) {
-        changed = true;
-        const bits = [];
-        if (optionCheck.value.effort || cleared.has("effort"))
-          bits.push(
-            cleared.has("effort") ? "effort cleared" : `effort "${optionCheck.value.effort}"`,
-          );
-        if (optionCheck.value.speed || cleared.has("speed"))
-          bits.push(cleared.has("speed") ? "speed cleared" : `speed "${optionCheck.value.speed}"`);
-        if (optionCheck.value.permission || cleared.has("permission"))
-          bits.push(
-            cleared.has("permission")
-              ? "permission cleared"
-              : `permission "${optionCheck.value.permission}"`,
-          );
-        if (bits.length)
-          addMessage(
-            s,
-            "system",
-            `Options updated (${bits.join(", ")}). They apply from the next CLI turn; a turn already running keeps its current options.`,
-          );
-      }
-      if (changed) {
-        s.updatedAt = now();
-        await save();
-      }
-      return json(res, 200, {
-        ...s,
-        model: s.model ?? null,
-        previousModel,
-      });
-    }
-    if (req.method === "GET" && parts[0] === "agents" && parts[2] === "capabilities") {
-      const agentId = parts[1];
-      if (!adapters[agentId])
-        return json(res, 404, {
-          error: `Unknown agent. Available: ${Object.keys(adapters).join(", ")}.`,
-        });
-      const modelId = url.searchParams.get("model") || undefined;
-      const listed = await listAgentModels(agentId);
-      const modelRow =
-        modelId && listed?.available
-          ? (listed.models?.find((m) => m.id === modelId) ?? { id: modelId })
-          : undefined;
-      return json(res, 200, optionCapabilities(adapters[agentId], modelRow));
-    }
-    if (
-      parts[0] === "agents" &&
-      parts.length === 3 &&
-      (parts[2] === "install" || parts[2] === "update" || parts[2] === "harness")
-    ) {
-      const agentId = parts[1];
-      if (!adapters[agentId])
-        return json(res, 404, {
-          error: `Unknown agent. Available: ${Object.keys(adapters).join(", ")}.`,
-        });
-      const agent = state.agents.find((a) => a.id === agentId);
-      if (req.method === "GET" && parts[2] === "harness") {
-        const job = harnessJobs.get(agentId);
-        return json(res, 200, { ...job, agentId, kind: job.kind ?? "install" });
-      }
-      if (req.method !== "POST" || (parts[2] !== "install" && parts[2] !== "update"))
-        return json(res, 404, { error: "Not found." });
-      const kind = parts[2];
-      if (
-        state.sessions.some(
-          (s) => s.agentId === agentId && ["working", "verifying"].includes(s.status),
-        )
-      )
-        return json(res, 409, {
-          error:
-            "This agent still has a running task. Wait until it stops before installing or updating.",
-        });
-      const method = agent?.installMethod ?? "missing";
-      if (kind === "install" && method !== "missing")
-        return json(res, 409, {
-          error: `${agent?.name ?? agentId} is already installed.`,
-        });
-      if (kind === "update" && method !== "npm") {
-        if (method === "other")
-          return json(res, 409, {
-            error: `Installed outside npm at ${agent?.installPath ?? "unknown path"}; update it where you installed it.`,
-          });
-        return json(res, 409, {
-          error: `${agent?.name ?? agentId} is not installed yet. Install it first.`,
-        });
-      }
-      try {
-        const job = harnessJobs.start(agentId, kind, adapters[agentId].harness[kind]);
-        return json(res, 200, job);
-      } catch (error) {
-        if (error?.code === "BUSY") return json(res, 409, { error: error.message });
-        throw error;
-      }
-    }
-    if (parts[0] === "workflows") {
-      const agentIds = Object.keys(adapters);
-      if (req.method === "GET" && parts.length === 1)
-        return json(res, 200, { workflows: listWorkflows(state.workflows) });
-      if (req.method === "POST" && parts.length === 1) {
-        const data = await body(req);
-        const result = upsertWorkflow(state.workflows, data, { agentIds });
-        if (!result.ok) return json(res, result.status ?? 400, { error: result.error });
-        state.workflows = result.stored;
-        await save();
-        return json(res, 201, { workflow: result.workflow });
-      }
-      if (req.method === "POST" && parts.length === 2) {
-        const data = await body(req);
-        const result = upsertWorkflow(state.workflows, data, { id: parts[1], agentIds });
-        if (!result.ok) return json(res, result.status ?? 400, { error: result.error });
-        state.workflows = result.stored;
-        await save();
-        return json(res, 200, { workflow: result.workflow });
-      }
-      if (req.method === "POST" && parts.length === 3 && parts[2] === "delete") {
-        const result = removeWorkflow(state.workflows, parts[1]);
-        if (!result.ok) return json(res, result.status ?? 400, { error: result.error });
-        state.workflows = result.stored;
-        await save();
-        return json(res, 200, { ok: true });
-      }
-      return json(res, 404, { error: "Not found." });
-    }
-    if (req.method === "GET" && parts[0] === "agents")
-      return json(res, 200, { agents: await agentStatus() });
+    const routeContext = {
+      path,
+      spawn,
+      adapters,
+      optionCapabilities,
+      state,
+      authChildren,
+      id,
+      harnessJobs,
+      agentStatus,
+      listAgentModels,
+      start,
+      decodeBase64,
+      readAttachment,
+      saveAttachment,
+      DATA_DIR,
+      body,
+      which,
+      run,
+      COMPUTER_ERROR_STATUS,
+      INCOGNITO_PROFILE_ID,
+      HumanControlError,
+      resolveAttachments,
+      browserContexts,
+      controls,
+      browserHub,
+      computers,
+      browserStream,
+      OBSERVE_BROWSER_ACTIONS,
+      OBSERVE_COMPUTER_ACTIONS,
+      save,
+      computerView,
+      PayloadTooLarge,
+      stop,
+      processMatches,
+      stopChild,
+      children,
+      devStartClaims,
+      now,
+      startDevServer,
+      devView,
+      refreshDevProcess,
+      connect,
+      eventHub,
+      bootstrapPayload,
+      bootstrapAgents,
+      refreshBootstrapInBackground,
+      fs,
+      os,
+      getDiff,
+      checksFor,
+      cloneRepository,
+      createProjectFolder,
+      expandUserPath,
+      makeDirectory,
+      parseRepoSource,
+      sessionLogs,
+      turns,
+      addMessage,
+      MODEL_ID,
+      UNSUPPORTED_RISK,
+      resolveSessionOptions,
+      syncOptionFields,
+      projectInfo,
+      terminalWaitSignal,
+      listWorkflows,
+      upsertWorkflow,
+      removeWorkflow,
+      req,
+      res,
+      url,
+      parts,
+      handled: false,
+      registerProject: async (...args) => {
+        await registerProject(...args);
+        routeContext.handled = true;
+        return true;
+      },
+      json: (...args) => {
+        json(...args);
+        routeContext.handled = true;
+        return true;
+      },
+    };
+    routeContext.handled = false;
+    if (await terminal(routeContext)) return;
+    routeContext.handled = false;
+    if (await editor(routeContext)) return;
+    routeContext.handled = false;
+    if (await events(routeContext)) return;
+    routeContext.handled = false;
+    if (await sessionReads(routeContext)) return;
+    routeContext.handled = false;
+    if (await projects(routeContext)) return;
+    routeContext.handled = false;
+    if (await attachments(routeContext)) return;
+    routeContext.handled = false;
+    if (await sessionActions(routeContext)) return;
+    routeContext.handled = false;
+    if (await browser(routeContext)) return;
+    routeContext.handled = false;
+    if (await devServer(routeContext)) return;
+    routeContext.handled = false;
+    if (await agents(routeContext)) return;
+    routeContext.handled = false;
+    if (await workflows(routeContext)) return;
     return json(res, 404, { error: "Not found." });
   } catch (error) {
     if (
