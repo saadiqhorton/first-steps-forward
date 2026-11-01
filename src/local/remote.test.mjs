@@ -124,7 +124,13 @@ test("network addresses split Tailscale from the local network and skip bridges"
 });
 
 /** launchRemote with fakes; returns what ADE was launched with and what it printed. */
-async function remote({ run, script = sharing, env = {}, launch } = {}) {
+async function remote({
+  run,
+  script = sharing,
+  env = {},
+  launch,
+  interfaces: nics = interfaces,
+} = {}) {
   const launched = [];
   const lines = [];
   const tailscale = fakeTailscale(script);
@@ -136,7 +142,7 @@ async function remote({ run, script = sharing, env = {}, launch } = {}) {
     log: (line) => lines.push(line),
     run,
     spawn: tailscale.spawn,
-    interfaces,
+    interfaces: nics,
     launch:
       launch ??
       (async (options) => {
@@ -147,34 +153,36 @@ async function remote({ run, script = sharing, env = {}, launch } = {}) {
   return { result, launched, output: lines.join("\n"), env, tailscale };
 }
 
-test("with Tailscale, ADE stays on loopback and prints one HTTPS sign-in link", async () => {
-  const { result, launched, output, env } = await remote({ run: status() });
-  assert.equal(launched[0].host, "127.0.0.1");
+test("without Tailscale, ADE prints a Wi-Fi sign-in link and nothing about Tailscale", async () => {
+  const { result, launched, output, env } = await remote({
+    run: noTailscale,
+    interfaces: { wlan0: interfaces.wlan0 },
+  });
+  assert.equal(launched[0].host, "0.0.0.0");
   assert.match(env.ADE_TOKEN, /^[0-9a-f]{32}$/);
-  assert.deepEqual(result.links, [`https://box.tail1234.ts.net/api/auth?token=${env.ADE_TOKEN}`]);
+  assert.deepEqual(result.links, [`http://192.168.1.20:3000/api/auth?token=${env.ADE_TOKEN}`]);
   assert.equal(result.url, "http://127.0.0.1:3000");
-  assert.match(output, /only devices on your tailnet/);
-  assert.doesNotMatch(output, /plain HTTP/);
-});
-
-test("without Tailscale, ADE listens on the network and prints a link per address", async () => {
-  const { result, launched, output, env } = await remote({ run: noTailscale });
-  assert.equal(launched[0].host, "0.0.0.0");
-  assert.deepEqual(result.links, [
-    `http://100.86.51.32:3000/api/auth?token=${env.ADE_TOKEN}`,
-    `http://192.168.1.20:3000/api/auth?token=${env.ADE_TOKEN}`,
-  ]);
+  assert.match(output, /\(same Wi-Fi\)/);
   assert.match(output, /plain HTTP/);
-  assert.match(output, /install Tailscale/);
+  assert.doesNotMatch(output, /Tailscale/);
 });
 
-test("when Tailscale cannot share, ADE falls back to the network and says why", async () => {
-  const { launched, output } = await remote({ run: status(), script: denied });
-  assert.equal(launched[0].host, "0.0.0.0");
-  assert.match(output, /Tailscale could not share ADE \(Access denied/);
-  const off = await remote({ run: status({ CertDomains: [] }) });
-  assert.equal(off.launched[0].host, "0.0.0.0");
-  assert.match(off.output, /Turn on HTTPS for your tailnet/);
+test("with Tailscale connected, the Wi-Fi link comes first and an HTTPS tailnet link follows", async () => {
+  const { result, launched, env } = await remote({ run: status() });
+  assert.equal(launched[0].host, "0.0.0.0", "Wi-Fi devices without Tailscale still reach ADE");
+  assert.deepEqual(result.links, [
+    `http://192.168.1.20:3000/api/auth?token=${env.ADE_TOKEN}`,
+    `https://box.tail1234.ts.net/api/auth?token=${env.ADE_TOKEN}`,
+  ]);
+});
+
+test("when Tailscale cannot serve HTTPS, its devices get the plain tailnet address", async () => {
+  for (const options of [{ run: status(), script: denied }, { run: status({ CertDomains: [] }) }]) {
+    const { result, env, tailscale } = await remote(options);
+    assert.equal(result.links[1], `http://100.86.51.32:3000/api/auth?token=${env.ADE_TOKEN}`);
+    assert.equal(result.links.length, 2);
+    if (!options.script) assert.equal(tailscale.spawned.length, 0, "no HTTPS, so no serve");
+  }
 });
 
 test("a token the user set is kept, and a failed start ends the share", async () => {

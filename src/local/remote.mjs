@@ -1,7 +1,8 @@
-// `ade --remote`: share ADE with the user's other devices with nothing to configure. With
-// Tailscale connected (and HTTPS on for the tailnet), ADE stays on loopback and `tailscale serve`
-// gives the tailnet an HTTPS link; otherwise ADE listens on the local network. Either way the
-// access token gates every remote request and rides in the printed sign-in link.
+// `ade --remote`: use ADE from the user's phone or other computers with nothing to configure.
+// ADE listens on the local network and prints a sign-in link for devices on the same Wi-Fi. When
+// Tailscale is already connected it adds a link for the tailnet too (HTTPS through `tailscale
+// serve` when the tailnet allows it). The access token gates every remote request and rides in
+// each printed link.
 import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -154,65 +155,42 @@ export async function launchRemote({
   const signIn = (base) => `${base}/api/auth?token=${encodeURIComponent(env.ADE_TOKEN)}`;
   const tailscale = await tailscaleStatus(run);
   let share = null;
-  let note = "";
   if (tailscale?.https) {
     try {
       share = await shareOnTailnet(port, {
         spawn,
         onExit: () => log("Tailscale stopped sharing ADE; restart ADE to share it again."),
       });
-    } catch (error) {
-      note = `Tailscale could not share ADE (${error.message}), so it is shared on the network instead.`;
+    } catch {
+      // Tailscale is an extra: its devices still get the plain tailnet address below.
     }
-  } else if (tailscale) {
-    note =
-      "Turn on HTTPS for your tailnet (https://login.tailscale.com/admin/dns) and restart ADE for a private HTTPS link.";
-  } else {
-    note =
-      "For a private HTTPS link that also works away from home, install Tailscale (https://tailscale.com/download) and restart ADE.";
   }
   let server;
   try {
-    // Behind `tailscale serve` ADE stays on loopback; otherwise every interface hears it.
-    ({ server } = await launch({
-      staticDir,
-      port,
-      host: share ? "127.0.0.1" : "0.0.0.0",
-      env,
-      log: () => {},
-    }));
+    // Every interface: the Wi-Fi link, the tailnet address, and `tailscale serve` on loopback.
+    ({ server } = await launch({ staticDir, port, host: "0.0.0.0", env, log: () => {} }));
   } catch (error) {
     share?.stop();
     throw error;
   }
   const local = `http://127.0.0.1:${port}`;
-  const links = [];
+  const { tailnet, lan } = networkAddresses(interfaces);
+  const targets = [
+    ...lan.map((address) => ({ base: `http://${address}:${port}`, via: "same Wi-Fi" })),
+    ...(share
+      ? [{ base: `https://${tailscale.name}`, via: "Tailscale" }]
+      : tailnet.map((address) => ({ base: `http://${address}:${port}`, via: "Tailscale" }))),
+  ];
+  const links = targets.map(({ base }) => signIn(base));
   const lines = ["ADE is running.", `  This computer:  ${local}`];
-  if (share) {
-    links.push(signIn(`https://${tailscale.name}`));
-    lines.push(
-      `  Your devices:   ${links[0]}`,
-      "                  (only devices on your tailnet can reach it)",
-    );
-  } else {
-    const { tailnet, lan } = networkAddresses(interfaces);
-    for (const [address, where] of [
-      ...tailnet.map((address) => [address, "Tailscale"]),
-      ...lan.map((address) => [address, "same Wi-Fi or network"]),
-    ]) {
-      links.push(signIn(`http://${address}:${port}`));
-      lines.push(
-        `  ${links.length === 1 ? "Your devices:  " : "               "} ${links.at(-1)}  (${where})`,
-      );
-    }
-    if (!links.length)
-      lines.push("  No network address found; connect this computer to Wi-Fi and start again.");
-    else if (lan.length)
-      lines.push("Network links are plain HTTP: fine at home, not on public Wi-Fi.");
-  }
-  if (links.length)
+  targets.forEach(({ via }, i) =>
+    lines.push(`  ${i ? "               " : "Your devices:  "} ${links[i]}  (${via})`),
+  );
+  if (!links.length)
+    lines.push("  No network address found; connect this computer to Wi-Fi and start again.");
+  else
     lines.push("Open a link once on each phone or laptop; it stays signed in. Ctrl+C stops ADE.");
-  if (note) lines.push(note);
+  if (lan.length) lines.push("Wi-Fi links are plain HTTP: fine at home, not on public Wi-Fi.");
   for (const line of lines) log(line);
   return { server, url: local, links, stop: () => share?.stop() };
 }

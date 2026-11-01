@@ -16,8 +16,8 @@ const USAGE = `Usage: ade [--port N] [--host H | --remote] [--open]
 
   --port N   listen on port N (default 3000; PORT also works)
   --host H   listen on H (default 127.0.0.1; non-loopback needs ADE_TOKEN)
-  --remote   use ADE from your other devices too: prints a link to open on them
-             (over Tailscale when it is connected, otherwise the same Wi-Fi)
+  --remote   use ADE from your phone or other computers on the same Wi-Fi:
+             prints a link to open on them (plus one for Tailscale, if connected)
   --open     open ADE in the default browser once it is listening`;
 
 if (Number(process.versions.node.split(".")[0]) < MIN_NODE_MAJOR) {
