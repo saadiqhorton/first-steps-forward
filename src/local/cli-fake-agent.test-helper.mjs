@@ -126,12 +126,19 @@ if (scenario === "permission")
   process.stderr.write("permission requested: bash (rm -rf build); auto-rejecting\n");
 if (scenario === "gate") {
   say("Working.");
+  // The CLI is spawned detached, so when the test runner dies mid-file this
+  // helper is re-parented and would wait forever. Give up then, and after a
+  // minute even with the runner alive.
+  const parent = process.ppid;
+  const started = Date.now();
   const timer = setInterval(() => {
-    if (!env.FAKE_CLI_GATE || !existsSync(env.FAKE_CLI_GATE)) return;
-    clearInterval(timer);
-    say(reply);
-    end();
-    process.exit(0);
+    if (env.FAKE_CLI_GATE && existsSync(env.FAKE_CLI_GATE)) {
+      clearInterval(timer);
+      say(reply);
+      end();
+      process.exit(0);
+    }
+    if (process.ppid !== parent || Date.now() - started > 60_000) process.exit(3);
   }, 20);
 } else {
   say(reply);
