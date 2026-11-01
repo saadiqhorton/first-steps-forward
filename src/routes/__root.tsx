@@ -89,6 +89,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 });
 
 function RootShell({ children }: { children: ReactNode }) {
+  // Even as a SPA the build prerenders this shell and React hydrates it, and
+  // themeInitScript sets data-theme on <html> before that happens.
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

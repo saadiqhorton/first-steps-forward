@@ -1,7 +1,6 @@
 export const LAST_PROJECT_KEY = "ade-last-project";
 
 export function readLastProject(): string | null {
-  if (typeof window === "undefined") return null;
   try {
     return window.localStorage.getItem(LAST_PROJECT_KEY);
   } catch {
@@ -10,7 +9,6 @@ export function readLastProject(): string | null {
 }
 
 export function writeLastProject(projectId: string): void {
-  if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(LAST_PROJECT_KEY, projectId);
   } catch {

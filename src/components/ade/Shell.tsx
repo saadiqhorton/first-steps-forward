@@ -72,7 +72,7 @@ const RIGHT_TABS: RightTab[] = ["activity", "diff", "computer", "terminal"];
 function useIsDesktop(): boolean {
   const [isDesktop, setIsDesktop] = useState(true);
   useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
+    if (!window.matchMedia) return;
     const query = window.matchMedia("(min-width: 1024px)");
     const apply = () => setIsDesktop(query.matches);
     apply();

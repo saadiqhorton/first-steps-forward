@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import type { Session } from "@/lib/ade/types";
 import {
   filterSessions as filterSessionsJs,
@@ -32,7 +32,6 @@ export function filterSessions(
 }
 
 function readViewed(): Record<string, number> {
-  if (typeof window === "undefined") return {};
   try {
     const raw = window.localStorage.getItem(VIEWED_KEY);
     if (!raw) return {};
@@ -58,19 +57,18 @@ function onStorage(e: StorageEvent) {
 }
 
 function ensureStorageListener() {
-  if (storageBound || typeof window === "undefined") return;
+  if (storageBound) return;
   window.addEventListener("storage", onStorage);
   storageBound = true;
 }
 
 function releaseStorageListener() {
-  if (!storageBound || typeof window === "undefined" || listeners.size > 0) return;
+  if (!storageBound || listeners.size > 0) return;
   window.removeEventListener("storage", onStorage);
   storageBound = false;
 }
 
 function snapshot(): Record<string, number> {
-  if (typeof window === "undefined") return cached;
   let raw: string | null = null;
   try {
     raw = window.localStorage.getItem(VIEWED_KEY);
@@ -99,7 +97,6 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function markViewed(sessionId: string, at: number): void {
-  if (typeof window === "undefined") return;
   const next = { ...readViewed(), [sessionId]: at };
   try {
     window.localStorage.setItem(VIEWED_KEY, JSON.stringify(next));
@@ -111,9 +108,5 @@ export function markViewed(sessionId: string, at: number): void {
 
 /** Re-renders on markViewed and on cross-tab `storage` events. */
 export function useViewed(): Record<string, number> {
-  useEffect(() => {
-    // Ensure first client paint picks up storage after SSR empty snapshot.
-    emit();
-  }, []);
-  return useSyncExternalStore(subscribe, snapshot, () => ({}));
+  return useSyncExternalStore(subscribe, snapshot);
 }
