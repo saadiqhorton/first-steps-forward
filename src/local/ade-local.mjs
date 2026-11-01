@@ -106,18 +106,7 @@ let sharedUpgradeAttached = false;
 const browserStream = createBrowserStreamServer({
   hub: browserHub,
   controls,
-  originAllowed: (origin) => {
-    if (lastApiHeaders !== null && originAllowed({ headers: { ...lastApiHeaders, origin } }))
-      return true;
-    if (!origin) return true;
-    try {
-      const parsed = new URL(origin);
-      const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-      if (new Set(["127.0.0.1", "localhost", "::1"]).has(host)) return true;
-      if (!EXPOSE_HOST() && !EXPOSE_TOKEN() && isPrivateIpAddress(host)) return true;
-    } catch {}
-    return false;
-  },
+  originAllowed: (origin, req) => streamOriginAllowed(origin, req),
 });
 globalThis.__adeBrowserStream = browserStream;
 const OBSERVE_BROWSER_ACTIONS = new Set(["status", "snapshot", "screenshot", "wait_for"]);
@@ -755,36 +744,15 @@ function isLoopbackAddress(address) {
     normalized === "::1" || normalized === "127.0.0.1" || /^127(?:\.\d{1,3}){3}$/.test(normalized)
   );
 }
-function isPrivateIpAddress(address) {
-  if (!address) return false;
-  const normalized = address
-    .toLowerCase()
-    .replace(/^::ffff:/, "")
-    .replace(/%.*$/, "");
-  return (
-    /^10(?:\.\d{1,3}){3}$/.test(normalized) ||
-    /^192\.168(?:\.\d{1,3}){2}$/.test(normalized) ||
-    /^172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}$/.test(normalized) ||
-    /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2}$/.test(normalized) ||
-    /^(?:fc|fd)[0-9a-f]{2}:/.test(normalized) ||
-    /^fe[89ab][0-9a-f]:/.test(normalized)
-  );
-}
 const hostnameOf = (hostHeader) =>
   hostHeader ? new URL(`http://${hostHeader}`).hostname.toLowerCase().replace(/^\[|\]$/g, "") : "";
-function isTrustedLocalOrLanPeer(req) {
+function isLoopbackPeer(req) {
   const host = hostnameOf(req.headers.host);
-  const remote = req.socket?.remoteAddress;
-  if (new Set(["127.0.0.1", "localhost", "::1"]).has(host))
-    return isLoopbackAddress(remote) && originAllowed(req);
-  if (
-    !EXPOSE_HOST() &&
-    !EXPOSE_TOKEN() &&
-    isPrivateIpAddress(host) &&
-    (isLoopbackAddress(remote) || isPrivateIpAddress(remote))
-  )
-    return originAllowed(req);
-  return false;
+  return (
+    new Set(["127.0.0.1", "localhost", "::1"]).has(host) &&
+    isLoopbackAddress(req.socket?.remoteAddress) &&
+    originAllowed(req)
+  );
 }
 function tokenAccepted(req) {
   const expected = EXPOSE_TOKEN();
@@ -824,12 +792,25 @@ function originAllowed(req) {
     .trim();
   return !forwardHost || parsed.host === forwardHost;
 }
+/** Origin rule for the agent-browser stream socket; `req` is the upgrade request. */
+export function streamOriginAllowed(origin, req) {
+  // Without an Origin the caller is not a page; only this machine may be that.
+  if (!origin) return isLoopbackAddress(req.socket?.remoteAddress);
+  if (originAllowed(req)) return true;
+  if (lastApiHeaders !== null && originAllowed({ headers: { ...lastApiHeaders, origin } }))
+    return true;
+  try {
+    const host = new URL(origin).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return new Set(["127.0.0.1", "localhost", "::1"]).has(host);
+  } catch {
+    return false;
+  }
+}
 function localRequest(req) {
   const host = hostnameOf(req.headers.host);
   // Loopback peers (the UI on this machine, agent CLIs, dev-control curls)
-  // and direct private-LAN peers (when no explicit ADE_HOST/ADE_TOKEN gate is
-  // configured) keep same-origin Origin checks.
-  if (isTrustedLocalOrLanPeer(req)) return true;
+  // keep same-origin Origin checks. No other peer is trusted without the token.
+  if (isLoopbackPeer(req)) return true;
   // A loopback reverse proxy (`tailscale serve`) forwards with a preserved,
   // non-loopback Host and X-Forwarded-Proto; the proxy itself connects from
   // loopback and its remote clients are gated by the proxy.
@@ -903,7 +884,7 @@ async function handle(req, res) {
     parts[0] === "agents" &&
     parts.length === 3 &&
     ["install", "update", "harness"].includes(parts[2]);
-  if ((["terminal", "editor"].includes(parts[0]) || harnessRoute) && !isTrustedLocalOrLanPeer(req))
+  if ((["terminal", "editor"].includes(parts[0]) || harnessRoute) && !isLoopbackPeer(req))
     return json(res, 403, { error: "Host tools are available only on this machine." });
   // Remember the real base URL of this serving instance for the agent-facing
   // dev-control curls. Only LOCAL requests count (the agent CLIs run on this
@@ -916,16 +897,6 @@ async function handle(req, res) {
     const reqHost = hostnameOf(req.headers.host);
     if (["127.0.0.1", "localhost", "::1"].includes(reqHost)) {
       lastApiBaseUrl = `http://${req.headers.host}`;
-      lastApiHeaders = {
-        host: req.headers.host,
-        "x-forwarded-proto": req.headers["x-forwarded-proto"],
-        "x-forwarded-host": req.headers["x-forwarded-host"],
-      };
-    } else if (isTrustedLocalOrLanPeer(req)) {
-      if (!lastApiBaseUrl) {
-        const reqPort = new URL(`http://${req.headers.host}`).port;
-        lastApiBaseUrl = `http://127.0.0.1${reqPort ? `:${reqPort}` : ""}`;
-      }
       lastApiHeaders = {
         host: req.headers.host,
         "x-forwarded-proto": req.headers["x-forwarded-proto"],
@@ -1499,12 +1470,7 @@ async function handle(req, res) {
         }
         await browserStream.start();
         const streamUrl = new URL(browserStream.url(project.id));
-        const reqHost = hostnameOf(req.headers.host);
-        if (sharedUpgradeAttached && req.headers.host) {
-          streamUrl.host = req.headers.host;
-        } else if (isPrivateIpAddress(reqHost)) {
-          streamUrl.hostname = reqHost;
-        }
+        if (sharedUpgradeAttached && req.headers.host) streamUrl.host = req.headers.host;
         return json(res, 200, {
           available: true,
           streamUrl: streamUrl.toString(),
@@ -2069,7 +2035,16 @@ function attachComputerUpgrades(httpServer) {
   }
   const onUpgrade = (req, socket, head) => {
     const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
-    if (pathname === "/preview-stream") browserStream.handleUpgrade(req, socket, head);
+    if (pathname !== "/preview-stream") return;
+    // The stream server itself only listens on loopback, so this shared path is
+    // the only way in for a remote viewer: apply the same peer/token/Host
+    // guard as the API before handing the socket over.
+    if (!localRequest(req)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    browserStream.handleUpgrade(req, socket, head);
   };
   httpServer.__adeUpgradeListener = onUpgrade;
   httpServer.on("upgrade", onUpgrade);

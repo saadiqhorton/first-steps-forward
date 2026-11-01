@@ -157,6 +157,29 @@ test("rejects a bad token and a disallowed origin with 4401", async (t) => {
   assert.equal((await closedWith(badOrigin)).code, 4401);
 });
 
+test("listens on loopback only", async (t) => {
+  const { server } = setup(t);
+  await server.start();
+  assert.equal(server.address().address, "127.0.0.1");
+});
+
+test("passes the upgrade request to the origin check", async (t) => {
+  const seen = [];
+  const server = createBrowserStreamServer({
+    hub: fakeHub(new Map()),
+    controls: createControlRegistry(),
+    originAllowed: (origin, req) => {
+      seen.push(req.socket.remoteAddress);
+      return false;
+    },
+  });
+  t.after(() => server.close());
+  await server.start();
+  const client = await open(streamUrl(server, "p1", "A"));
+  assert.equal((await closedWith(client)).code, 4401);
+  assert.match(seen[0], /127\.0\.0\.1$/);
+});
+
 test("closes with 4503 and a JSON reason when the browser is unavailable", async (t) => {
   const { server } = setup(t);
   await server.start();

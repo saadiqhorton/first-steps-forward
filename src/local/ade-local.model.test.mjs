@@ -42,8 +42,14 @@ process.env.HOME = home;
 // os.homedir() reads USERPROFILE on Windows, not HOME; without this the
 // tests would write into the real ~/.ade workspace.
 process.env.USERPROFILE = home;
-const { handleLocalApi, devServerArgs, detectFramework, refreshDevProcess, computerContext } =
-  await import("./ade-local.mjs");
+const {
+  handleLocalApi,
+  devServerArgs,
+  detectFramework,
+  refreshDevProcess,
+  computerContext,
+  streamOriginAllowed,
+} = await import("./ade-local.mjs");
 const { checksFor } = await import("./project-scripts.mjs");
 
 const apiRequest = (urlPath, body) => ({
@@ -221,6 +227,55 @@ test("non-loopback peers cannot submit requests or poison the captured manifest 
     });
     assert.equal(response.status, 404, `${address} should be accepted as loopback`);
   }
+});
+
+test("private-LAN peers get no implicit trust without ADE_HOST and ADE_TOKEN", async () => {
+  const lan = (remoteAddress, host = "192.168.1.50:3000") => ({
+    url: `http://${host}/api/agents/unknown/models`,
+    method: "GET",
+    headers: { entries: () => [["host", host]] },
+    runtime: { node: { req: { socket: { remoteAddress } } } },
+    text: async () => "",
+  });
+  delete process.env.ADE_HOST;
+  delete process.env.ADE_TOKEN;
+  for (const remote of ["192.168.1.77", "10.0.0.8", "100.64.1.2", "fd12::5"])
+    assert.equal((await handleLocalApi(lan(remote))).status, 403, `${remote} must be refused`);
+  // Even the machine itself, addressed by a LAN name, is not a loopback Host.
+  assert.equal((await handleLocalApi(lan("127.0.0.1"))).status, 403);
+  // Loopback Host from a loopback peer still passes.
+  assert.equal((await handleLocalApi(lan("127.0.0.1", "127.0.0.1:3000"))).status, 404);
+});
+
+test("the agent-browser stream accepts no-Origin upgrades only from a loopback socket", () => {
+  const upgrade = (remoteAddress, origin, host = "127.0.0.1:3000") => ({
+    headers: { host, ...(origin ? { origin } : {}) },
+    socket: { remoteAddress },
+  });
+  assert.equal(streamOriginAllowed("", upgrade("127.0.0.1")), true);
+  assert.equal(streamOriginAllowed("", upgrade("::ffff:127.0.0.1")), true);
+  assert.equal(streamOriginAllowed("", upgrade("192.168.1.77")), false);
+  assert.equal(streamOriginAllowed("", upgrade("203.0.113.8")), false);
+  // A private-IP page origin no longer earns trust on its own.
+  assert.equal(
+    streamOriginAllowed(
+      "http://192.168.1.77:3100",
+      upgrade("192.168.1.77", "http://192.168.1.77:3100", "127.0.0.1:3000"),
+    ),
+    false,
+  );
+  // Same-authority page origins (the shared /preview-stream path) still pass.
+  assert.equal(
+    streamOriginAllowed(
+      "http://100.64.1.2:3100",
+      upgrade("100.64.1.2", "http://100.64.1.2:3100", "100.64.1.2:3100"),
+    ),
+    true,
+  );
+  assert.equal(
+    streamOriginAllowed("http://127.0.0.1:3100", upgrade("127.0.0.1", "http://127.0.0.1:3100")),
+    true,
+  );
 });
 
 test("opt-in exposure is token-gated, loopback stays exempt, and login sets the cookie", async () => {

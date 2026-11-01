@@ -146,7 +146,7 @@ function hostReason(message) {
  * @param {{
  *   hub: { get(projectId: string): Promise<any> },
  *   controls: { for(projectId: string): any },
- *   originAllowed: (origin: string) => boolean,
+ *   originAllowed: (origin: string, req: import("node:http").IncomingMessage) => boolean,
  * }} options
  */
 export function createBrowserStreamServer({ hub, controls, originAllowed }) {
@@ -347,7 +347,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
     const { ws } = rec;
     const params = new URL(req.url ?? "/", "http://127.0.0.1").searchParams;
     const origin = req.headers.origin ?? "";
-    if (!tokenMatches(params.get("token")) || !originAllowed(origin)) {
+    if (!tokenMatches(params.get("token")) || !originAllowed(origin, req)) {
       ws.close(CLOSE_UNAUTHORIZED, "unauthorized");
       return false;
     }
@@ -515,13 +515,14 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
 
   return {
     handleUpgrade,
-    /** Starts listening on a random port. Idempotent. */
+    address: () => server.address(),
+    /** Starts listening on a random loopback port. Idempotent. */
     start() {
       if (!started) {
         started = new Promise((resolve, reject) => {
           const onError = (error) => reject(error);
           server.once("error", onError);
-          server.listen(0, "0.0.0.0", () => {
+          server.listen(0, "127.0.0.1", () => {
             server.off("error", onError);
             port = server.address().port;
             resolve({ port });

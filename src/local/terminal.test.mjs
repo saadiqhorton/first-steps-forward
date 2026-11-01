@@ -267,5 +267,23 @@ test("host terminal rejects non-loopback peers even when the API is otherwise ex
   assert.equal(rebound.status, 403);
 });
 
+test("host terminal rejects private-LAN peers when no token gate is configured", async () => {
+  delete process.env.ADE_HOST;
+  delete process.env.ADE_TOKEN;
+  // No Origin header, so only the peer/Host rule can refuse these.
+  const lanCall = async (remoteAddress) => {
+    const response = await handleLocalApi({
+      url: "http://192.168.1.50:3000/api/terminal",
+      method: "POST",
+      headers: { entries: () => [["host", "192.168.1.50:3000"]], get: () => null },
+      runtime: { node: { req: { socket: { remoteAddress } } } },
+      text: async () => JSON.stringify({ projectId: "project-1", cols: 80, rows: 24 }),
+    });
+    return response.status;
+  };
+  assert.equal(await lanCall("192.168.1.77"), 403);
+  assert.equal(await lanCall("127.0.0.1"), 403);
+});
+
 // On exit, not in test.after(): ADE's last workspace save can land after the tests end.
 process.once("exit", () => rmSync(home, { recursive: true, force: true }));

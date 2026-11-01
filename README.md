@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:3100` (the dev server is pinned there; override with `npm run dev -- --port <n>`). The development server and API bind to `127.0.0.1`, not the LAN. To run the built, self-hosted Node server instead:
+Open `http://127.0.0.1:3100` (the dev server is pinned there; override with `npm run dev -- --port <n>`). The development server and API bind to `127.0.0.1` by default, not the LAN; `ADE_HOST`/`ADE_TOKEN` (below) apply to `npm run dev` too, and a non-loopback `ADE_HOST` without `ADE_TOKEN` makes the dev server refuse to start. To run the built, self-hosted Node server instead:
 
 ```sh
 npm run build
