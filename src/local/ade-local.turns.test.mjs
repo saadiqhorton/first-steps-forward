@@ -51,6 +51,8 @@ const projects = [
   project("p-stop"),
   project("p-quota"),
   project("p-pi"),
+  project("p-huge"),
+  project("p-huge-error"),
   project("p-oc"),
   project("p-silent"),
   project("p-switch"),
@@ -104,6 +106,28 @@ writeFileSync(
   JSON.stringify({
     projects,
     sessions: [
+      {
+        id: "s-biglog",
+        projectId: "p-boot",
+        agentId: "codex",
+        createdBy: "codex",
+        request: "task",
+        criteria: "",
+        status: "complete",
+        messages: [],
+        changes: [],
+        checks: [],
+        logs: [
+          "$ codex exec",
+          JSON.stringify({
+            type: "agent_end",
+            willRetry: false,
+            messages: ["m".repeat(1_700_000)],
+          }),
+        ],
+        createdAt: 1,
+        updatedAt: 1,
+      },
       {
         id: "s-interrupted",
         projectId: "p-boot",
@@ -201,6 +225,14 @@ test("boot recovery stops an interrupted turn and forgets what died with it", { 
   assert.equal(s.steerNow, undefined);
   assert.equal(s.pendingPermissions, undefined);
   assert.ok(systemTexts(s).some((t) => t.startsWith("ADE restarted and stopped")));
+});
+
+test("boot shrinks stored logs and the next save drops the old megabytes", { skip }, async () => {
+  const stored = session("s-biglog").logs;
+  assert.equal(stored[0], "$ codex exec");
+  assert.deepEqual(JSON.parse(stored[1]), { type: "agent_end", willRetry: false });
+  const onDisk = () => readFileSync(path.join(home, ".ade", "workspace.json"), "utf8");
+  await waitFor(() => !onDisk().includes("mmmmmmmmmm"), "the shrunk workspace to be saved");
 });
 
 test("a Codex turn runs to ready with the agent's reply", { skip }, async () => {
@@ -322,6 +354,38 @@ test("Pi's settled error blocks a turn that exited 0", { skip }, async () => {
   assert.ok(texts.some((t) => t.startsWith("The agent reported that this turn failed")));
   const [first] = turns("p-pi");
   assert.ok(first.args.includes("--provider") && first.args.includes("anthropic"));
+});
+
+test("a megabyte Pi line is stored as small valid JSON and the reply stays", { skip }, async () => {
+  const id = await start("p-huge", "huge", { agentId: "pi" });
+  const done = await waitFor(() => settled(id), "the turn");
+  assert.equal(done.status, "ready");
+  assert.ok(done.logs.length > 2);
+  for (const line of done.logs) assert.ok(line.length < 8192, `a ${line.length}-char line`);
+  const events = done.logs.filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+  const agentEnd = events.find((event) => event.type === "agent_end");
+  assert.ok(agentEnd && !("messages" in agentEnd));
+  const toolEnd = events.find((event) => event.type === "tool_execution_end");
+  assert.match(toolEnd.result, /^A{500}…\[\+299500 chars\]$/);
+  // A short line is stored exactly as the CLI wrote it.
+  assert.ok(
+    done.logs.includes(
+      JSON.stringify({
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "Done." }] },
+      }),
+    ),
+  );
+  assert.ok(done.messages.some((m) => m.role === "agent" && m.text === "Done."));
+});
+
+test("a failure inside a megabyte Pi line is still classified", { skip }, async () => {
+  const id = await start("p-huge-error", "huge-error", { agentId: "pi" });
+  const done = await waitFor(() => settled(id), "the failed turn");
+  assert.equal(done.status, "blocked");
+  assert.equal(done.failureKind, "provider_quota");
+  assert.ok(systemTexts(done).some((t) => t.includes("try again in 20s")));
+  assert.ok(done.logs.every((line) => line.length < 8192));
 });
 
 test("OpenCode: a model error on stderr after exit 0 blocks the turn", { skip }, async () => {

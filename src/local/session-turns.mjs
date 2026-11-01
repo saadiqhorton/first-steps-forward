@@ -46,6 +46,41 @@ export class TurnRefused extends Error {
 const now = () => Date.now();
 const SETTLED = ["stopped", "complete"];
 
+const LOG_LINE_LIMIT = 4096;
+const LOG_STRING_LIMIT = 500;
+// Whole transcripts a CLI repeats on every event (Pi's agent_end and turn_end); the chat has them.
+const LOG_DROPPED_KEYS = new Set(["messages", "toolResults"]);
+
+function shrinkValue(value) {
+  if (typeof value === "string")
+    return value.length > LOG_STRING_LIMIT
+      ? `${value.slice(0, LOG_STRING_LIMIT)}…[+${value.length - LOG_STRING_LIMIT} chars]`
+      : value;
+  if (Array.isArray(value)) return value.map(shrinkValue);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !LOG_DROPPED_KEYS.has(key))
+        .map(([key, item]) => [key, shrinkValue(item)]),
+    );
+  return value;
+}
+
+/**
+ * Bound one raw CLI log line before it is stored or classified. Lines up to 4 KB are returned
+ * as they are. A longer JSON line stays valid JSON (the Activity pane parses it) with its
+ * transcripts dropped and long strings cut; anything else is cut to 4 KB with a marker.
+ * @param {string} line
+ */
+export function shrinkLogLine(line) {
+  if (typeof line !== "string" || line.length <= LOG_LINE_LIMIT) return line;
+  try {
+    const shrunk = JSON.stringify(shrinkValue(JSON.parse(line)));
+    if (shrunk.length <= LOG_LINE_LIMIT * 2) return shrunk;
+  } catch {}
+  return `${line.slice(0, LOG_LINE_LIMIT)}…[+${line.length - LOG_LINE_LIMIT} chars]`;
+}
+
 /** Append one line to a session's log (the last 500 are kept). */
 export function addLog(session, text) {
   session.logs = [...(session.logs ?? []), text].slice(-500);
@@ -312,8 +347,11 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
           addMessage(session, "agent", event.text);
           if (event.text.trim()) turn.sawText = true;
         } else if (event.type === "log") {
-          addLog(session, event.line);
-          turn.texts.push(event.line);
+          // The adapter already parsed the raw line; what is kept only needs the failure wording,
+          // which sits in short lines or in the first 500 characters of a field.
+          const line = shrinkLogLine(event.line);
+          addLog(session, line);
+          turn.texts.push(line);
         } else if (event.type === "notice" || event.type === "error") {
           addMessage(session, "system", event.text);
           turn.texts.push(event.text);
