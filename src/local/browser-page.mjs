@@ -621,6 +621,11 @@ class BrowserSession {
     return this.#closed;
   }
 
+  /** How many viewers are streaming this session's screen. */
+  get viewerCount() {
+    return this.#screencasts.size;
+  }
+
   /** Current navigation state. canGoBack and canGoForward are cached from CDP history. */
   nav() {
     return {
@@ -1543,16 +1548,29 @@ function requireString(value, name) {
   return value;
 }
 
+const DEFAULT_IDLE_MS = 15 * 60_000;
+
+/** `ADE_BROWSER_IDLE_MS` overrides the idle timeout, for tests. */
+function browserIdleMs() {
+  const override = Number(process.env.ADE_BROWSER_IDLE_MS);
+  return override > 0 ? override : DEFAULT_IDLE_MS;
+}
+
 /**
  * One browser session per project, opened lazily on that project's headless Chrome context and
- * reopened after the context closes.
- * @param {{ contextFor: (projectId: string) => Promise<import("playwright-core").BrowserContext> }} options
+ * reopened after the context closes. A session nobody uses for `idleMs` and nobody watches is
+ * closed, so an idle ADE leaves no Chrome running; the next call reopens it.
+ * @param {{ contextFor: (projectId: string) => Promise<import("playwright-core").BrowserContext>, idleMs?: number }} options
  */
-export function createBrowserHub({ contextFor }) {
+export function createBrowserHub({ contextFor, idleMs = browserIdleMs() }) {
   /** @type {Map<string, Promise<BrowserSession>>} */
   const sessions = new Map();
   /** Sessions that finished opening, for synchronous status checks. */
   const open = new Map();
+  /** When each project's session was last asked for (agent action, viewer attach) or watched. */
+  const lastUsed = new Map();
+  /** @type {ReturnType<typeof setInterval> | undefined} */
+  let sweeper;
 
   async function connect(projectId, onClosed) {
     let context;
@@ -1564,12 +1582,34 @@ export function createBrowserHub({ contextFor }) {
     return BrowserSession.open({ context, onClosed });
   }
 
+  /** Closes sessions that have no viewer and went unused for `idleMs`. */
+  function sweep() {
+    const time = Date.now();
+    for (const [key, session] of open) {
+      if (session.viewerCount > 0) lastUsed.set(key, time);
+      else if (time - (lastUsed.get(key) ?? 0) > idleMs) void close(key);
+    }
+  }
+
+  /** One timer, running only while a session exists. */
+  function syncSweeper() {
+    if (sessions.size === 0) {
+      clearInterval(sweeper);
+      sweeper = undefined;
+    } else if (!sweeper) {
+      sweeper = setInterval(sweep, Math.min(60_000, Math.max(10, idleMs / 2)));
+      sweeper.unref?.();
+    }
+  }
+
   /** Closes the project's session and its context. */
   async function close(projectId) {
     const key = String(projectId);
     const current = sessions.get(key);
     sessions.delete(key);
     open.delete(key);
+    lastUsed.delete(key);
+    syncSweeper();
     if (!current) return;
     const session = await current.catch(() => null);
     await session?.close();
@@ -1582,6 +1622,7 @@ export function createBrowserHub({ contextFor }) {
      */
     async get(projectId) {
       const key = String(projectId);
+      lastUsed.set(key, Date.now());
       const current = sessions.get(key);
       if (current) {
         try {
@@ -1593,16 +1634,24 @@ export function createBrowserHub({ contextFor }) {
         if (sessions.get(key) === current) sessions.delete(key);
       }
       const entry = connect(projectId, () => {
-        if (sessions.get(key) === entry) sessions.delete(key);
+        if (sessions.get(key) === entry) {
+          sessions.delete(key);
+          lastUsed.delete(key);
+          syncSweeper();
+        }
         if (open.get(key)?.closed) open.delete(key);
       });
       sessions.set(key, entry);
+      syncSweeper();
       try {
         const session = await entry;
         if (sessions.get(key) === entry && !session.closed) open.set(key, session);
         return session;
       } catch (cause) {
-        if (sessions.get(key) === entry) sessions.delete(key);
+        if (sessions.get(key) === entry) {
+          sessions.delete(key);
+          syncSweeper();
+        }
         throw cause;
       }
     },

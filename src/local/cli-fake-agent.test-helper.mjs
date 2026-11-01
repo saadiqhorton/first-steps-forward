@@ -14,6 +14,8 @@
 //   settled-error   Pi only: report a settled provider error but exit 0
 //   silent          exit 0 without any output
 //   silent-error    exit 0 with only a model error on stderr (OpenCode's habit)
+//   huge            Pi only: reply "Done." among megabyte-long event lines
+//   huge-error      Pi only: a settled rate-limit error inside a megabyte agent_end
 //   permission      OpenCode only: auto-reject a permission on stderr, then reply
 // - FAKE_CLI_REPLY: the final reply text instead of "Done.".
 import { appendFileSync, existsSync } from "node:fs";
@@ -133,6 +135,31 @@ if (scenario === "gate") {
     end();
     process.exit(0);
   }, 20);
+} else if (scenario === "huge" || scenario === "huge-error") {
+  const assistant = (extra) => ({
+    role: "assistant",
+    content: [{ type: "text", text: "x".repeat(1_700_000) }],
+    ...extra,
+  });
+  // Pi repeats whole transcripts and tool payloads on single lines that reach megabytes.
+  out({ type: "tool_execution_end", toolName: "screenshot", result: "A".repeat(300_000) });
+  if (scenario === "huge") {
+    say(reply);
+    out({ type: "agent_end", willRetry: false, messages: [assistant({ stopReason: "stop" })] });
+  } else {
+    out({
+      type: "agent_end",
+      willRetry: false,
+      messages: [
+        assistant({
+          stopReason: "error",
+          errorMessage: "429 rate limit exceeded. Please try again in 20s.",
+        }),
+      ],
+    });
+  }
+  // Exiting at once would cut the megabytes still queued on the pipe.
+  process.stdout.write("", () => process.exit(0));
 } else {
   say(reply);
   end();
