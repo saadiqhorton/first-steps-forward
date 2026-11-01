@@ -120,17 +120,6 @@ Each project's right pane has a **Browser** tab: a headless Chrome on your machi
 
 The existing TanStack Start/React app and warm workbench visual direction are retained. A small Node local-service module is mounted into Vite dev/preview and the self-hosted Node server: `src/local/ade-local.mjs` holds the request guard and the shared state, each area's API routes live in `src/local/routes/`, and larger services have their own modules (`dev-server.mjs`, `agent-status.mjs`, `remote.mjs` and others). Agent adapters are isolated in `src/local/adapters/` so additional CLIs can be added without changing UI state. The service owns project registration, Git inspection/diffs, task persistence, child-process lifecycle, CLI streaming, checks, and development servers. The browser receives scoped invalidations over Server-Sent Events and loads session details and logs on demand; browser storage is no longer the source of truth.
 
-## Releasing
-
-The npm package `@dezignerdrugz/ade` is built from this repository, not from its development manifest:
-
-```sh
-npm run package                                # builds the app, stages and packs it in .pack/
-npm publish .pack/dezignerdrugz-ade-<version>.tgz
-```
-
-Publishing needs `npm login` as an account that owns the `@dezignerdrugz` scope. Bump `version` in the root `package.json` before packaging a new release; npm never accepts the same version twice.
-
 ## License
 
 ADE is released under the [MIT License](LICENSE). Third-party components and bundled fonts keep their own licenses; see `THIRD_PARTY_NOTICES.md` and `public/licenses/`.
