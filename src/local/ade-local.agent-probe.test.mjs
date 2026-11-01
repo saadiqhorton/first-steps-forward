@@ -67,13 +67,15 @@ const invocations = () => readFileSync(calls, "utf8").split("\n").filter(Boolean
 const versionProbes = () => invocations().filter((line) => line.endsWith(" --version")).length;
 const npmRootCalls = () => invocations().filter((line) => line === "npm root -g").length;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// performance.now(), not Date.now(): a test that mocks Date.now freezes it, and a deadline on a
+// frozen clock never passes, so a probe that never comes would spin here instead of failing.
 async function waitFor(check, what, ms = 15000) {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + ms;
+  while (performance.now() < deadline) {
     if (check()) return;
     await sleep(25);
   }
-  throw new Error(`Timed out waiting for ${what}`);
+  throw new Error(`Timed out waiting for ${what}; calls so far:\n${invocations().join("\n")}`);
 }
 /** Lets a probe that was wrongly started show itself. */
 const settle = () => sleep(400);
@@ -129,4 +131,20 @@ test("a restart inside the interval trusts the cached fetchedAt", { skip }, asyn
   assert.equal(res.status, 200);
   await settle();
   assert.equal(versionProbes(), before);
+});
+
+test("a latest-version check does not move the cache's fetchedAt", { skip }, async (t) => {
+  const cache = () =>
+    JSON.parse(readFileSync(path.join(home, ".ade", "agents-status.json"), "utf8"));
+  const withLatest = () => cache().agents.filter((agent) => agent.latestVersion).length;
+  // Two hours on, so the cached registry answers have expired and each check really runs `npm view`.
+  // The previous test rewrote the cache without latest versions, so those seen below are this probe's.
+  let clock = Date.now() + seconds(7200);
+  const probedAt = clock;
+  t.mock.method(Date, "now", () => clock);
+  assert.equal((await call("/api/agents")).status, 200);
+  // The probe has stamped the cache; the checks it started write only after their processes exit.
+  clock += seconds(3600);
+  await waitFor(() => withLatest() === 3, "this probe's latest-version checks");
+  assert.equal(cache().fetchedAt, probedAt, "a later write must not push the next probe back");
 });
