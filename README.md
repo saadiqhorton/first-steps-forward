@@ -42,7 +42,7 @@ That server listens on `127.0.0.1:3000` (override with `PORT=... npm start`). It
 
 Add a project from the **+** button, in one of three ways: pick an **existing folder** (the native picker when available, ADE's own folder browser otherwise, or type its local path); **clone from GitHub** into a folder you choose (`owner/repo`, a GitHub URL, or an SSH address — runs `git clone` with prompts disabled, so a private repository needs `gh auth login`, a git credential helper, or an SSH key in `ssh-agent`; addresses carrying a password and non-remote paths are refused); or make a **new folder**, optionally initialized as a Git repository. The folder browser has a **New folder** button for creating a destination. A failed clone removes whatever it partially wrote, and an existing folder is never overwritten. To drop a project from the workspace, use **Remove** in the project header: it deletes only ADE's metadata (session records, process entries) for that project after an explicit confirmation, and never touches the folder or its files.
 
-ADE stores project/session metadata and CLI logs in `~/.ade/workspace.json` (private file permissions); Pi session files are under `~/.ade/sessions/`. Project files are not copied into ADE, and provider credentials are not written to ADE or project files.
+ADE stores project/session metadata in `~/.ade/workspace.json` and CLI logs in per-session JSONL files under `~/.ade/session-logs/` (private file permissions); Pi session files are under `~/.ade/sessions/`. Project files are not copied into ADE, and provider credentials are not written to ADE or project files.
 
 ## Agents and authentication
 
@@ -92,7 +92,7 @@ Each project's right pane has a **Browser** tab: a headless Chrome on your machi
 
 ## Architecture
 
-The existing TanStack Start/React app and warm workbench visual direction are retained. A small Node local-service module is mounted into Vite dev/preview and the self-hosted Node server. Agent adapters are isolated in `src/local/adapters/` so additional CLIs can be added without changing UI state. The service owns project registration, Git inspection/diffs, task persistence, child-process lifecycle, CLI streaming, checks, and development servers. The browser polls that loopback API; browser storage is no longer the source of truth.
+The existing TanStack Start/React app and warm workbench visual direction are retained. A small Node local-service module is mounted into Vite dev/preview and the self-hosted Node server. Agent adapters are isolated in `src/local/adapters/` so additional CLIs can be added without changing UI state. The service owns project registration, Git inspection/diffs, task persistence, child-process lifecycle, CLI streaming, checks, and development servers. The browser receives scoped invalidations over Server-Sent Events and loads session details and logs on demand; browser storage is no longer the source of truth.
 
 ## Checks
 
