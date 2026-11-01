@@ -935,7 +935,13 @@ async function handle(req, res) {
   }
   try {
     if (parts[0] === "terminal") {
-      const terminal = await import("./terminal.mjs");
+      const { loadTerminal } = await import("./terminal-loader.mjs");
+      let terminal;
+      try {
+        terminal = await loadTerminal();
+      } catch (error) {
+        return json(res, 503, { error: error.message });
+      }
       if (req.method === "POST" && parts.length === 1) {
         const data = await body(req);
         const project = state.projects.find((item) => item.id === data.projectId);
