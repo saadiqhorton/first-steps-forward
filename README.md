@@ -11,19 +11,19 @@ Requirements: Node.js 22+ and Git. Install whichever coding-agent CLI you plan t
 Run ADE without cloning the repository or installing its development dependencies:
 
 ```sh
-npx @saadiqhorton/ade
+npx @dezignerdrugz/ade
 ```
 
 Open the printed address (by default `http://127.0.0.1:3000`). To choose a port or open it automatically:
 
 ```sh
-npx @saadiqhorton/ade --port 3100 --open
+npx @dezignerdrugz/ade --port 3100 --open
 ```
 
 ### Use it from your phone or another computer
 
 ```sh
-npx @saadiqhorton/ade --remote
+npx @dezignerdrugz/ade --remote
 ```
 
 ADE prints a sign-in link next to its usual address:
@@ -46,7 +46,7 @@ Open the link on a phone or laptop connected to the same Wi-Fi. It signs that br
 
 If the link does not open on the other device, check that both are on the same network (guest and office networks often keep devices apart), that this computer's firewall allows incoming connections on ADE's port, and that this computer's address has not changed since ADE started.
 
-Check this machine's setup with `npx @saadiqhorton/ade doctor`. The built-in terminal is optional; when its platform binary is unavailable, the rest of ADE still works. `ade browser-setup` explains or installs host packages needed by Chrome on supported Linux systems.
+Check this machine's setup with `npx @dezignerdrugz/ade doctor`. The built-in terminal is optional; when its platform binary is unavailable, the rest of ADE still works. `ade browser-setup` explains or installs host packages needed by Chrome on supported Linux systems.
 
 ### Run from source
 
@@ -122,14 +122,14 @@ The existing TanStack Start/React app and warm workbench visual direction are re
 
 ## Releasing
 
-The npm package `@saadiqhorton/ade` is built from this repository, not from its development manifest:
+The npm package `@dezignerdrugz/ade` is built from this repository, not from its development manifest:
 
 ```sh
 npm run package                                # builds the app, stages and packs it in .pack/
-npm publish .pack/saadiqhorton-ade-<version>.tgz
+npm publish .pack/dezignerdrugz-ade-<version>.tgz
 ```
 
-Publishing needs `npm login` as an account that owns the `@saadiqhorton` scope. Bump `version` in the root `package.json` before packaging a new release; npm never accepts the same version twice.
+Publishing needs `npm login` as an account that owns the `@dezignerdrugz` scope. Bump `version` in the root `package.json` before packaging a new release; npm never accepts the same version twice.
 
 ## License
 

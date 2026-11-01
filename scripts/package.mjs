@@ -1,4 +1,4 @@
-// `npm run package`: stages the publishable `@saadiqhorton/ade` package in .pack/stage and runs
+// `npm run package`: stages the publishable `@dezignerdrugz/ade` package in .pack/stage and runs
 // `npm pack` there. The repo's package.json is the Lovable/dev manifest (the whole React
 // toolchain), so the package gets its own: only what the Node server imports at runtime, pinned
 // to the versions package-lock.json resolved. It ships the SPA build, not the Nitro server bundle.
@@ -93,7 +93,7 @@ async function main() {
   }
 
   const manifest = {
-    name: "@saadiqhorton/ade",
+    name: "@dezignerdrugz/ade",
     version: rootManifest.version,
     description:
       "ADE: a local web UI that drives coding-agent CLIs (Codex, OpenCode, Pi, Claude Code) on your machine.",

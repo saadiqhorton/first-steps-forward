@@ -30,7 +30,7 @@ from starting the user's local service.
 
 The repository manifest remains the Lovable development manifest. `npm run package` builds the
 client, stages only the runtime server, CLI, static assets, licenses, and runtime dependencies in
-`.pack/`, then creates a tarball. The staged package is invoked with `npx @saadiqhorton/ade` and
+`.pack/`, then creates a tarball. The staged package is invoked with `npx @dezignerdrugz/ade` and
 requires Node 22+ and Git. It is built and smoke-tested locally; publication remains a separate
 release decision.
 
