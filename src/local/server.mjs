@@ -34,7 +34,7 @@ const TYPES = {
  *   `staticDir` is the SPA build's client directory (assets plus the shell HTML).
  * @returns {Promise<http.Server>}
  */
-export async function startAdeServer({ host = "127.0.0.1", port = 3000, staticDir }) {
+export async function startAdeServer({ host = "127.0.0.1", port = 3100, staticDir }) {
   await start();
   const root = path.resolve(staticDir);
   const server = http.createServer((req, res) => {

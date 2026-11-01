@@ -12,7 +12,7 @@ import { startAdeServer } from "./server.mjs";
  */
 export async function launchAde({
   staticDir,
-  port = 3000,
+  port = 3100,
   host: requested,
   env = process.env,
   log = console.log,

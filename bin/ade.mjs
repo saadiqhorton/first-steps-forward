@@ -14,7 +14,7 @@ const USAGE = `Usage: ade [--port N] [--host H | --remote] [--open]
        ade doctor
        ade browser-setup
 
-  --port N   listen on port N (default 3000; PORT also works)
+  --port N   listen on port N (default 3100, like npm run dev; PORT also works)
   --host H   listen on H (default 127.0.0.1; non-loopback needs ADE_TOKEN)
   --remote   use ADE from your phone or other computers on the same Wi-Fi:
              prints a link to open on them (plus one for Tailscale, if connected)
@@ -85,7 +85,7 @@ async function main() {
     });
   }
 
-  const raw = values.port ?? process.env.PORT ?? "3000";
+  const raw = values.port ?? process.env.PORT ?? "3100";
   const port = Number(raw);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     console.error(`Invalid port: ${raw}`);

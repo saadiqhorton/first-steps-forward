@@ -10,7 +10,7 @@ import { launchAde } from "../src/local/launch.mjs";
 
 try {
   await launchAde({
-    port: Number(process.env.PORT ?? 3000),
+    port: Number(process.env.PORT ?? 3100),
     staticDir: fileURLToPath(new URL("../.output/public", import.meta.url)),
   });
 } catch (error) {
