@@ -133,3 +133,22 @@ test("/preview-stream upgrades reach the stream; other upgrades are refused", as
   const [notFound] = await once(other, "error");
   assert.match(notFound.message, /404/);
 });
+
+// Last: each launch re-records the listen address the earlier tests check.
+test("a host given on the command line reaches the request guard", async () => {
+  const { launchAde } = await import("./launch.mjs");
+  const env = { ADE_TOKEN: "secret" };
+  const { server: given } = await launchAde({
+    staticDir,
+    port: 0,
+    host: "127.0.0.1",
+    env,
+    log() {},
+  });
+  given.close();
+  assert.equal(env.ADE_HOST, "127.0.0.1", "ade --host must set what the guard reads");
+  const untouched = {};
+  const { server: plain } = await launchAde({ staticDir, port: 0, env: untouched, log() {} });
+  plain.close();
+  assert.equal(untouched.ADE_HOST, undefined);
+});

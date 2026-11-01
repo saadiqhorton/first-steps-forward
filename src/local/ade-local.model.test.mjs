@@ -317,12 +317,19 @@ test("opt-in exposure is token-gated, loopback stays exempt, and login sets the 
     );
     // A loopback reverse proxy (`tailscale serve`) forwards with a preserved
     // non-loopback Host and X-Forwarded-Proto; its browser Origin (https,
-    // different authority) must be accepted.
-    const proxied = await api({
-      url: "http://hackpad-tailnet:3000/api/agents/unknown/models",
-      headers: { "x-forwarded-proto": "https", origin: "https://hackpad-tailnet.ts.net" },
-    });
-    assert.equal(proxied.status, 404);
+    // different authority) must be accepted. With a token set, its clients
+    // must prove it like any other remote peer.
+    const proxied = (headers = {}) =>
+      api({
+        url: "http://hackpad-tailnet:3000/api/agents/unknown/models",
+        headers: {
+          "x-forwarded-proto": "https",
+          origin: "https://hackpad-tailnet.ts.net",
+          ...headers,
+        },
+      });
+    assert.equal((await proxied({ authorization: "Bearer lan-secret" })).status, 404);
+    assert.equal((await proxied()).status, 401);
     // ...but a browser-shaped request without X-Forwarded-Proto stays
     // unauthorized (401) in exposed mode — the Host fence governs who is
     // allowed, not the status code.
@@ -371,6 +378,60 @@ test("opt-in exposure is token-gated, loopback stays exempt, and login sets the 
     assert.equal((await lanRequest()).status, 403);
   } finally {
     delete process.env.ADE_HOST;
+    delete process.env.ADE_TOKEN;
+  }
+});
+
+test("behind `tailscale serve` a set token gates proxied clients, and the sign-in link sets the cookie", async () => {
+  // `ade --remote` on Tailscale: ADE stays on loopback; the proxy forwards from loopback.
+  const proxied = (overrides = {}) =>
+    api({
+      url: "http://box.tailnet.ts.net/api/agents/unknown/models",
+      ...overrides,
+      headers: {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "box.tailnet.ts.net",
+        origin: "https://box.tailnet.ts.net",
+        ...overrides.headers,
+      },
+    });
+  delete process.env.ADE_HOST;
+  delete process.env.ADE_TOKEN;
+  try {
+    // No token set: the proxy is the gate, as before.
+    assert.equal((await proxied()).status, 404);
+    process.env.ADE_TOKEN = "tail-secret";
+    const denied = await proxied();
+    assert.equal(denied.status, 401);
+    assert.equal((await denied.json()).authRequired, true);
+    assert.equal((await proxied({ headers: { cookie: "ade_auth=tail-secret" } })).status, 404);
+    // Another site's page in a tailnet browser is refused even with the cookie.
+    const crossSite = await proxied({
+      headers: { cookie: "ade_auth=tail-secret", origin: "https://evil.example" },
+    });
+    assert.equal(crossSite.status, 401);
+    // Host tools stay on this machine even for a signed-in remote device.
+    const terminal = await proxied({
+      url: "http://box.tailnet.ts.net/api/terminal",
+      headers: { cookie: "ade_auth=tail-secret" },
+    });
+    assert.equal(terminal.status, 403);
+    // This machine's own clients stay exempt.
+    assert.equal(
+      (await api({ url: "http://127.0.0.1:3000/api/agents/unknown/models" })).status,
+      404,
+    );
+    // The sign-in link: the right token sets the cookie and sends the browser
+    // to the app, leaving the token off the address bar.
+    const link = await proxied({ url: "http://box.tailnet.ts.net/api/auth?token=tail-secret" });
+    assert.equal(link.status, 303);
+    assert.equal(link.headers.get("location"), "/");
+    assert.match(String(link.headers.get("set-cookie")), /ade_auth=tail-secret; HttpOnly/);
+    const stale = await proxied({ url: "http://box.tailnet.ts.net/api/auth?token=old" });
+    assert.equal(stale.status, 401);
+    assert.equal(stale.headers.get("set-cookie"), null);
+    assert.match((await stale.json()).error, /sign-in link is out of date/);
+  } finally {
     delete process.env.ADE_TOKEN;
   }
 });

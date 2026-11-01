@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-// The `ade` command: `ade [--port N] [--host H] [--open]` serves the UI and API from one
+// The `ade` command: `ade [--port N] [--host H | --remote] [--open]` serves the UI and API from one
 // process, `ade doctor` reports what this machine is missing, and `ade browser-setup` prepares a
 // Linux host for the agent browser. Everything is imported after the Node check so an old Node
 // gets a message instead of a syntax error.
 import { spawn } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const MIN_NODE_MAJOR = 22;
-const USAGE = `Usage: ade [--port N] [--host H] [--open]
+const USAGE = `Usage: ade [--port N] [--host H | --remote] [--open]
        ade doctor
        ade browser-setup
 
   --port N   listen on port N (default 3000; PORT also works)
   --host H   listen on H (default 127.0.0.1; non-loopback needs ADE_TOKEN)
+  --remote   use ADE from your other devices too: prints a link to open on them
+             (over Tailscale when it is connected, otherwise the same Wi-Fi)
   --open     open ADE in the default browser once it is listening`;
 
 if (Number(process.versions.node.split(".")[0]) < MIN_NODE_MAJOR) {
@@ -45,6 +49,7 @@ async function main() {
       options: {
         port: { type: "string", short: "p" },
         host: { type: "string" },
+        remote: { type: "boolean" },
         open: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
@@ -86,13 +91,31 @@ async function main() {
     console.error(`Invalid port: ${raw}`);
     return 1;
   }
-  const { launchAde } = await import("../src/local/launch.mjs");
+  if (values.remote && values.host) {
+    console.error(`Use either --remote or --host, not both.\n\n${USAGE}`);
+    return 1;
+  }
+  const staticDir = fileURLToPath(new URL("../.output/public", import.meta.url));
   try {
-    const { url } = await launchAde({
-      port,
-      host: values.host,
-      staticDir: fileURLToPath(new URL("../.output/public", import.meta.url)),
-    });
+    let url;
+    if (values.remote) {
+      const { launchRemote } = await import("../src/local/remote.mjs");
+      const remote = await launchRemote({
+        port,
+        staticDir,
+        dataDir: path.join(os.homedir(), ".ade"),
+      });
+      url = remote.url;
+      // A terminal's Ctrl+C reaches `tailscale serve` too, but a plain `kill` of ADE would not.
+      for (const signal of ["SIGINT", "SIGTERM"])
+        process.once(signal, () => {
+          remote.stop();
+          process.exit(0);
+        });
+    } else {
+      const { launchAde } = await import("../src/local/launch.mjs");
+      ({ url } = await launchAde({ port, host: values.host, staticDir }));
+    }
     if (values.open) openBrowser(url);
   } catch (error) {
     console.error(

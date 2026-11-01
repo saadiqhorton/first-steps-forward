@@ -6,7 +6,7 @@ import { startAdeServer } from "./server.mjs";
  * loopback unless ADE_HOST opts into another interface, which then REQUIRES a
  * non-empty ADE_TOKEN (see bind-host.mjs). Prints how to reach it.
  * @param {{ staticDir: string, port?: number, host?: string, env?: NodeJS.ProcessEnv, log?: (line: string) => void }} options
- *   `host` overrides ADE_HOST; the token rule applies to it either way.
+ *   `host` overrides ADE_HOST and is written back to `env.ADE_HOST`; the token rule applies either way.
  * @returns {Promise<{ server: import("node:http").Server, url: string }>}
  * @throws {Error} when the bind rule refuses the host
  */
@@ -18,6 +18,8 @@ export async function launchAde({
   log = console.log,
 }) {
   const host = resolveBindHost(requested === undefined ? env : { ...env, ADE_HOST: requested });
+  // The request guard reads ADE_HOST, so a host given on the command line must reach it too.
+  if (requested !== undefined) env.ADE_HOST = host;
   const server = await startAdeServer({ host, port, staticDir });
   const { port: bound } = /** @type {import("node:net").AddressInfo} */ (server.address());
   const url = `http://${host.includes(":") ? `[${host}]` : host}:${bound}`;

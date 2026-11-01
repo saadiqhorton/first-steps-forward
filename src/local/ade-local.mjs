@@ -427,20 +427,18 @@ export function streamOriginAllowed(origin, req) {
     return false;
   }
 }
+// Forwarded by a reverse proxy on this machine (`tailscale serve`): the proxy connects from
+// loopback and preserves the remote Host and X-Forwarded-Proto.
+const proxiedRequest = (req) =>
+  isLoopbackAddress(req.socket?.remoteAddress) && !!req.headers["x-forwarded-proto"];
 function localRequest(req) {
   const host = hostnameOf(req.headers.host);
   // Loopback peers (the UI on this machine, agent CLIs, dev-control curls)
   // keep same-origin Origin checks. No other peer is trusted without the token.
   if (isLoopbackPeer(req)) return true;
-  // A loopback reverse proxy (`tailscale serve`) forwards with a preserved,
-  // non-loopback Host and X-Forwarded-Proto; the proxy itself connects from
-  // loopback and its remote clients are gated by the proxy.
-  if (
-    isLoopbackAddress(req.socket?.remoteAddress) &&
-    req.headers["x-forwarded-proto"] &&
-    originAllowed(req)
-  )
-    return true;
+  // A proxied client was admitted by the proxy. With a token set it must also
+  // prove it: `tailscale serve` admits everyone on the tailnet, not just its owner.
+  if (proxiedRequest(req) && originAllowed(req)) return !EXPOSE_TOKEN() || tokenAccepted(req);
   // Opt-in LAN/Tailscale exposure: the peer must prove the token, and (for a
   // specific bind address) the Host header must name the exposed interface —
   // a DNS-rebound page presenting some other authority never reaches the API.
@@ -481,13 +479,15 @@ export async function handle(req, res) {
   // The token exchange must be reachable by not-yet-authorized peers —
   // proving the token here is exactly how a LAN/Tailscale client becomes
   // authorized (the route itself validates it).
-  const isAuthExchange = req.method === "POST" && parts[0] === "auth" && parts.length === 1;
+  // GET is the sign-in link `ade --remote` prints: it carries the token in the query.
+  const isAuthExchange =
+    ["GET", "POST"].includes(req.method) && parts[0] === "auth" && parts.length === 1;
   if (!localRequest(req) && !isAuthExchange) {
-    // In exposed mode an unauthorized peer gets 401 + authRequired (the UI
-    // shows its token gate). Otherwise — including ADE_HOST without
-    // ADE_TOKEN, which start-local refuses to boot — the strict
-    // loopback-only 403: without a token the address is never exposed.
-    if (loopbackBind() || !EXPOSE_TOKEN())
+    // In exposed mode, or behind a proxy while a token is set, an unauthorized
+    // peer gets 401 + authRequired (the UI shows its token gate). Otherwise —
+    // including ADE_HOST without ADE_TOKEN, which start-local refuses to boot —
+    // the strict loopback-only 403: without a token the address is never exposed.
+    if (!EXPOSE_TOKEN() || (loopbackBind() && !proxiedRequest(req)))
       return json(res, 403, { error: "ADE local API only accepts requests from this machine." });
     return json(res, 401, {
       error: "ADE requires its access token for requests from other machines.",
@@ -505,15 +505,26 @@ export async function handle(req, res) {
     return json(res, 403, { error: "Host tools are available only on this machine." });
   try {
     if (isAuthExchange) {
-      const data = await body(req);
-      const token = String(data.token ?? "").trim();
+      const link = req.method === "GET";
+      const token = String(
+        (link ? url.searchParams.get("token") : (await body(req)).token) ?? "",
+      ).trim();
       if (!EXPOSE_TOKEN() || !token || !safeTokenEqual(token, EXPOSE_TOKEN()))
-        return json(res, 401, { error: "Incorrect access token." });
+        return json(res, 401, {
+          error: link
+            ? "This sign-in link is out of date. Open the link ADE printed when it last started."
+            : "Incorrect access token.",
+        });
       res.setHeader(
         "set-cookie",
         `ade_auth=${encodeURIComponent(EXPOSE_TOKEN())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000`,
       );
-      return json(res, 200, { ok: true });
+      if (!link) return json(res, 200, { ok: true });
+      // Off the address bar, so the token is not bookmarked or shared from there.
+      res.statusCode = 303;
+      res.setHeader("location", "/");
+      res.setHeader("cache-control", "no-store");
+      return res.end();
     }
     // Route modules get the shared state and services; anything stateless they import.
     const ctx = {
