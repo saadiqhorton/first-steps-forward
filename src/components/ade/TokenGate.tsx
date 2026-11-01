@@ -1,8 +1,9 @@
 import { useState } from "react";
 
-// Shown when ADE is exposed beyond loopback (ADE_HOST + ADE_TOKEN) and this
-// browser has not proven the token yet: POST /api/auth exchanges it for an
-// HttpOnly cookie, then the provider's normal polling resumes.
+// Shown when ADE is shared beyond this machine (`ade --remote`, or ADE_HOST +
+// ADE_TOKEN) and this browser has not proven the token yet: POST /api/auth
+// exchanges it for an HttpOnly cookie, then the provider's normal polling resumes.
+// The sign-in link ADE prints does the same exchange without this form.
 export function TokenGate({ onUnlocked }: { onUnlocked: () => Promise<void> }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,8 +33,8 @@ export function TokenGate({ onUnlocked }: { onUnlocked: () => Promise<void> }) {
       <div className="w-full max-w-sm rounded-2xl border border-line bg-panel p-6">
         <h1 className="text-xl font-medium">Unlock with the access token</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-dim">
-          ADE is listening on a non-loopback address, so other machines must prove the access token
-          it was started with. Enter it once; the browser keeps the session.
+          This ADE is shared with your other devices. Open the sign-in link ADE printed when it
+          started, or enter its access token here. This browser stays signed in.
         </p>
         <form onSubmit={submit} className="mt-4 space-y-3">
           <input
