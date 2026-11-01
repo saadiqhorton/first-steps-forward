@@ -663,9 +663,7 @@ export function createSessionTurns({ state, save, adapters, dataDir, turnContext
         session,
         "system",
         `Switched from ${from?.name ?? session.createdBy} to ${target.name}. No agent turn was started. The new agent will start a fresh conversation when you send a message; the repository state, task, and current diff carry over, but the prior conversation does not.` +
-          (droppedModel
-            ? ` The previous model (${droppedModel}) belonged to the old agent.`
-            : "") +
+          (droppedModel ? ` The previous model (${droppedModel}) belonged to the old agent.` : "") +
           (selection.model
             ? ` The selected model is "${selection.model}".`
             : ` ${target.name} will use its configured default model.`) +

@@ -7,7 +7,8 @@ for (const mode of ["direct", "click"]) {
   p.on("pageerror", (e) => errs.push(e.message));
   await p.goto("http://127.0.0.1:3100/", { waitUntil: "networkidle" });
   await p.waitForTimeout(1000);
-  if (mode === "direct") await p.goto(p.url().replace(/\/conversations.*$/, "/workflows"), { waitUntil: "networkidle" });
+  if (mode === "direct")
+    await p.goto(p.url().replace(/\/conversations.*$/, "/workflows"), { waitUntil: "networkidle" });
   else await p.getByRole("link", { name: "Workflows" }).click();
   await p.waitForTimeout(1500);
   console.log(mode, "->", p.url().split("/").pop(), "|", errs.join(" || ") || "no errors");

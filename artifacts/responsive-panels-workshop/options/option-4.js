@@ -145,7 +145,8 @@ WS.register({
   /** The collapsed rail: a vertical stack of tab icons. */
   renderRail(state, { mock }) {
     const tone = mock.computerCopy[state.computer].tone;
-    const dot = tone === "live" ? "teal" : tone === "busy" ? "amber" : tone === "error" ? "red" : "";
+    const dot =
+      tone === "live" ? "teal" : tone === "busy" ? "amber" : tone === "error" ? "red" : "";
     return `<div class="o4-rail" role="tablist" aria-label="Right panel (collapsed)">
       ${mock.rightTabs
         .map(
@@ -246,7 +247,10 @@ WS.register({
         right.style.width = `${L.width}px`;
         const key = `${L.mode}|${state.tab}|${state.computer}`;
         if (key !== lastRightKey) {
-          WS.renderKeepFocus(right, L.mode === "rail" ? this.renderRail(state, ctx) : this.renderPanel(state, ctx));
+          WS.renderKeepFocus(
+            right,
+            L.mode === "rail" ? this.renderRail(state, ctx) : this.renderPanel(state, ctx),
+          );
           lastRightKey = key;
         }
       }

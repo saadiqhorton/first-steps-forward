@@ -191,7 +191,12 @@ export function formatJsonLogEvent(event) {
     if (!text.trim()) return null;
     return { tone: "info", title: "Agent wrote a reply", body: truncate(text, 160), raw: "" };
   }
-  if (type === "tool_use" || type === "tool_call" || type === "tool" || type === "tool_execution_start") {
+  if (
+    type === "tool_use" ||
+    type === "tool_call" ||
+    type === "tool" ||
+    type === "tool_execution_start"
+  ) {
     const tool =
       asText(event.toolName) ||
       asText(event.tool) ||
@@ -215,9 +220,12 @@ export function formatJsonLogEvent(event) {
   if (type === "tool_result" || type === "tool_output" || type === "tool_execution_end") {
     const resultPayload =
       event.result && typeof event.result === "object" && Array.isArray(event.result.content)
-        ? event.result.content.find((c) => c && typeof c === "object" && typeof c.text === "string")?.text
+        ? event.result.content.find((c) => c && typeof c === "object" && typeof c.text === "string")
+            ?.text
         : undefined;
-    const body = humanBody(resultPayload ?? event.output ?? event.result ?? event.content ?? event.part);
+    const body = humanBody(
+      resultPayload ?? event.output ?? event.result ?? event.content ?? event.part,
+    );
     if (event.isError === true) {
       return {
         tone: "error",
@@ -235,7 +243,8 @@ export function formatJsonLogEvent(event) {
   }
   if (type === "turn_start") return { tone: "info", title: "Turn started", raw: "" };
   if (type === "turn_end") return { tone: "info", title: "Turn completed", raw: "" };
-  if (type === "agent_start" || type === "session") return { tone: "info", title: "Session started", raw: "" };
+  if (type === "agent_start" || type === "session")
+    return { tone: "info", title: "Session started", raw: "" };
   if (
     type === "message_start" ||
     type === "message_update" ||
@@ -420,7 +429,12 @@ function phraseForActivity(event) {
     return null;
   }
 
-  if (type === "tool_use" || type === "tool_call" || type === "tool" || type === "tool_execution_start") {
+  if (
+    type === "tool_use" ||
+    type === "tool_call" ||
+    type === "tool" ||
+    type === "tool_execution_start"
+  ) {
     const tool = asText(record.toolName || record.tool || record.name || "tool").toLowerCase();
     const input = unwrapToolPayload(record.input ?? record.args ?? record.arguments ?? record.part);
     const fields = input && typeof input === "object" ? input : {};
@@ -443,7 +457,12 @@ function phraseForActivity(event) {
     if (delta.startsWith("text")) return "Writing a reply";
     return null;
   }
-  if (type === "tool_result" || type === "tool_output" || type === "tool_execution_end" || type === "text")
+  if (
+    type === "tool_result" ||
+    type === "tool_output" ||
+    type === "tool_execution_end" ||
+    type === "text"
+  )
     return "Still working on the next step";
   if (type === "permission")
     return asText(record.decision) === "asked"

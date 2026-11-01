@@ -10,7 +10,7 @@ WS.register({
     "Three fixed layouts — <b>Compact</b> 280px (icon tabs, stacked status card), <b>Standard</b> 400px (today's 16:10 card, fixed), <b>Wide</b> 600px (screen on top, Details beside the hint) — so no width in between can look half-built.",
     "Dragging follows the pointer in real time, clamped to 280–60% of the window; letting go (or an arrow-key step) animates to the nearest of those sizes. Drag past 140px and it collapses to 0, leaving a small reopen button on the seam.",
     "Below a 1024px window the panel becomes a Compact sheet that overlays the main panel's right edge, opened from a toggle near the top bar and closed with the toggle or Esc.",
-    "In code: <code>Shell.tsx</code>'s <code>react-resizable-panels</code> group would snap via <code>onLayoutChanged</code> instead of leaving <code>rightWidth</code> wherever the drag ends, and <code>AgentComputerPane.tsx</code> would take a <code>sizeMode: \"compact\" | \"standard\" | \"wide\"</code> prop (or <code>@container</code> breakpoints at the same 280/400/600 widths) instead of one fixed 16:10 card.",
+    'In code: <code>Shell.tsx</code>\'s <code>react-resizable-panels</code> group would snap via <code>onLayoutChanged</code> instead of leaving <code>rightWidth</code> wherever the drag ends, and <code>AgentComputerPane.tsx</code> would take a <code>sizeMode: "compact" | "standard" | "wide"</code> prop (or <code>@container</code> breakpoints at the same 280/400/600 widths) instead of one fixed 16:10 card.',
     "A 320px close-up still maps to Compact and a 480px one to Standard — the two below-1024 mounts Shell ships today.",
   ],
   css: `
@@ -103,7 +103,10 @@ WS.register({
   },
 
   cardStacked(state, c, icons, mock) {
-    const icon = state.computer === "starting" ? icons.loader.replace('class="i"', 'class="i m-spin"') : icons.monitor;
+    const icon =
+      state.computer === "starting"
+        ? icons.loader.replace('class="i"', 'class="i m-spin"')
+        : icons.monitor;
     return `<div class="opt3-card-stacked">
       <div class="opt3-card-icon">${icon}</div>
       <div class="opt3-card-eyebrow">${mock.project}</div>
@@ -115,7 +118,10 @@ WS.register({
   },
 
   cardBox(state, c, icons, mock) {
-    const icon = state.computer === "starting" ? icons.loader.replace('class="i"', 'class="i m-spin"') : icons.monitor;
+    const icon =
+      state.computer === "starting"
+        ? icons.loader.replace('class="i"', 'class="i m-spin"')
+        : icons.monitor;
     return `<div class="opt3-card-box">
       <div class="opt3-card-inner">
         <div class="opt3-card-icon">${icon}</div>

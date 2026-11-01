@@ -119,7 +119,10 @@ WS.register({
   renderComputer(state, { mock, icons }) {
     const c = mock.computerCopy[state.computer];
     const isLive = state.computer === "live";
-    const monitorIcon = state.computer === "starting" ? icons.loader.replace('class="i"', 'class="i m-spin"') : icons.monitor;
+    const monitorIcon =
+      state.computer === "starting"
+        ? icons.loader.replace('class="i"', 'class="i m-spin"')
+        : icons.monitor;
     const screen = isLive
       ? `<div class="m-screen">${mock.liveScreen()}</div>`
       : `<div class="o2-wide"><div class="o2-card">

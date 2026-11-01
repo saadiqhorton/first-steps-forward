@@ -145,7 +145,9 @@ WS.register({
     if (state.tab === "activity") return `<div class="m-scroll">${ctx.mock.activityBody()}</div>`;
     if (state.tab === "diff") return `<div class="m-scroll">${ctx.mock.diffBody()}</div>`;
     if (state.tab === "terminal") return ctx.mock.terminalBody();
-    return mode === "dock" ? this.renderComputerDock(state, ctx) : this.renderComputerSide(state, ctx);
+    return mode === "dock"
+      ? this.renderComputerDock(state, ctx)
+      : this.renderComputerSide(state, ctx);
   },
 
   renderComputerSide(state, ctx) {
@@ -230,7 +232,8 @@ WS.register({
         const L = this.layout(ctx.getState());
         ctx.setState({ dock: L.dock ? "side" : "bottom" });
       }
-      if (t.dataset.act === "collapse") ctx.setState({ dockCollapsed: !ctx.getState().dockCollapsed });
+      if (t.dataset.act === "collapse")
+        ctx.setState({ dockCollapsed: !ctx.getState().dockCollapsed });
     };
     el.addEventListener("click", onClick);
     return () => el.removeEventListener("click", onClick);
@@ -315,7 +318,10 @@ WS.register({
   mountPanel(root, ctx) {
     const unwire = this.wirePanel(root, ctx);
     const update = (state) => {
-      WS.renderKeepFocus(root, `<div class="m-right">${this.renderPanel(state, ctx, "side", { allowToggle: false })}</div>`);
+      WS.renderKeepFocus(
+        root,
+        `<div class="m-right">${this.renderPanel(state, ctx, "side", { allowToggle: false })}</div>`,
+      );
     };
     update(ctx.getState());
     return { update, destroy: unwire };
