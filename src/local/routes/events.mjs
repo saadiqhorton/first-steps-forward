@@ -1,11 +1,10 @@
-/** Route module. Dependencies are supplied by the request context. */
+/** `/api/events` (the update stream) and `/api/bootstrap`. */
 export async function events(ctx) {
   const {
     req,
     res,
     url,
     parts,
-    connect,
     eventHub,
     state,
     now,

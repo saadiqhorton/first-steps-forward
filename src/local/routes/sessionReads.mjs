@@ -1,24 +1,21 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { getDiff, projectInfo } from "../project-git.mjs";
+import { MODEL_ID } from "../models.mjs";
+import { resolveAttachments } from "../attachments.mjs";
+import { body } from "../http.mjs";
+
+/** `/api/sessions`: search, read one session, and start a new one. */
 export async function sessionReads(ctx) {
   const {
     req,
     res,
     url,
     parts,
-    path,
-    getDiff,
-    projectInfo,
-    MODEL_ID,
-    resolveAttachments,
     DATA_DIR,
     state,
     turns,
-    id,
     UNSUPPORTED_RISK,
     resolveSessionOptions,
     json,
-    body,
-    start,
   } = ctx;
   if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
     const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();

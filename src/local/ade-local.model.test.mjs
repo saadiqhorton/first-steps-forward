@@ -42,16 +42,9 @@ process.env.HOME = home;
 // os.homedir() reads USERPROFILE on Windows, not HOME; without this the
 // tests would write into the real ~/.ade workspace.
 process.env.USERPROFILE = home;
-const {
-  handle,
-  start,
-  setListenAddress,
-  devServerArgs,
-  detectFramework,
-  refreshDevProcess,
-  computerContext,
-  streamOriginAllowed,
-} = await import("./ade-local.mjs");
+const { handle, start, setListenAddress, refreshDevProcess, computerContext, streamOriginAllowed } =
+  await import("./ade-local.mjs");
+const { devServerArgs, detectFramework } = await import("./dev-server.mjs");
 const { checksFor } = await import("./project-scripts.mjs");
 const { callApi } = await import("./api-request.test-helper.mjs");
 await start();

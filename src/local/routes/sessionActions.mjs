@@ -1,29 +1,26 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { adapters } from "../adapters/index.mjs";
+import { getDiff } from "../project-git.mjs";
+import { addMessage } from "../session-turns.mjs";
+import { MODEL_ID } from "../models.mjs";
+import { resolveAttachments } from "../attachments.mjs";
+import { body } from "../http.mjs";
+
+/** `/api/sessions/:id/*`: logs, follow-ups and actions, the diff, and model or option changes. */
 export async function sessionActions(ctx) {
   const {
     req,
     res,
     url,
     parts,
-    adapters,
-    getDiff,
-    addMessage,
-    MODEL_ID,
-    resolveAttachments,
     DATA_DIR,
     sessionLogs,
     state,
     turns,
-    id,
     now,
     UNSUPPORTED_RISK,
     save,
     resolveSessionOptions,
-    syncOptionFields,
     json,
-    body,
-    start,
-    stop,
   } = ctx;
   if (
     req.method === "GET" &&
@@ -253,4 +250,11 @@ export async function sessionActions(ctx) {
     });
   }
   return ctx.handled || res.writableEnded;
+}
+
+function syncOptionFields(session, value, cleared) {
+  for (const key of ["effort", "speed", "permission"]) {
+    if (cleared.has(key)) delete session[key];
+    else if (value[key] !== undefined) session[key] = value[key];
+  }
 }

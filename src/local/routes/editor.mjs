@@ -1,6 +1,8 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { body } from "../http.mjs";
+
+/** `/api/editor/:projectId/*`: browse, search, read and write project files. */
 export async function editor(ctx) {
-  const { req, res, url, parts, path, state, id, json, body } = ctx;
+  const { req, res, url, parts, state, json } = ctx;
   if (parts[0] === "editor") {
     const editor = await import("../editor.mjs");
     const project = state.projects.find((item) => item.id === parts[1]);

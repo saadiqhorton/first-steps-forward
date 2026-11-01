@@ -1,22 +1,20 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { spawnCommand as spawn } from "../spawn.mjs";
+import { adapters } from "../adapters/index.mjs";
+import { optionCapabilities } from "../capabilities.mjs";
+
+/** `/api/agents/*`: sign-in, install and update jobs, models and option capabilities. */
 export async function agents(ctx) {
   const {
     req,
     res,
     url,
     parts,
-    path,
-    spawn,
-    adapters,
-    optionCapabilities,
     state,
     authChildren,
-    id,
     harnessJobs,
     agentStatus,
     listAgentModels,
     json,
-    start,
   } = ctx;
   if (req.method === "POST" && parts[0] === "agents" && parts[2] === "login") {
     const agent = state.agents.find((a) => a.id === parts[1]);

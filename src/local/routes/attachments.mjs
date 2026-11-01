@@ -1,7 +1,9 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { decodeBase64, readAttachment, saveAttachment } from "../attachments.mjs";
+import { body } from "../http.mjs";
+
+/** `/api/attachments`: upload and read files attached to a message. */
 export async function attachments(ctx) {
-  const { req, res, parts, decodeBase64, readAttachment, saveAttachment, DATA_DIR, json, body } =
-    ctx;
+  const { req, res, parts, DATA_DIR, json } = ctx;
   if (req.method === "POST" && parts[0] === "attachments" && parts.length === 1) {
     try {
       const data = await body(req);

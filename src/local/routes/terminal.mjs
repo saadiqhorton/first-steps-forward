@@ -1,6 +1,9 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { promises as fs } from "node:fs";
+import { body } from "../http.mjs";
+
+/** `/api/terminal/*`: host terminal sessions in a project folder. */
 export async function terminal(ctx) {
-  const { req, res, url, parts, fs, path, state, id, terminalWaitSignal, json, body } = ctx;
+  const { req, res, url, parts, state, json } = ctx;
   if (parts[0] === "terminal") {
     const { loadTerminal } = await import("../terminal-loader.mjs");
     let terminal;
@@ -68,4 +71,15 @@ export async function terminal(ctx) {
     return json(res, 404, { error: "Not found." });
   }
   return ctx.handled || res.writableEnded;
+}
+// A browser disconnect ends the response before it is written. Waiting reads
+// listen for that so a closed tab does not hold a PTY poll open.
+function terminalWaitSignal(req, res) {
+  if (req.signal) return req.signal;
+  if (!res || typeof res.on !== "function") return undefined;
+  const controller = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  return controller.signal;
 }

@@ -1,23 +1,25 @@
-/** Route module. Dependencies are supplied by the request context. */
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { runCommand as run, stopProcess as stopChild } from "../spawn.mjs";
+import { adapters } from "../adapters/index.mjs";
+import { getDiff, projectInfo } from "../project-git.mjs";
+import { checksFor } from "../project-scripts.mjs";
+import {
+  cloneRepository,
+  createProjectFolder,
+  expandUserPath,
+  makeDirectory,
+  parseRepoSource,
+} from "../project-sources.mjs";
+import { body } from "../http.mjs";
+
+/** Folder picking, and `/api/projects`: add (by path, clone or new folder), remove, diff, checks. */
 export async function projects(ctx) {
   const {
     req,
     res,
-    url,
     parts,
-    fs,
-    os,
-    path,
-    run,
-    stopChild,
-    adapters,
-    getDiff,
-    checksFor,
-    cloneRepository,
-    createProjectFolder,
-    expandUserPath,
-    makeDirectory,
-    parseRepoSource,
     sessionLogs,
     state,
     children,
@@ -25,12 +27,8 @@ export async function projects(ctx) {
     controls,
     computers,
     turns,
-    id,
     save,
     json,
-    body,
-    registerProject,
-    stop,
   } = ctx;
   if (req.method === "GET" && parts[0] === "browse") {
     // Read-only directory listing for ADE's built-in folder picker. Same
@@ -109,7 +107,7 @@ export async function projects(ctx) {
     const real = await fs.realpath(expandUserPath(requested, os.homedir()));
     const stat = await fs.stat(real);
     if (!stat.isDirectory()) return json(res, 400, { error: "That path is not a directory." });
-    return registerProject(res, real, data.name);
+    return registerProject(ctx, real, data.name);
   }
   if (req.method === "POST" && parts[0] === "projects" && parts[1] === "clone") {
     const data = await body(req);
@@ -122,7 +120,7 @@ export async function projects(ctx) {
       name: data.name?.trim?.() || source.name,
       home: os.homedir(),
     });
-    return registerProject(res, await fs.realpath(created), data.name || source.name);
+    return registerProject(ctx, await fs.realpath(created), data.name || source.name);
   }
   if (req.method === "POST" && parts[0] === "projects" && parts[1] === "create") {
     const data = await body(req);
@@ -133,7 +131,7 @@ export async function projects(ctx) {
       git: data.git !== false,
       home: os.homedir(),
     });
-    return registerProject(res, await fs.realpath(created), data.name);
+    return registerProject(ctx, await fs.realpath(created), data.name);
   }
   if (req.method === "POST" && parts[0] === "projects" && parts[2] === "default-agent") {
     const project = state.projects.find((p) => p.id === parts[1]);
@@ -182,4 +180,29 @@ export async function projects(ctx) {
     return json(res, 200, { checks: await checksFor(project) });
   }
   return ctx.handled || res.writableEnded;
+}
+// Registers an existing directory as a project and answers the request. Shared
+// by "add a folder", "clone a repository" and "create a folder".
+async function registerProject(ctx, real, name) {
+  const { res, state, save, id, now, refreshDevProcess, json } = ctx;
+  if (state.projects.some((p) => p.path === real))
+    return json(res, 409, { error: "This project is already added." });
+  const project = {
+    id: id(),
+    name: String(name || path.basename(real)),
+    path: real,
+    branch: "",
+    ahead: 0,
+    uncommittedFiles: [],
+    defaultAgent: "codex",
+    addedAt: now(),
+  };
+  await projectInfo(project);
+  state.projects.push(project);
+  // Same detection path as the bootstrap re-scan: an unreadable or
+  // malformed package.json records a distinct note instead of silently
+  // reporting no dev script.
+  const { proc } = await refreshDevProcess(project);
+  await save();
+  return json(res, 201, { project, process: proc });
 }
