@@ -106,6 +106,8 @@ test("the bootstrap poll probes again once the interval has passed", { skip }, a
   t.mock.method(Date, "now", () => real + seconds(61));
   await call("/api/bootstrap");
   await waitFor(() => versionProbes() === before + 4, "the probe after the interval");
+  // Let that probe finish its auth checks and cache write before the next test reads the cache.
+  await settle();
 });
 
 test("a restart inside the interval trusts the cached fetchedAt", { skip }, async () => {

@@ -186,6 +186,8 @@ const settled = (id) => {
 const turns = (projectId) =>
   readFileSync(invocations, "utf8")
     .split("\n")
+    // A CLI may be mid-append: only newline-terminated lines are complete.
+    .slice(0, -1)
     .filter(Boolean)
     .map((line) => JSON.parse(line))
     .filter(

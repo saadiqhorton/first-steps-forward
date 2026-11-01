@@ -269,14 +269,7 @@ async function agentStatus() {
     }),
   );
   state.agents = results;
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
-    await fs.writeFile(
-      AGENTS_STATUS_FILE,
-      JSON.stringify({ fetchedAt: Date.now(), agents: results }),
-      { mode: 0o600 },
-    );
-  } catch {}
+  await writeAgentsStatus(results);
   // Background, non-blocking latest-version checks — next bootstrap poll picks them up.
   for (const agent of results) {
     // A CLI that updates itself in place is never behind in a way ADE can fix.
@@ -290,16 +283,22 @@ async function agentStatus() {
       if (current.version && compareVersions(current.version, latest) < 0)
         current.updateAvailable = true;
       else delete current.updateAvailable;
-      try {
-        await fs.writeFile(
-          AGENTS_STATUS_FILE,
-          JSON.stringify({ fetchedAt: Date.now(), agents: state.agents }),
-          { mode: 0o600 },
-        );
-      } catch {}
+      await writeAgentsStatus(state.agents);
     })();
   }
   return results;
+}
+// Write-then-rename: a reader (another ADE instance, or this one restarting) must never see a
+// truncated file, which would parse as "no cache" and re-probe every CLI.
+async function writeAgentsStatus(agents) {
+  const tmp = `${AGENTS_STATUS_FILE}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true, mode: 0o700 });
+    await fs.writeFile(tmp, JSON.stringify({ fetchedAt: Date.now(), agents }), { mode: 0o600 });
+    await fs.rename(tmp, AGENTS_STATUS_FILE);
+  } catch {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+  }
 }
 
 /**
