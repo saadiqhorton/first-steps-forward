@@ -75,6 +75,7 @@ async function main() {
   await copy(".output/public");
   await copy("public/licenses");
   await copy("README.md");
+  await copy("LICENSE");
   await copy("THIRD_PARTY_NOTICES.md");
 
   const dependencies = {};
@@ -93,10 +94,10 @@ async function main() {
 
   const manifest = {
     name: "@saadiqhorton/ade",
-    // The dev manifest carries no version; 0.1.0 is the first one this package has.
-    version: rootManifest.version ?? "0.1.0",
+    version: rootManifest.version,
     description:
       "ADE: a local web UI that drives coding-agent CLIs (Codex, OpenCode, Pi, Claude Code) on your machine.",
+    license: "MIT",
     type: "module",
     bin: { ade: "bin/ade.mjs" },
     engines: { node: ">=22" },
@@ -107,6 +108,7 @@ async function main() {
       ".output/public",
       "public/licenses",
       "README.md",
+      "LICENSE",
       "THIRD_PARTY_NOTICES.md",
     ],
     dependencies,
