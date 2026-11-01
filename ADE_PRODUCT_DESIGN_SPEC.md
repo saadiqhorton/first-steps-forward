@@ -98,7 +98,7 @@ Users can run and monitor project workflows such as tests, CI, and deployment. T
 
 ### Mobile access
 
-The longer-term experience should let a user check project status, answer a question, start a task, or open a preview from a phone or another browser. This is a later milestone, not a requirement for the first usable release.
+The longer-term experience should let a user check project status, answer a question, start a task, or open a preview from a phone or another browser. A phone or another computer can already open the full ADE in its browser with `ade --remote` (see the README); an experience designed for small screens remains a later milestone, not a requirement for the first usable release.
 
 ## 6. Functional requirements
 
@@ -152,7 +152,7 @@ The longer-term experience should let a user check project status, answer a ques
 
 - Claude Code adapter and additional agent integrations, based on user demand and supported authentication paths.
 - Workflow integrations for CI and deployment providers.
-- Browser-based remote access and mobile controls, connecting only to a user-controlled ADE host unless the project later chooses to add a hosted service.
+- Mobile controls designed for small screens, connecting only to a user-controlled ADE host unless the project later chooses to add a hosted service. (Browser access from another device already exists through `ade --remote`.)
 - Optional project notes and pinned documents, without requiring them for agent context.
 - Safe concurrency support for independent tasks, with workspace isolation when tasks overlap.
 - Additional agent and model adapters, including local inference options.
@@ -208,7 +208,7 @@ These are runtime guarantees, not a reason to make every task feel like a compli
 - **Responsive:** Project switching, session navigation, and opening a local preview should feel immediate; long-running work must remain observable without blocking the workspace.
 - **Accessible:** Primary controls are keyboard accessible, status is not communicated by color alone, and nontechnical language is used by default.
 - **Private:** No telemetry by default; credentials are stored securely; remote exposure of a local preview requires deliberate configuration.
-- **Network exposure is opt-in and token-gated:** ADE binds loopback by default. Non-loopback exposure happens only through an explicit `ADE_HOST` + `ADE_TOKEN` configuration (`scripts/start-local.mjs` refuses a non-loopback bind without a token), and every API request from a non-loopback client must prove that token (bearer header or the browser's `HttpOnly` session cookie). Local agent CLIs and loopback clients remain exempt; a `tailscale serve`-style HTTPS proxy in front of the loopback bind is the recommended path for remote access.
+- **Network exposure is opt-in and token-gated:** ADE binds loopback by default. Non-loopback exposure happens only through an explicit `ADE_HOST` + `ADE_TOKEN` configuration (`scripts/start-local.mjs` refuses a non-loopback bind without a token), and every API request from a non-loopback client must prove that token (bearer header or the browser's `HttpOnly` session cookie). Local agent CLIs and loopback clients remain exempt. With a token set, browsers reaching ADE through a local proxy such as `tailscale serve` must prove it too. `ade --remote` is the supported path for remote access: it makes and keeps the token, listens on the local network, adds a Tailscale link when Tailscale is connected, and prints a sign-in link that carries the token (see `docs/adr/0004-remote-access.md`).
 
 ## 10. Success measures
 

@@ -152,7 +152,7 @@ export async function launchRemote({
   // `tailscale serve` must know the port before ADE binds it.
   if (!port) throw new Error("ade --remote needs a fixed port; pick one with --port.");
   env.ADE_TOKEN = (env.ADE_TOKEN ?? "").trim() || (await remoteToken(dataDir));
-  const signIn = (base) => `${base}/api/auth?token=${encodeURIComponent(env.ADE_TOKEN)}`;
+  const signIn = (base) => `${base}/?token=${encodeURIComponent(env.ADE_TOKEN)}`;
   const tailscale = await tailscaleStatus(run);
   let share = null;
   if (tailscale?.https) {

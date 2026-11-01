@@ -58,6 +58,24 @@ _Avoid_: approval, prompt
 The models an agent reports it can use, read from the agent itself.
 _Avoid_: catalog, model list (in code)
 
+## Access
+
+**Remote access**:
+Using ADE from a browser on another device, such as a phone, which `ade --remote` turns on. The agents still run on the machine running ADE.
+_Avoid_: exposure, remote mode
+
+**Access token**:
+The secret a browser or script on another device must prove before ADE answers it. `ade --remote` makes one and keeps it; `ADE_TOKEN` sets one by hand.
+_Avoid_: password, API key
+
+**Sign-in link**:
+An ADE address carrying the access token (`?token=…`). Opening it once signs that browser in.
+_Avoid_: magic link, invite link
+
+**Host tools**:
+The terminal, the file editor, and installing or updating agent CLIs. They act directly on the machine running ADE, so they never work through remote access.
+_Avoid_: local tools, admin tools
+
 ## Browser and dev server
 
 **Agent browser**:
