@@ -134,6 +134,28 @@ test("/preview-stream upgrades reach the stream; other upgrades are refused", as
   assert.match(notFound.message, /404/);
 });
 
+test("a page link with ?token= signs the browser in and leaves the token off the address", async () => {
+  // Not shared: the query is the app's business.
+  assert.equal((await raw("/?token=anything")).status, 200);
+  process.env.ADE_TOKEN = "link-secret";
+  try {
+    const link = await raw("/?token=link-secret");
+    assert.equal(link.status, 303);
+    assert.equal(link.headers.location, "/");
+    assert.match(String(link.headers["set-cookie"]), /ade_auth=link-secret; HttpOnly/);
+    const stale = await raw("/p/one/conversations?tab=2&token=old");
+    assert.equal(stale.status, 303, "a wrong token still lands on the page, to unlock there");
+    assert.equal(stale.headers.location, "/p/one/conversations?tab=2");
+    assert.equal(stale.headers["set-cookie"], undefined);
+    const offsite = await raw("/.//evil.example/?token=link-secret");
+    assert.equal(offsite.headers.location, "/evil.example/", "never a //host redirect");
+    // The API ignores the link form.
+    assert.notEqual((await raw("/api/bootstrap?token=link-secret")).status, 303);
+  } finally {
+    delete process.env.ADE_TOKEN;
+  }
+});
+
 // Last: each launch re-records the listen address the earlier tests check.
 test("a host given on the command line reaches the request guard", async () => {
   const { launchAde } = await import("./launch.mjs");

@@ -463,6 +463,36 @@ const routes = [
   agents,
   workflows,
 ];
+// This browser's proof of the token: HttpOnly, sent on same-site navigations, kept for a year.
+function setAuthCookie(res) {
+  res.setHeader(
+    "set-cookie",
+    `ade_auth=${encodeURIComponent(EXPOSE_TOKEN())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000`,
+  );
+}
+/**
+ * The sign-in link `ade --remote` prints: any ADE page with `?token=<ADE_TOKEN>`. The right token
+ * gets the same cookie POST /api/auth sets. Either way the browser goes on to that page without
+ * the token, so it does not stay in the address bar; a wrong one lands on the unlock screen.
+ * Returns false, untouched, for any other request.
+ * @param {import("node:http").IncomingMessage} req
+ * @param {import("node:http").ServerResponse} res
+ * @returns {boolean}
+ */
+export function signInFromLink(req, res) {
+  if (req.method !== "GET" || !EXPOSE_TOKEN()) return false;
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  const token = url.searchParams.get("token");
+  if (token === null) return false;
+  if (safeTokenEqual(token.trim(), EXPOSE_TOKEN())) setAuthCookie(res);
+  url.searchParams.delete("token");
+  res.statusCode = 303;
+  // One leading slash: "//host" would send the browser to another site.
+  res.setHeader("location", `/${url.pathname.replace(/^\/+/, "")}${url.search}`);
+  res.setHeader("cache-control", "no-store");
+  res.end();
+  return true;
+}
 /**
  * The API router: every `/api/*` request, from the dev server or the
  * production server (src/local/server.mjs). Call start() first.
@@ -479,9 +509,7 @@ export async function handle(req, res) {
   // The token exchange must be reachable by not-yet-authorized peers —
   // proving the token here is exactly how a LAN/Tailscale client becomes
   // authorized (the route itself validates it).
-  // GET is the sign-in link `ade --remote` prints: it carries the token in the query.
-  const isAuthExchange =
-    ["GET", "POST"].includes(req.method) && parts[0] === "auth" && parts.length === 1;
+  const isAuthExchange = req.method === "POST" && parts[0] === "auth" && parts.length === 1;
   if (!localRequest(req) && !isAuthExchange) {
     // In exposed mode, or behind a proxy while a token is set, an unauthorized
     // peer gets 401 + authRequired (the UI shows its token gate). Otherwise —
@@ -505,26 +533,12 @@ export async function handle(req, res) {
     return json(res, 403, { error: "Host tools are available only on this machine." });
   try {
     if (isAuthExchange) {
-      const link = req.method === "GET";
-      const token = String(
-        (link ? url.searchParams.get("token") : (await body(req)).token) ?? "",
-      ).trim();
+      const data = await body(req);
+      const token = String(data.token ?? "").trim();
       if (!EXPOSE_TOKEN() || !token || !safeTokenEqual(token, EXPOSE_TOKEN()))
-        return json(res, 401, {
-          error: link
-            ? "This sign-in link is out of date. Open the link ADE printed when it last started."
-            : "Incorrect access token.",
-        });
-      res.setHeader(
-        "set-cookie",
-        `ade_auth=${encodeURIComponent(EXPOSE_TOKEN())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000`,
-      );
-      if (!link) return json(res, 200, { ok: true });
-      // Off the address bar, so the token is not bookmarked or shared from there.
-      res.statusCode = 303;
-      res.setHeader("location", "/");
-      res.setHeader("cache-control", "no-store");
-      return res.end();
+        return json(res, 401, { error: "Incorrect access token." });
+      setAuthCookie(res);
+      return json(res, 200, { ok: true });
     }
     // Route modules get the shared state and services; anything stateless they import.
     const ctx = {
@@ -649,6 +663,9 @@ function mount(server) {
   }
   server.middlewares.use("/api", (req, res) => {
     handle(req, res).catch((e) => json(res, 500, { error: e.message }));
+  });
+  server.middlewares.use((req, res, next) => {
+    if (!signInFromLink(req, res)) next();
   });
 }
 

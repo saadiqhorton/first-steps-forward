@@ -26,7 +26,25 @@ npx @saadiqhorton/ade --port 3100 --open
 npx @saadiqhorton/ade --remote
 ```
 
-ADE prints a sign-in link for devices on the same Wi-Fi; open it once on each device and that device stays signed in. The link is plain HTTP, so use it on your home network, not on public Wi-Fi. Nothing else is needed. If [Tailscale](https://tailscale.com) is already connected, ADE also prints a link that works from your other Tailscale devices wherever they are (HTTPS through `tailscale serve` while ADE runs, when your tailnet allows it). The access token in the links is kept in `~/.ade/remote-token`; delete that file to sign every device out. The built-in terminal, file editor, and CLI installs stay available only on the computer running ADE.
+ADE prints a sign-in link next to its usual address:
+
+```text
+ADE is running.
+  This computer:  http://127.0.0.1:3000
+  Your devices:   http://192.168.1.135:3000/?token=…  (same Wi-Fi)
+Open a link once on each phone or laptop; it stays signed in. Ctrl+C stops ADE.
+Wi-Fi links are plain HTTP: fine at home, not on public Wi-Fi.
+```
+
+Open the link on a phone or laptop connected to the same Wi-Fi. It signs that browser in and opens ADE; from then on the plain address (`http://192.168.1.135:3000`) works there too. There is no account, password or configuration:
+
+- **The link stays the same.** ADE makes its access token once and keeps it in `~/.ade/remote-token`. Delete that file to sign every device out; the next `ade --remote` makes a new link.
+- **Home networks only.** The Wi-Fi link is plain HTTP, so anyone on the same network could read it in transit. Use it at home, not on public or shared Wi-Fi.
+- **Tailscale is optional.** If [Tailscale](https://tailscale.com) is already connected, ADE adds a second link that works from your Tailscale devices wherever they are: HTTPS through `tailscale serve` while ADE runs (when your tailnet has HTTPS certificates turned on), otherwise the plain tailnet address. Nothing is left in your Tailscale settings when ADE stops.
+- **Some tools stay on this computer.** The built-in terminal, the file editor, and installing or updating agent CLIs work only on the computer running ADE.
+- **Another port:** `ade --remote --port 3100`. Ctrl+C stops ADE, and the links stop working until you run `ade --remote` again.
+
+If the link does not open on the other device, check that both are on the same network (guest and office networks often keep devices apart), that this computer's firewall allows incoming connections on ADE's port, and that this computer's address has not changed since ADE started.
 
 Check this machine's setup with `npx @saadiqhorton/ade doctor`. The built-in terminal is optional; when its platform binary is unavailable, the rest of ADE still works. `ade browser-setup` explains or installs host packages needed by Chrome on supported Linux systems.
 
@@ -46,7 +64,7 @@ npm run build
 npm start
 ```
 
-That server listens on `127.0.0.1:3000` (override with `PORT=... npm start`). It stays loopback-only unless you explicitly opt in: set `ADE_HOST` to a LAN/Tailscale interface address (or `0.0.0.0`) **and** `ADE_TOKEN` to a non-empty secret (`openssl rand -hex 16`); without a token `scripts/start-local.mjs` refuses to listen on a non-loopback address and exits 1. In exposed mode every `/api` request from a non-loopback client must prove the token — as `Authorization: Bearer <ADE_TOKEN>` for scripts, or via an `HttpOnly` `ade_auth` cookie that the UI's token gate obtains by POSTing the token to `/api/auth` once (wrong tokens get 401). A specific `ADE_HOST` also compares the request's Host header against that address as a DNS-rebinding fence; `ADE_HOST=0.0.0.0` (or `::`) spans every interface and accepts any Host name, with the token remaining the gate. Loopback clients — the agent CLIs and ADE on this machine — are exempt from the token either way. Plain HTTP carries the token in the clear, so prefer a Tailscale address, or keep the default loopback bind and front it with `tailscale serve --bg https / http://127.0.0.1:3000`: requests then arrive from the local proxy and the remote browser gets HTTPS. Without `ADE_TOKEN` the proxy is the only gate; with it, proxied browsers must prove the token too (a tailnet can include other people). `GET /api/auth?token=…` is the sign-in link form of the exchange: it sets the same cookie and redirects to the app. `ade --remote` (above) does all of this for you.
+That server listens on `127.0.0.1:3000` (override with `PORT=... npm start`). To share a source checkout with your other devices the easy way, run `node bin/ade.mjs --remote` after `npm run build` (see **Use it from your phone or another computer** above); the rest of this paragraph describes the manual settings it uses. It stays loopback-only unless you explicitly opt in: set `ADE_HOST` (or pass `ade --host`) to a LAN/Tailscale interface address (or `0.0.0.0`) **and** `ADE_TOKEN` to a non-empty secret (`openssl rand -hex 16`); without a token `scripts/start-local.mjs` refuses to listen on a non-loopback address and exits 1. In exposed mode every `/api` request from a non-loopback client must prove the token — as `Authorization: Bearer <ADE_TOKEN>` for scripts, or via an `HttpOnly` `ade_auth` cookie that the UI's token gate obtains by POSTing the token to `/api/auth` once (wrong tokens get 401). A specific `ADE_HOST` also compares the request's Host header against that address as a DNS-rebinding fence; `ADE_HOST=0.0.0.0` (or `::`) spans every interface and accepts any Host name, with the token remaining the gate. Loopback clients — the agent CLIs and ADE on this machine — are exempt from the token either way. Plain HTTP carries the token in the clear, so prefer a Tailscale address, or keep the default loopback bind and front it with `tailscale serve --bg https / http://127.0.0.1:3000`: requests then arrive from the local proxy and the remote browser gets HTTPS. Without `ADE_TOKEN` the proxy is the only gate; with it, proxied browsers must prove the token too (a tailnet can include other people). Opening any ADE page with `?token=<ADE_TOKEN>` signs that browser in the same way, then reloads the page without the token so it does not stay in the address bar.
 
 Add a project from the **+** button, in one of three ways: pick an **existing folder** (the native picker when available, ADE's own folder browser otherwise, or type its local path); **clone from GitHub** into a folder you choose (`owner/repo`, a GitHub URL, or an SSH address — runs `git clone` with prompts disabled, so a private repository needs `gh auth login`, a git credential helper, or an SSH key in `ssh-agent`; addresses carrying a password and non-remote paths are refused); or make a **new folder**, optionally initialized as a Git repository. The folder browser has a **New folder** button for creating a destination. A failed clone removes whatever it partially wrote, and an existing folder is never overwritten. To drop a project from the workspace, use **Remove** in the project header: it deletes only ADE's metadata (session records, process entries) for that project after an explicit confirmation, and never touches the folder or its files.
 
@@ -100,7 +118,7 @@ Each project's right pane has a **Browser** tab: a headless Chrome on your machi
 
 ## Architecture
 
-The existing TanStack Start/React app and warm workbench visual direction are retained. A small Node local-service module is mounted into Vite dev/preview and the self-hosted Node server. Agent adapters are isolated in `src/local/adapters/` so additional CLIs can be added without changing UI state. The service owns project registration, Git inspection/diffs, task persistence, child-process lifecycle, CLI streaming, checks, and development servers. The browser receives scoped invalidations over Server-Sent Events and loads session details and logs on demand; browser storage is no longer the source of truth.
+The existing TanStack Start/React app and warm workbench visual direction are retained. A small Node local-service module is mounted into Vite dev/preview and the self-hosted Node server: `src/local/ade-local.mjs` holds the request guard and the shared state, each area's API routes live in `src/local/routes/`, and larger services have their own modules (`dev-server.mjs`, `agent-status.mjs`, `remote.mjs` and others). Agent adapters are isolated in `src/local/adapters/` so additional CLIs can be added without changing UI state. The service owns project registration, Git inspection/diffs, task persistence, child-process lifecycle, CLI streaming, checks, and development servers. The browser receives scoped invalidations over Server-Sent Events and loads session details and logs on demand; browser storage is no longer the source of truth.
 
 ## Checks
 

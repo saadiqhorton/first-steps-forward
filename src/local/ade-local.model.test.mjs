@@ -382,7 +382,7 @@ test("opt-in exposure is token-gated, loopback stays exempt, and login sets the 
   }
 });
 
-test("behind `tailscale serve` a set token gates proxied clients, and the sign-in link sets the cookie", async () => {
+test("behind `tailscale serve` a set token gates proxied clients", async () => {
   // `ade --remote` on Tailscale: ADE stays on loopback; the proxy forwards from loopback.
   const proxied = (overrides = {}) =>
     api({
@@ -421,16 +421,6 @@ test("behind `tailscale serve` a set token gates proxied clients, and the sign-i
       (await api({ url: "http://127.0.0.1:3000/api/agents/unknown/models" })).status,
       404,
     );
-    // The sign-in link: the right token sets the cookie and sends the browser
-    // to the app, leaving the token off the address bar.
-    const link = await proxied({ url: "http://box.tailnet.ts.net/api/auth?token=tail-secret" });
-    assert.equal(link.status, 303);
-    assert.equal(link.headers.get("location"), "/");
-    assert.match(String(link.headers.get("set-cookie")), /ade_auth=tail-secret; HttpOnly/);
-    const stale = await proxied({ url: "http://box.tailnet.ts.net/api/auth?token=old" });
-    assert.equal(stale.status, 401);
-    assert.equal(stale.headers.get("set-cookie"), null);
-    assert.match((await stale.json()).error, /sign-in link is out of date/);
   } finally {
     delete process.env.ADE_TOKEN;
   }
