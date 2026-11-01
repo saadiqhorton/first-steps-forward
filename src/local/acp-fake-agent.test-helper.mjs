@@ -34,11 +34,23 @@ const chunk = (sessionId, text) =>
   update(sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
 let nextId = 1000;
 const waiting = new Map();
+// The helper is spawned detached, so if the test runner dies mid-request the
+// reply never comes and this helper would wait forever. Give up then: when
+// re-parented, or after a minute with no reply.
+const parent = process.ppid;
 const ask = (method, params) =>
   new Promise((resolve) => {
     const id = nextId++;
     waiting.set(id, resolve);
     send({ id, method, params });
+    const started = Date.now();
+    const watch = setInterval(() => {
+      if (!waiting.has(id)) {
+        clearInterval(watch);
+        return;
+      }
+      if (process.ppid !== parent || Date.now() - started > 60_000) process.exit(3);
+    }, 1000);
   });
 const modes = (currentModeId) => ({
   currentModeId,
