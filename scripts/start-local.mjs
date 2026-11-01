@@ -1,24 +1,32 @@
-// Local ADE binds loopback unless ADE_HOST opts into a LAN/Tailscale address.
-// A non-loopback bind REQUIRES a non-empty ADE_TOKEN: every /api request from
-// a non-loopback peer must present it (Authorization: Bearer …, or the
-// ade_auth cookie POST /api/auth sets), so an exposed ADE is never
-// unauthenticated. Loopback clients (the agent CLIs, local curls) stay
-// exempt from the token either way.
-const host = (process.env.ADE_HOST ?? "").trim() || "127.0.0.1";
-const loopback = new Set(["127.0.0.1", "localhost", "::1"]);
-process.env.HOST = host;
-process.env.NITRO_HOST = host;
-process.env.NITRO_PORT ??= process.env.PORT ?? "3000";
-if (!loopback.has(host.toLowerCase())) {
-  if (!(process.env.ADE_TOKEN ?? "").trim()) {
-    console.error(
-      "ADE refuses to listen on a non-loopback address without an access token.\n" +
-        "Set ADE_TOKEN (e.g. `openssl rand -hex 16`) and start again, or unset ADE_HOST to stay loopback-only.",
-    );
-    process.exit(1);
-  }
+// Serves the production build (`npm run build`) on one port: the UI, the
+// local API and the agent-browser stream. Loopback unless ADE_HOST opts into a
+// LAN/Tailscale address, which then REQUIRES a non-empty ADE_TOKEN: every /api
+// request from a non-loopback peer must present it (Authorization: Bearer …,
+// or the ade_auth cookie POST /api/auth sets), so an exposed ADE is never
+// unauthenticated. Loopback clients (the agent CLIs, local curls) stay exempt
+// from the token either way.
+import { fileURLToPath } from "node:url";
+import { isLoopbackHost, resolveBindHost } from "../src/local/bind-host.mjs";
+import { startAdeServer } from "../src/local/server.mjs";
+
+let host;
+try {
+  host = resolveBindHost();
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+const server = await startAdeServer({
+  host,
+  port: Number(process.env.PORT ?? 3000),
+  staticDir: fileURLToPath(new URL("../.output/public", import.meta.url)),
+});
+const { port } = /** @type {import("node:net").AddressInfo} */ (server.address());
+const url = `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
+if (isLoopbackHost(host)) {
+  console.log(`ADE is listening on ${url}`);
+} else {
   console.log(
-    `ADE is listening on http://${host}:${process.env.NITRO_PORT} — token required from non-loopback clients (Authorization: Bearer <ADE_TOKEN>). Plain HTTP travels unencrypted; prefer a Tailscale address, or run \`tailscale serve --bg https / http://127.0.0.1:${process.env.NITRO_PORT}\` for HTTPS.`,
+    `ADE is listening on ${url} — token required from non-loopback clients (Authorization: Bearer <ADE_TOKEN>). Plain HTTP travels unencrypted; prefer a Tailscale address, or run \`tailscale serve --bg https / http://127.0.0.1:${port}\` for HTTPS.`,
   );
 }
-await import("../.output/server/index.mjs");

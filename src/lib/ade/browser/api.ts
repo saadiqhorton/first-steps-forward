@@ -12,7 +12,7 @@ export interface BrowserStatus {
   readonly available: boolean;
   /** Why the browser is unavailable, for display. */
   readonly reason?: string;
-  /** Loopback WebSocket URL for the stream, with the project and token already in it. */
+  /** Origin-relative WebSocket path for the stream, with the project and token already in it. */
   readonly streamUrl?: string;
   readonly control: BrowserControlState;
 }

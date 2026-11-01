@@ -6,8 +6,9 @@
 // gets its own screencast from the browser session; frames are binary JPEG and
 // are acked to Chromium only after the viewer acks them. Project-level state
 // (nav, viewport, pointer, dialog, control) is shared by all viewers of a project.
+// It has no listener of its own: the server that serves ADE hands it the
+// /preview-stream upgrades (see handleUpgrade in ade-local.mjs).
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import http from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 
 const PATH = "/preview-stream";
@@ -152,13 +153,7 @@ function hostReason(message) {
 export function createBrowserStreamServer({ hub, controls, originAllowed }) {
   const token = randomBytes(24).toString("hex");
   const rooms = new Map();
-  const server = http.createServer((req, res) => {
-    res.writeHead(404);
-    res.end();
-  });
   const wss = new WebSocketServer({ noServer: true });
-  let started = null;
-  let port = 0;
 
   const tokenMatches = (given) => {
     if (typeof given !== "string") return false;
@@ -506,51 +501,20 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
     return true;
   };
 
-  server.on("upgrade", (req, socket, head) => {
-    if (!handleUpgrade(req, socket, head)) {
-      socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-      socket.destroy();
-    }
-  });
-
   return {
     handleUpgrade,
-    address: () => server.address(),
-    /** Starts listening on a random loopback port. Idempotent. */
-    start() {
-      if (!started) {
-        started = new Promise((resolve, reject) => {
-          const onError = (error) => reject(error);
-          server.once("error", onError);
-          server.listen(0, "127.0.0.1", () => {
-            server.off("error", onError);
-            port = server.address().port;
-            resolve({ port });
-          });
-        }).catch((error) => {
-          started = null;
-          throw error;
-        });
-      }
-      return started;
-    },
-    /** @returns {string} stream URL for `projectId`, without the per-viewer query params. */
+    /**
+     * @returns {string} origin-relative stream path for `projectId`, without the
+     * per-viewer query params; the page resolves it against its own origin.
+     */
     url(projectId) {
-      if (!port) throw new Error("The browser stream server is not running.");
-      const url = new URL(`ws://127.0.0.1:${port}${PATH}`);
-      url.searchParams.set("project", projectId);
-      url.searchParams.set("token", token);
-      return url.toString();
+      const params = new URLSearchParams({ project: projectId, token });
+      return `${PATH}?${params}`;
     },
+    /** Disconnects every viewer. */
     async close() {
-      if (!started) return;
-      const pending = started;
-      started = null;
-      await pending.catch(() => {});
       for (const ws of wss.clients) ws.terminate();
       await new Promise((resolve) => wss.close(() => resolve()));
-      server.closeAllConnections();
-      await new Promise((resolve) => server.close(() => resolve()));
     },
   };
 }

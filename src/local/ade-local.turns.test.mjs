@@ -154,16 +154,24 @@ process.env.USERPROFILE = home;
 process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
 process.env.FAKE_CLI_LOG = invocations;
 
-const { handleLocalApi, _setAgentsForTest, _getSessionForTest } = await import("./ade-local.mjs");
+const {
+  handle,
+  start: startAde,
+  setListenAddress,
+  _setAgentsForTest,
+  _getSessionForTest,
+} = await import("./ade-local.mjs");
+const { callApi } = await import("./api-request.test-helper.mjs");
 _setAgentsForTest(agents);
+await startAde();
+// What the serving HTTP server records once it listens; agents get this base URL.
+setListenAddress({ address: "127.0.0.1", family: "IPv4", port: 3000 });
 
 const call = async (urlPath, body) => {
-  const res = await handleLocalApi({
+  const res = await callApi(handle, {
     url: `http://127.0.0.1:3000${urlPath}`,
-    method: body === undefined ? "GET" : "POST",
-    headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "::ffff:127.0.0.1" } } } },
-    text: async () => JSON.stringify(body ?? {}),
+    body,
+    remoteAddress: "::ffff:127.0.0.1",
   });
   return { status: res.status, json: await res.json() };
 };

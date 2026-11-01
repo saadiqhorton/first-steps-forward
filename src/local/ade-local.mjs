@@ -38,7 +38,7 @@ import {
   createHarnessJobs,
 } from "./harness.mjs";
 import { listWorkflows, upsertWorkflow, deleteWorkflow as removeWorkflow } from "./workflows.mjs";
-import { reconcileWorkspaceMessages, saveWorkspace } from "./workspace-persistence.mjs";
+import { saveWorkspace } from "./workspace-persistence.mjs";
 import {
   SourceError,
   cloneRepository,
@@ -62,26 +62,20 @@ const authChildren = new Map();
 // Process ids whose dev-server port has been confirmed to accept a
 // connection; a process that dies before that never actually listened.
 const listenedProcs = new Set();
-// Real base URL of the serving ADE instance, taken from the latest loopback
-// request's Host header; null until the first request after boot.
-let lastApiBaseUrl = null;
+// Loopback base URL of the server this module is mounted on, recorded when it
+// starts listening (see setListenAddress); null until then.
+let listenBaseUrl = null;
 const devStartClaims = new Set();
-// One agent computer (headless Chrome) per project; see computer.mjs. The installer and the
-// Playwright contexts are process-wide: when Vite loads this module a second time, both copies
-// share one Chrome instead of fighting over the same profile directory.
-const browserInstaller = (globalThis.__adeBrowserInstaller ??= createBrowserInstaller({
-  baseDir: DATA_DIR,
-}));
-const browserContexts = (globalThis.__adeBrowserContexts ??= createBrowserContexts({
+// One agent computer (headless Chrome) per project; see computer.mjs.
+const browserInstaller = createBrowserInstaller({ baseDir: DATA_DIR });
+const browserContexts = createBrowserContexts({
   profilesDir: path.join(DATA_DIR, "browser", "profiles"),
   executable: () => browserInstaller.executable(),
   diagnose: (executable, cause) => diagnoseLaunchFailure({ executable, cause }),
-}));
+});
 // One control lock per project, shared by the browser stream, computer_* and browser_* tools.
-// The hub and the WebSocket stream server start lazily on first use.
+// The hub opens browser sessions lazily on first use.
 const controls = createControlRegistry();
-void globalThis.__adeBrowserStream?.close?.().catch?.(() => {});
-void globalThis.__adeBrowserHub?.closeAll?.().catch?.(() => {});
 // Each project browses in its own persistent profile, or a throwaway context in incognito mode.
 const browserHub = createBrowserHub({
   contextFor(projectId) {
@@ -91,7 +85,6 @@ const browserHub = createBrowserHub({
       : browserContexts.contextFor(projectId);
   },
 });
-globalThis.__adeBrowserHub = browserHub;
 const computers = createComputerManager({ installer: browserInstaller, hub: browserHub });
 // Every session's turns and checks, and the only writer of a session's status.
 const turns = createSessionTurns({
@@ -105,16 +98,13 @@ const turns = createSessionTurns({
     agentBrowser: agentComputerFor(project),
   }),
 });
-// Address headers of the latest trusted loopback API request (see handle()).
-// The stream's Origin check runs the same originAllowed rule against them.
-let lastApiHeaders = null;
-let sharedUpgradeAttached = false;
+// Viewers reach the stream through /preview-stream on the server that serves
+// the UI and API (see handleUpgrade); it never listens on its own.
 const browserStream = createBrowserStreamServer({
   hub: browserHub,
   controls,
   originAllowed: (origin, req) => streamOriginAllowed(origin, req),
 });
-globalThis.__adeBrowserStream = browserStream;
 const OBSERVE_BROWSER_ACTIONS = new Set(["status", "snapshot", "screenshot", "wait_for"]);
 const OBSERVE_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
 const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
@@ -529,11 +519,20 @@ function devServerStatus(project) {
   if (proc.status === "starting") return "starting";
   return proc.startedAt ? "stopped" : "stopped (never started this session)";
 }
-// Only NITRO_PORT is ADE's own configured listen port (set by
-// scripts/start-local.mjs); a generic shell PORT could belong to anything.
-function knownListenBaseUrl() {
-  const port = process.env.NITRO_PORT;
-  return port && /^\d+$/.test(String(port)) ? `http://127.0.0.1:${port}` : null;
+/**
+ * Records where the serving HTTP server listens, so agents get a base URL that
+ * reaches it from this machine. A wildcard bind is reachable on 127.0.0.1; a
+ * specific non-loopback bind is not reachable as a loopback peer at all, so
+ * agents get no URL (their tools are omitted) rather than one that needs the token.
+ * @param {import("node:net").AddressInfo | string | null} address `server.address()`
+ */
+export function setListenAddress(address) {
+  if (!address || typeof address === "string") return;
+  const host = address.address;
+  if (host === "::1") listenBaseUrl = `http://[::1]:${address.port}`;
+  else if (["0.0.0.0", "::"].includes(host) || isLoopbackAddress(host))
+    listenBaseUrl = `http://127.0.0.1:${address.port}`;
+  else listenBaseUrl = null;
 }
 /**
  * What a CLI needs to drive this project's agent computer: the MCP server
@@ -542,7 +541,7 @@ function knownListenBaseUrl() {
  * are then omitted rather than pointed at a guessed address.
  */
 export function computerContext(project) {
-  const api = lastApiBaseUrl ?? knownListenBaseUrl();
+  const api = listenBaseUrl;
   if (!api) return null;
   const local = path.join(adeRoot(), "src", "local");
   return {
@@ -760,14 +759,24 @@ function isAttachmentUploadPath(pathname) {
   return cleaned === "/api/attachments" || cleaned === "/attachments";
 }
 
+class PayloadTooLarge extends Error {
+  constructor() {
+    super("Request body too large.");
+    this.status = 413;
+  }
+}
+// API request bodies are small JSON (attachments up to 14 MB). A larger body is
+// refused before it is read, or as soon as it outgrows the limit: an exposed
+// instance must not let an unauthenticated peer stream an unbounded body into memory.
 async function body(req) {
   const url = new URL(req.url, "http://127.0.0.1");
   const attachmentUpload = req.method === "POST" && isAttachmentUploadPath(url.pathname);
   const limit = attachmentUpload ? 14 * 1024 * 1024 : 1_000_000;
+  if (Number(req.headers["content-length"]) > limit) throw new PayloadTooLarge();
   let raw = "";
   for await (const chunk of req) {
     raw += chunk;
-    if (raw.length > limit) throw new Error("Request too large");
+    if (raw.length > limit) throw new PayloadTooLarge();
   }
   return raw ? JSON.parse(raw) : {};
 }
@@ -831,8 +840,6 @@ export function streamOriginAllowed(origin, req) {
   // Without an Origin the caller is not a page; only this machine may be that.
   if (!origin) return isLoopbackAddress(req.socket?.remoteAddress);
   if (originAllowed(req)) return true;
-  if (lastApiHeaders !== null && originAllowed({ headers: { ...lastApiHeaders, origin } }))
-    return true;
   try {
     const host = new URL(origin).hostname.toLowerCase().replace(/^\[|\]$/g, "");
     return new Set(["127.0.0.1", "localhost", "::1"]).has(host);
@@ -888,7 +895,13 @@ async function registerProject(res, real, name) {
   await save();
   return json(res, 201, { project, process: proc });
 }
-async function handle(req, res) {
+/**
+ * The API router: every `/api/*` request, from the dev server or the
+ * production server (src/local/server.mjs). Call start() first.
+ * @param {import("node:http").IncomingMessage} req
+ * @param {import("node:http").ServerResponse} res
+ */
+export async function handle(req, res) {
   const url = new URL(req.url, "http://127.0.0.1");
   const parts = url.pathname
     .replace(/^\/api\/?/, "")
@@ -920,24 +933,6 @@ async function handle(req, res) {
     ["install", "update", "harness"].includes(parts[2]);
   if ((["terminal", "editor"].includes(parts[0]) || harnessRoute) && !isLoopbackPeer(req))
     return json(res, 403, { error: "Host tools are available only on this machine." });
-  // Remember the real base URL of this serving instance for the agent-facing
-  // dev-control curls. Only LOCAL requests count (the agent CLIs run on this
-  // machine), and only with loopback Host names — a LAN browser polling
-  // bootstrap must not poison manifests with an authority that would require
-  // the token, and the exempt POST /api/auth path must not either (its peer
-  // is by definition not yet authorized; a forged loopback Host header on a
-  // remote peer fails localRequest's peer check).
-  if (localRequest(req) && req.headers.host) {
-    const reqHost = hostnameOf(req.headers.host);
-    if (["127.0.0.1", "localhost", "::1"].includes(reqHost)) {
-      lastApiBaseUrl = `http://${req.headers.host}`;
-      lastApiHeaders = {
-        host: req.headers.host,
-        "x-forwarded-proto": req.headers["x-forwarded-proto"],
-        "x-forwarded-host": req.headers["x-forwarded-host"],
-      };
-    }
-  }
   try {
     if (parts[0] === "terminal") {
       const { loadTerminal } = await import("./terminal-loader.mjs");
@@ -1069,7 +1064,6 @@ async function handle(req, res) {
       return json(res, 200, { ok: true });
     }
     if (req.method === "GET" && parts[0] === "bootstrap") {
-      await reconcileWorkspaceMessages(DATA_FILE, state);
       const agents = await bootstrapAgents();
       // Return the persisted workspace snapshot immediately. Git inspection,
       // diffs, and dev-script re-scan update the next 2-second poll instead
@@ -1462,6 +1456,7 @@ async function handle(req, res) {
             : await control.agent(run);
           return json(res, status, payload);
         } catch (error) {
+          if (error instanceof PayloadTooLarge) throw error;
           if (error instanceof HumanControlError)
             return json(res, 409, { error: error.message, code: error.code });
           return json(res, 503, { error: error.message });
@@ -1508,12 +1503,11 @@ async function handle(req, res) {
               : (computer.detail ?? "The agent browser is not running yet.");
           return json(res, 200, { available: false, reason, control });
         }
-        await browserStream.start();
-        const streamUrl = new URL(browserStream.url(project.id));
-        if (sharedUpgradeAttached && req.headers.host) streamUrl.host = req.headers.host;
+        // Origin-relative: the page resolves it against the address it was loaded
+        // from, which is also correct behind an HTTPS proxy (wss:).
         return json(res, 200, {
           available: true,
-          streamUrl: streamUrl.toString(),
+          streamUrl: browserStream.url(project.id),
           control,
         });
       }
@@ -1973,7 +1967,11 @@ async function handle(req, res) {
       return json(res, 200, { agents: await agentStatus() });
     return json(res, 404, { error: "Not found." });
   } catch (error) {
-    if (error instanceof SourceError || error instanceof TurnRefused)
+    if (
+      error instanceof SourceError ||
+      error instanceof TurnRefused ||
+      error instanceof PayloadTooLarge
+    )
       return json(res, error.status, { error: error.message });
     return json(res, 500, { error: error?.message ?? String(error) });
   }
@@ -1994,116 +1992,69 @@ export function _getSessionForTest(sessionId) {
 export function _sessionBusyForTest(sessionId) {
   return turns.isBusy(_getSessionForTest(sessionId));
 }
-await load();
-// API request bodies are tiny JSON; anything larger is refused before it is
-// read (an exposed instance must not let an unauthenticated peer stream an
-// unbounded body into memory — content-length lies are caught by the reader).
-const MAX_PAYLOAD_BYTES = 1024 * 1024;
-async function boundedText(request, limit = MAX_PAYLOAD_BYTES) {
-  const declared = Number(request.headers?.get?.("content-length") ?? "");
-  if (Number.isFinite(declared) && declared > limit) throw new Error("payload_too_large");
-  if (!request.body) return await request.text();
-  const reader = request.body.getReader();
-  const chunks = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel().catch(() => {});
-      throw new Error("payload_too_large");
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
+let started = null;
+/**
+ * Loads the saved workspace and recovers its processes and turns. Importing this
+ * module does nothing on its own: the server that mounts handle() calls start()
+ * first (Vite's dev/preview servers, or src/local/server.mjs). Idempotent.
+ */
+export function start() {
+  started ??= load();
+  return started;
 }
-export async function handleLocalApi(request) {
-  const url = new URL(request.url);
-  if (!url.pathname.startsWith("/api/")) return undefined;
-  const headers = Object.fromEntries(request.headers.entries());
-  let payload = "";
-  const attachmentUpload = request.method === "POST" && isAttachmentUploadPath(url.pathname);
-  const bodyLimit = attachmentUpload ? 14 * 1024 * 1024 : MAX_PAYLOAD_BYTES;
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    try {
-      payload = await boundedText(request, bodyLimit);
-    } catch {
-      return Response.json({ error: "Request body too large." }, { status: 413 });
-    }
+/**
+ * Closes the agent browser and its viewers. A Vite restart (an edit to the
+ * config or to a module it imports) evaluates a fresh copy of this module; the
+ * old copy must let go of Chrome's profile directories before the new one
+ * opens them.
+ */
+export async function stop() {
+  await browserStream.close();
+  await browserHub.closeAll();
+  await browserContexts.close();
+}
+/**
+ * Hands a `/preview-stream` WebSocket upgrade to the agent-browser stream,
+ * after the same peer/token/Host guard as the API. Returns false for any other
+ * path so the caller (or Vite's HMR socket) can handle it.
+ * @returns {boolean}
+ */
+export function handleUpgrade(req, socket, head) {
+  const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+  if (pathname !== "/preview-stream") return false;
+  if (!localRequest(req)) {
+    socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+    return true;
   }
-  // Resolve the client address the way the runtimes actually present it. The
-  // built server (nitro node preset) hands us srvx's NodeRequest: the raw
-  // IncomingMessage is private, the address lives on
-  // request.runtime.node.req.socket.remoteAddress (mirrored as request.ip)
-  // and request.socket does NOT exist. A plain fetch Request has neither, and
-  // with no provable address the request must fail closed (403).
-  const remoteAddress = request.runtime?.node?.req?.socket?.remoteAddress ?? request.ip;
-  const req = {
-    method: request.method,
-    url: `${url.pathname}${url.search}`,
-    headers,
-    ...(remoteAddress ? { socket: { remoteAddress } } : {}),
-    signal: request.signal,
-    async *[Symbol.asyncIterator]() {
-      if (payload) yield Buffer.from(payload);
-    },
-  };
-  const response = {
-    statusCode: 200,
-    headers: {},
-    body: "",
-    setHeader(name, value) {
-      this.headers[name] = value;
-    },
-    end(value) {
-      this.body = value ?? "";
-    },
-  };
-  await handle(req, response);
-  const outBody = response.body;
-  return new Response(outBody instanceof Buffer ? outBody : (outBody ?? ""), {
-    status: response.statusCode,
-    headers: response.headers,
+  return browserStream.handleUpgrade(req, socket, head);
+}
+/** Mounts the API and the stream on a Vite dev or preview server. */
+function mount(server) {
+  const httpServer = server.httpServer;
+  if (httpServer) {
+    httpServer.on("upgrade", (req, socket, head) => handleUpgrade(req, socket, head));
+    httpServer.once("listening", () => setListenAddress(httpServer.address()));
+    httpServer.once("close", () => void stop().catch(() => {}));
+  }
+  server.middlewares.use("/api", (req, res) => {
+    handle(req, res).catch((e) => json(res, 500, { error: e.message }));
   });
-}
-function attachComputerUpgrades(httpServer) {
-  if (!httpServer || typeof httpServer.on !== "function") return;
-  sharedUpgradeAttached = true;
-  if (httpServer.__adeUpgradeListener) {
-    httpServer.off("upgrade", httpServer.__adeUpgradeListener);
-  }
-  const onUpgrade = (req, socket, head) => {
-    const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
-    if (pathname !== "/preview-stream") return;
-    // The stream server itself only listens on loopback, so this shared path is
-    // the only way in for a remote viewer: apply the same peer/token/Host
-    // guard as the API before handing the socket over.
-    if (!localRequest(req)) {
-      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
-      socket.destroy();
-      return;
-    }
-    browserStream.handleUpgrade(req, socket, head);
-  };
-  httpServer.__adeUpgradeListener = onUpgrade;
-  httpServer.on("upgrade", onUpgrade);
 }
 
 export function adeLocalApi() {
   return {
     name: "ade-loopback-local-api",
-    configureServer(server) {
-      attachComputerUpgrades(server.httpServer);
-      server.middlewares.use("/api", (req, res) => {
-        handle(req, res).catch((e) => json(res, 500, { error: e.message }));
-      });
+    async configureServer(server) {
+      await start();
+      mount(server);
     },
-    configurePreviewServer(server) {
-      attachComputerUpgrades(server.httpServer);
-      server.middlewares.use("/api", (req, res) => {
-        handle(req, res).catch((e) => json(res, 500, { error: e.message }));
-      });
+    async configurePreviewServer(server) {
+      // TanStack Start's SPA build renders the shell through a throwaway
+      // `vite preview`; that must never touch the user's ~/.ade.
+      if (process.env.TSS_PRERENDERING === "true") return;
+      await start();
+      mount(server);
     },
   };
 }

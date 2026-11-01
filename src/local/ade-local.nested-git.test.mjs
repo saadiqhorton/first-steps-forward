@@ -69,17 +69,12 @@ process.env.HOME = home;
 // os.homedir() reads USERPROFILE on Windows, not HOME; without this the
 // tests would write into the real ~/.ade workspace.
 process.env.USERPROFILE = home;
-const { handleLocalApi } = await import("./ade-local.mjs");
+const { handle, start } = await import("./ade-local.mjs");
+const { callApi } = await import("./api-request.test-helper.mjs");
+await start();
 
 async function get(urlPath) {
-  const request = {
-    url: `http://127.0.0.1:3000${urlPath}`,
-    method: "GET",
-    headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-    runtime: { node: { req: { socket: { remoteAddress: "127.0.0.1" } } } },
-    text: async () => "",
-  };
-  const response = await handleLocalApi(request);
+  const response = await callApi(handle, { url: `http://127.0.0.1:3000${urlPath}` });
   return { status: response.status, body: await response.json() };
 }
 

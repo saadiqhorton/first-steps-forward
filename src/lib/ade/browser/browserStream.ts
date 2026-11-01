@@ -123,7 +123,7 @@ export interface BrowserStreamNav {
 }
 
 export interface BrowserStreamOptions {
-  /** Server-issued `ws://` URL that already carries `project` and `token`. */
+  /** Server-issued `/preview-stream` path that already carries `project` and `token`. */
   readonly url: string;
   /** Stable per-page-load id, see viewer.ts. */
   readonly viewer: string;
@@ -257,7 +257,9 @@ function refusalMessage(code: number, reason: string): string | null {
  * The backoff counter resets on any frame or viewport message.
  */
 export function connectBrowserStream(options: BrowserStreamOptions): BrowserStream {
-  const target = new URL(options.url);
+  // The server issues a path on the origin that served the page; ws: or wss: follows that origin.
+  const target = new URL(options.url, window.location.href);
+  target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
   target.searchParams.set("viewer", options.viewer);
   target.searchParams.set("maxWidth", String(Math.max(1, Math.round(options.maxWidth))));
   target.searchParams.set("maxHeight", String(Math.max(1, Math.round(options.maxHeight))));

@@ -162,16 +162,15 @@ process.env.USERPROFILE = home;
 process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
 process.env.FAKE_CLI_LOG = invocations;
 
-const { handleLocalApi, _setAgentsForTest, _getSessionForTest } = await import("./ade-local.mjs");
-const apiRequest = (urlPath, body, remoteAddress = "::ffff:127.0.0.1") => ({
-  url: `http://127.0.0.1:3000${urlPath}`,
-  method: body === undefined ? "GET" : "POST",
-  headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-  runtime: { node: { req: { socket: { remoteAddress } } } },
-  text: async () => JSON.stringify(body ?? {}),
-});
-const call = async (urlPath, body, remoteAddress) => {
-  const res = await handleLocalApi(apiRequest(urlPath, body, remoteAddress));
+const { handle, start, _setAgentsForTest, _getSessionForTest } = await import("./ade-local.mjs");
+const { callApi } = await import("./api-request.test-helper.mjs");
+await start();
+const call = async (urlPath, body, remoteAddress = "::ffff:127.0.0.1") => {
+  const res = await callApi(handle, {
+    url: `http://127.0.0.1:3000${urlPath}`,
+    body,
+    remoteAddress,
+  });
   return { status: res.status, json: await res.json() };
 };
 async function waitFor(check, what) {
@@ -286,12 +285,11 @@ test("harness update is 409 when the agent was installed outside npm", async () 
 
 test("harness routes refuse non-loopback peers with 403", async () => {
   for (const pathSuffix of ["install", "update", "harness"]) {
-    const res = await handleLocalApi({
+    const res = await callApi(handle, {
       url: `http://127.0.0.1:3000/api/agents/opencode/${pathSuffix}`,
       method: pathSuffix === "harness" ? "GET" : "POST",
-      headers: { entries: () => [["host", "127.0.0.1:3000"]] },
-      runtime: { node: { req: { socket: { remoteAddress: "203.0.113.8" } } } },
-      text: async () => "{}",
+      body: pathSuffix === "harness" ? undefined : {},
+      remoteAddress: "203.0.113.8",
     });
     assert.equal(res.status, 403, `${pathSuffix} should be loopback-only`);
   }

@@ -1,5 +1,8 @@
 // The Lovable preset supplies TanStack Start, React, Tailwind, and aliases.
-// ADE pins the self-hosted server to Node and its UI/API to loopback.
+// ADE builds a single-page app: `npm start` (src/local/server.mjs) serves its
+// shell and assets next to the local API, and `npm run dev` mounts that API on
+// Vite's server through adeLocalApi(). This file and src/local/server.mjs are
+// the only importers of ade-local.mjs, which keeps it out of Lovable's bundle.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { adeLocalApi } from "./src/local/ade-local.mjs";
 import { resolveBindHost } from "./src/local/bind-host.mjs";
@@ -17,10 +20,11 @@ export default defineConfig({
     server: { host, port: 3100, strictPort: true },
     preview: { host, port: 3100, strictPort: true },
   },
-  nitro: { preset: "node-server" },
   tanstackStart: {
-    // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
-    // nitro/vite builds from this
+    // Lovable builds its hosted server from src/server.ts; ADE itself never runs it.
     server: { entry: "server" },
+    // No route renders on the server: the build prerenders one shell HTML
+    // (<client outDir>/_shell.html) for every path, and the UI loads its data from /api.
+    spa: { enabled: true },
   },
 });
