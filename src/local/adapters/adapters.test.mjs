@@ -35,6 +35,20 @@ test("Codex adapter uses its workspace-write sandbox and resumes the same thread
   assert.ok(resumed.includes("Continue"));
 });
 
+test("Codex runs in project folders that are not Git repositories, first turn and follow-ups", () => {
+  // Without the flag Codex exits 1: "Not inside a trusted directory and
+  // --skip-git-repo-check was not specified."
+  const base = { projectPath: "/tmp/plain-folder", prompt: "Go", session };
+  assert.ok(codex.command({ ...base, continuing: false })[1].includes("--skip-git-repo-check"));
+  const followUp = codex.command({
+    ...base,
+    session: { ...session, agentSessionId: "thread-2" },
+    continuing: true,
+  })[1];
+  assert.equal(followUp[1], "resume");
+  assert.ok(followUp.includes("--skip-git-repo-check"));
+});
+
 test("OpenCode adapter never opts into automatic permission approval", () => {
   const [bin, args] = opencode.command({
     projectPath: "/tmp/project",
@@ -358,6 +372,7 @@ test("adapters omit effort/speed/permission flags when options are absent (byte-
   assert.deepEqual(codex.command(base)[1], [
     "exec",
     "--json",
+    "--skip-git-repo-check",
     "--cd",
     "/tmp/project",
     "--sandbox",
@@ -395,6 +410,7 @@ test("Codex maps effort, speed, and plan permission onto argv", () => {
   assert.deepEqual(newPlan, [
     "exec",
     "--json",
+    "--skip-git-repo-check",
     "-c",
     'model_reasoning_effort="high"',
     "-c",
@@ -418,6 +434,7 @@ test("Codex maps effort, speed, and plan permission onto argv", () => {
     "exec",
     "resume",
     "--json",
+    "--skip-git-repo-check",
     "-c",
     'model_reasoning_effort="medium"',
     "-c",

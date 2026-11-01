@@ -111,6 +111,10 @@ export const codex = defineCliAgent({
     // `--` it swallows the positional prompt and then fails on closed stdin:
     // "No prompt provided via stdin."
     const promptArgs = imageArgs.length ? ["--", prompt] : [prompt];
+    // Codex refuses folders outside a Git repository unless told otherwise
+    // ("Not inside a trusted directory"). ADE runs it only in the project the
+    // user chose, which need not use Git, and tracks the turn's changes itself.
+    const trustArgs = ["--skip-git-repo-check"];
     return continuing && session.agentSessionId
       ? [
           "codex",
@@ -118,6 +122,7 @@ export const codex = defineCliAgent({
             "exec",
             "resume",
             "--json",
+            ...trustArgs,
             ...modelArgs,
             ...optionArgs,
             ...computerArgs,
@@ -132,6 +137,7 @@ export const codex = defineCliAgent({
           [
             "exec",
             "--json",
+            ...trustArgs,
             ...modelArgs,
             ...optionArgs,
             ...computerArgs,
