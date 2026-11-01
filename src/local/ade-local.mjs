@@ -14,7 +14,13 @@ import { adapters } from "./adapters/index.mjs";
 import { describeAgent } from "./adapters/kit.mjs";
 import { getDiff, projectInfo } from "./project-git.mjs";
 import { checksFor, packageManager } from "./project-scripts.mjs";
-import { addLog, addMessage, createSessionTurns, TurnRefused } from "./session-turns.mjs";
+import {
+  addLog,
+  addMessage,
+  createSessionTurns,
+  shrinkLogLine,
+  TurnRefused,
+} from "./session-turns.mjs";
 import { adeRoot, COMPUTER_ERROR_STATUS, createComputerManager, SCREEN } from "./computer.mjs";
 import { createBrowserHub } from "./browser-page.mjs";
 import { createBrowserInstaller } from "./browser-install.mjs";
@@ -124,6 +130,10 @@ const OBSERVE_BROWSER_ACTIONS = new Set(["status", "snapshot", "screenshot", "wa
 const OBSERVE_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
 const AGENTS_STATUS_FILE = path.join(DATA_DIR, "agents-status.json");
 let probingAgents = false;
+// A probe spawns ~17 processes, so the bootstrap poll only starts one this long after the last.
+// Explicit refreshes (agentStatus called directly) ignore it.
+const AGENT_PROBE_INTERVAL_MS = 60_000;
+let lastProbeStartedAt = 0;
 let refreshingBootstrap = false;
 const id = () => randomUUID();
 const now = () => Date.now();
@@ -162,6 +172,15 @@ async function load() {
     state.processes = Array.isArray(saved.processes) ? saved.processes : [];
     state.workflows = Array.isArray(saved.workflows) ? saved.workflows : [];
     let changed = false;
+    // Older versions stored raw CLI lines whole (up to 1.7 MB each); shrink them once here.
+    for (const session of state.sessions) {
+      if (!Array.isArray(session.logs)) continue;
+      const shrunk = session.logs.map(shrinkLogLine);
+      if (shrunk.some((line, i) => line !== session.logs[i])) {
+        session.logs = shrunk;
+        changed = true;
+      }
+    }
     for (const p of state.processes) {
       const project = state.projects.find((item) => item.id === p.projectId);
       const running = !!(p.pid && project && (await processMatches(p.pid, project.path)));
@@ -207,11 +226,22 @@ async function executable(bin) {
   const res = await run(bin, ["--version"], { timeout: 5000 });
   return res.code === 0 ? (res.stdout || res.stderr).trim().split(/\r?\n/)[0].slice(0, 100) : null;
 }
-async function npmRoot() {
-  const res = await run("npm", ["root", "-g"], { timeout: 5000 });
-  if (res.code !== 0) return null;
-  const root = (res.stdout || "").trim().split(/\r?\n/)[0]?.trim();
-  return root || null;
+// The global npm root only changes when npm itself does, so one lookup serves every probe.
+// A failed lookup is retried, and a finished harness job clears it.
+let npmRootLookup = null;
+function npmRoot() {
+  npmRootLookup ??= (async () => {
+    const res = await run("npm", ["root", "-g"], { timeout: 5000 });
+    if (res.code !== 0) return null;
+    const root = (res.stdout || "").trim().split(/\r?\n/)[0]?.trim();
+    return root || null;
+  })()
+    .catch(() => null)
+    .then((root) => {
+      if (!root) npmRootLookup = null;
+      return root;
+    });
+  return npmRootLookup;
 }
 const harnessDetectDeps = {
   which,
@@ -222,11 +252,13 @@ const harnessJobs = createHarnessJobs({
   spawn,
   onFinished: () => {
     clearModelsCache(DATA_DIR, Object.keys(adapters));
+    npmRootLookup = null;
     agentStatus().catch(() => {});
   },
 });
 
 async function agentStatus() {
+  lastProbeStartedAt = now();
   const results = await Promise.all(
     Object.values(adapters).map(async (adapter) => {
       const version = await executable(adapter.bin);
@@ -286,7 +318,9 @@ async function agentStatus() {
  * agent status immediately (persisted under ~/.ade) and refresh the real
  * probes in the background — the next poll picks them up. Only the very
  * first bootstrap after the store is wiped pays the full probe latency.
- * A single background probe runs at a time so polls can't stampede CLIs.
+ * A single background probe runs at a time, and none starts within
+ * AGENT_PROBE_INTERVAL_MS of the last (this process's, or the cached file's
+ * `fetchedAt` after a restart) so polls can't stampede CLIs.
  */
 async function bootstrapAgents() {
   let cached = null;
@@ -304,7 +338,8 @@ async function bootstrapAgents() {
   // Never make the project list wait on CLI version/auth probes. If there's
   // no cache yet, return the current (possibly empty) agent list; the normal
   // bootstrap poll picks up the probe result when it finishes.
-  if (!probingAgents) {
+  const lastProbe = Math.max(lastProbeStartedAt, Number(cached?.fetchedAt) || 0);
+  if (!probingAgents && now() - lastProbe >= AGENT_PROBE_INTERVAL_MS) {
     probingAgents = true;
     agentStatus()
       .catch(() => {})
