@@ -56,3 +56,44 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## beUI
+
+ADE's Activity pane uses the Agent Activity component from beUI (https://beui.dev), copyright (c) 2026 Saurabh Chauhan, released under the MIT License. The files were copied as published, and each starts with a header naming the source. Where a file differs from the original, the change is marked `// ADE:`. The license text is also in `src/components/agents/BEUI-LICENSE`.
+
+Files copied from beUI:
+
+- `src/components/agents/agent-activity/activity-row.tsx`
+- `src/components/agents/agent-activity/index.tsx`
+- `src/components/agents/agent-activity/types.ts`
+- `src/components/agents/agent-disclosure.tsx`
+- `src/components/agents/loading-states/thinking-shimmer.tsx`
+- `src/components/motion/text-shimmer.tsx`
+- `src/lib/ease.ts`
+- `src/lib/text-shimmer.ts`
+
+The full license text, copied from the beUI repository:
+
+```text
+MIT License
+
+Copyright (c) 2026 Saurabh Chauhan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

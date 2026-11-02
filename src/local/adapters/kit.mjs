@@ -10,6 +10,22 @@
 // - runTurn(input, io): one turn, reported as session events and how it ended.
 //
 // Nothing here touches a session.
+//
+// Activity logging for a new agent. The Activity pane reads every agent's log lines through one
+// event model (ActivityEvent in src/lib/ade/formatLogs.mjs), so it costs an agent little:
+// - An ACP agent needs nothing. runAcpTurn (../acp.mjs) logs each tool call as
+//   {type:"tool_call", callId, toolName, kind?, title?, input} and its result as
+//   {type:"tool_result", callId, toolName, kind?, isError?, summary?, additions?, deletions?,
+//   files?}, from the agent's own toolCallId, kind and title. `kind` (ACP's read, edit, search,
+//   execute, fetch, ...) is what classifies the step, and `callId` pairs a call with its result.
+//   A call is logged again as the agent refines it, and a result again with `amends: true` when
+//   the real diff comes after it; the pane folds each into the one step.
+// - A CLI that prints JSON lines needs one small decoder in formatLogs.mjs: map each raw event
+//   to an ActivityEvent (a tool_call and, later, a tool_result with the same callId; plus the
+//   odd message, plan or error), and add it to DECODERS. Then add a short fixture log under
+//   src/lib/ade/fixtures/activity/ and a row to src/lib/ade/activityConformance.test.mjs.
+// - Never log file contents or diffs. A result carries a few plain words (`summary`: "95
+//   lines", a command's last output line, an error's first line), changed line counts and paths.
 import { promises as fs } from "node:fs";
 import { commandLine } from "../harness.mjs";
 import { listAcpModels, runAcpTurn } from "../acp.mjs";

@@ -1,0 +1,17 @@
+Context manifest: 12 candidate files, tools: Claude Code tools: Build accepts file edits and asks you in ADE before shell commands and other actions; Plan is read-only. Plus ADE's agent computer tools
+{"type":"tool_call","toolName":"read","input":{"description":"Read File"}}
+{"type":"tool_result","toolName":"read"}
+{"type":"tool_result","toolName":"read"}
+{"type":"tool_call","toolName":"edit","input":{"path":"/p/src/a.ts"}}
+{"type":"tool_result","toolName":"edit"}
+{"type":"tool_call","toolName":"edit","input":{"description":"Write src/new.ts"}}
+{"type":"tool_call","toolName":"bash","input":{"description":"Terminal"}}
+{"type":"tool_result","toolName":"bash"}
+{"type":"tool_call","toolName":"bash","input":{"command":"cat missing.txt"}}
+{"type":"tool_result","toolName":"bash","isError":true}
+{"type":"tool_result","toolName":"tool","isError":true}
+{"type":"tool_call","toolName":"search","input":{"pattern":"TODO"}}
+{"type":"tool_result","toolName":"search"}
+{"type":"tool_call","toolName":"tool","input":{"description":"Ready to code?"}}
+{"type":"tool_result","toolName":"tool","isError":true}
+{"type":"message_update","assistantMessageEvent":{"type":"text"}}

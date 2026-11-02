@@ -135,6 +135,8 @@
   --foreground: var(--ink);
   --text-secondary: oklch(0.43 0.025 80);
   --text-muted: var(--dim);
+  /* beUI's text shimmer reads this one by its shadcn name. */
+  --muted-foreground: var(--text-muted);
   --border: var(--line);
   --border-subtle: oklch(0.9 0.025 87);
   --border-strong: oklch(0.78 0.035 82);
@@ -215,6 +217,14 @@
   --syntax-property: oklch(0.79 0.08 114);
   --syntax-heading: oklch(0.81 0.11 60);
   --syntax-invalid: oklch(0.73 0.15 29);
+}
+
+/* beUI's scrolling activity lists hide their scrollbar. */
+@utility scrollbar-hide {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @utility label-mono {

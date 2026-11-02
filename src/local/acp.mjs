@@ -7,6 +7,16 @@
 // ADE advertises no fs or terminal capability, so the agent keeps using its
 // own file and shell tools — ADE only answers permission requests.
 import { promises as fsp } from "node:fs";
+import {
+  awaitsChangeReport,
+  changeReport,
+  claimsCreation,
+  clip,
+  lateResultFields,
+  mergeToolCall,
+  TOOL_KINDS,
+  toolResultFields,
+} from "./acp-activity.mjs";
 
 export const ACP_PROTOCOL_VERSION = 1;
 const AUTH_REQUIRED = -32000;
@@ -34,13 +44,6 @@ export class AcpError extends Error {
     this.code = code;
   }
 }
-
-const clip = (value, max) => {
-  const text = String(value ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-};
 
 /**
  * A JSON-RPC 2.0 peer over newline-delimited JSON. `onRequest` answers the
@@ -144,7 +147,10 @@ export function toolNameOf(toolCall) {
   return KIND_TOOL[toolCall?.kind] ?? "tool";
 }
 
-/** Short scalar fields of a tool's input: never file contents or diffs. */
+/**
+ * Short scalar fields of a tool's input: never file contents or diffs. The tool's title is
+ * logged beside it, so a tool with no such fields has an empty input.
+ */
 function compactInput(toolCall) {
   const raw = toolCall?.rawInput && typeof toolCall.rawInput === "object" ? toolCall.rawInput : {};
   const input = {};
@@ -159,7 +165,6 @@ function compactInput(toolCall) {
   if (typeof filePath === "string") input.path = clip(filePath, 300);
   for (const key of ["pattern", "url", "query"])
     if (typeof raw[key] === "string") input[key] = clip(raw[key], 200);
-  if (!Object.keys(input).length && toolCall?.title) input.description = clip(toolCall.title, 200);
   return input;
 }
 
@@ -336,6 +341,7 @@ export async function runAcpTurn(options) {
   let lastRun = "";
   let emitted = false;
   let declinedModeSwitch = false;
+  let skippedUpdate = false;
   // Text runs between tool calls are separate paragraphs; ADE's message list
   // joins an agent's consecutive output, so the break has to be in the text.
   const flush = () => {
@@ -351,7 +357,123 @@ export async function runAcpTurn(options) {
     // Same events Pi logs, so the live status reads "Thinking" / "Writing a reply".
     on.log(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: kind } }));
   };
+  /** Each tool call by id: what the agent has sent so far, and whether its result is logged. */
   const tools = new Map();
+  /** A call is logged again as it is refined, but only this often before it is finished. */
+  const MAX_CALL_LINES = 6;
+  const MAX_UNIDENTIFIED = 50;
+  let unidentified = 0;
+  /** What the agent sends is not trusted to have the shape the protocol gives it. */
+  const guarded = (read, fallback) => {
+    try {
+      return read();
+    } catch {
+      return fallback;
+    }
+  };
+  /**
+   * Log a tool call, and its result once it has one. A call is logged again when later updates
+   * say more about it (Claude Code first names a tool before its input has streamed in), and
+   * the Activity pane folds the repeats into one step. The first sight of an id is its call,
+   * whichever update brought it, and it may already be completed.
+   */
+  const handleTool = (update) => {
+    const id = typeof update.toolCallId === "string" ? clip(update.toolCallId, 120) : "";
+    const known = id ? tools.get(id) : undefined;
+    if (known?.settled) {
+      logLateChange(known, update, id);
+      return;
+    }
+    // Nothing ties updates with no id together, so each stands alone; a turn only gets so many.
+    if (!id && ++unidentified > MAX_UNIDENTIFIED) return;
+    if (!known) {
+      flush();
+      lastRun = "";
+    }
+    const entry = {
+      call: mergeToolCall(known?.call ?? {}, update),
+      // A call keeps the name it was first logged with, so its lines stay one step.
+      name: known?.name,
+      logged: known?.logged,
+      lines: known?.lines ?? 0,
+      hooked: known?.hooked || changeReport(update) !== undefined,
+      settled: false,
+    };
+    entry.name ??= clip(toolNameOf(entry.call), 80);
+    const { call } = entry;
+    const failed = call.status === "failed";
+    const finished = failed || call.status === "completed";
+    const line = JSON.stringify({
+      type: "tool_call",
+      ...(id ? { callId: id } : {}),
+      toolName: entry.name,
+      ...(TOOL_KINDS.has(call.kind) ? { kind: call.kind } : {}),
+      ...(call.title ? { title: clip(call.title, 160) } : {}),
+      input: guarded(() => compactInput(call), {}),
+    });
+    // An agent that streams a command or a path as it types would otherwise write a line for
+    // every keystroke. Past a few, only the finished call is logged.
+    if (line !== entry.logged && (entry.lines < MAX_CALL_LINES || finished)) {
+      on.log(line);
+      entry.logged = line;
+      entry.lines++;
+    }
+    if (finished) {
+      const fields = guarded(() => toolResultFields(call, failed), {});
+      // Claude Code shows a Write as a new file until its PostToolUse report gives the real
+      // diff, which comes after the completed status. Counts taken from that guess would call a
+      // rewritten file all additions, so they wait for the report (see logLateChange).
+      const awaiting = !failed && !entry.hooked && awaitsChangeReport(call);
+      const guessed = awaiting && guarded(() => claimsCreation(call), true);
+      const { additions, deletions, ...rest } = fields;
+      on.log(
+        JSON.stringify({
+          type: "tool_result",
+          ...(id ? { callId: id } : {}),
+          toolName: entry.name,
+          ...(TOOL_KINDS.has(call.kind) ? { kind: call.kind } : {}),
+          ...(failed ? { isError: true } : {}),
+          ...(guessed ? rest : fields),
+        }),
+      );
+      entry.settled = true;
+      // The call's content and output are not kept once the result is logged.
+      entry.call = {};
+      entry.kind = call.kind;
+      if (awaiting)
+        entry.waiting = {
+          shown: guessed ? {} : { additions, deletions },
+          guess: { additions, deletions, files: fields.files },
+        };
+    }
+    if (id) {
+      tools.set(id, entry);
+      // A turn that runs thousands of tools forgets the oldest rather than grow.
+      if (tools.size > 10_000) tools.delete(tools.keys().next().value);
+    }
+  };
+  /**
+   * A change Claude Code reported after its result: the real diff. When it moves the line
+   * counts, the result is logged again with the counts, and the Activity pane takes the later
+   * result's fields over the earlier one's.
+   */
+  const logLateChange = (entry, update, id) => {
+    const report = entry.waiting ? changeReport(update) : undefined;
+    if (!report) return;
+    const fields = guarded(() => lateResultFields(entry.waiting, update, report), undefined);
+    entry.waiting = undefined;
+    if (fields)
+      on.log(
+        JSON.stringify({
+          type: "tool_result",
+          callId: id,
+          toolName: entry.name,
+          ...(TOOL_KINDS.has(entry.kind) ? { kind: entry.kind } : {}),
+          amends: true,
+          ...fields,
+        }),
+      );
+  };
 
   const handleUpdate = (update) => {
     switch (update?.sessionUpdate) {
@@ -364,42 +486,22 @@ export async function runAcpTurn(options) {
       case "agent_thought_chunk":
         run("thinking");
         return;
-      case "tool_call": {
-        flush();
-        lastRun = "";
-        tools.set(update.toolCallId, update);
-        on.log(
-          JSON.stringify({
-            type: "tool_call",
-            toolName: toolNameOf(update),
-            input: compactInput(update),
-          }),
-        );
+      case "tool_call":
+      case "tool_call_update":
+        handleTool(update);
         return;
-      }
-      case "tool_call_update": {
-        const known = { ...tools.get(update.toolCallId), ...update };
-        tools.set(update.toolCallId, known);
-        if (update.status === "completed" || update.status === "failed")
-          on.log(
-            JSON.stringify({
-              type: "tool_result",
-              toolName: toolNameOf(known),
-              ...(update.status === "failed" ? { isError: true } : {}),
-            }),
-          );
-        return;
-      }
       case "plan":
         flush();
         lastRun = "";
         on.log(
           JSON.stringify({
             type: "plan",
-            entries: (update.entries ?? []).slice(0, 20).map((entry) => ({
-              content: clip(entry?.content, 160),
-              status: entry?.status,
-            })),
+            entries: (Array.isArray(update.entries) ? update.entries : [])
+              .slice(0, 20)
+              .map((entry) => ({
+                content: clip(entry?.content, 160),
+                status: entry?.status,
+              })),
           }),
         );
         return;
@@ -445,7 +547,16 @@ export async function runAcpTurn(options) {
     onNotification(method, params) {
       if (method !== "session/update" || replaying || !sessionId) return;
       if (params?.sessionId !== sessionId) return;
-      handleUpdate(params.update);
+      // A notification that throws would take the process down with it; an update ADE cannot
+      // read is skipped, because a turn is worth more than one line of its activity.
+      try {
+        handleUpdate(params.update);
+      } catch {
+        if (!skippedUpdate) {
+          skippedUpdate = true;
+          on.log(`${name} sent an activity update ADE could not read; it was skipped.`);
+        }
+      }
     },
     async onRequest(method, params) {
       // Not gated on sessionId: an unanswerable request makes the agent deny

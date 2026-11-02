@@ -117,7 +117,12 @@ export function ActivityPanel({ session }: { session: Session }) {
         <section>
           <h2 className="label-mono">Logs</h2>
           <div className="mt-2">
-            <ActivityLogs lines={session.logs} />
+            <ActivityLogs
+              lines={session.logs}
+              live={session.status === "working" || session.status === "verifying"}
+              // The same words as the status line above the conversation.
+              {...(session.status === "verifying" ? { activity: "Running checks" } : {})}
+            />
           </div>
         </section>
       </div>
