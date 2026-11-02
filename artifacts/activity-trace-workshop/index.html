@@ -1,0 +1,1329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Activity pane · Logs · ADE design workshop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* ==========================================================================
+   Workshop chrome (outside the mock). Host theme variables with fallbacks.
+   ========================================================================== */
+:root {
+  --ws-bg-fb: #f6f3ec; --ws-fg-fb: #201e19; --ws-border-fb: #d9d3c4;
+  --ws-muted-fb: #625d51; --ws-accent-fb: #e6a748; --ws-accent-fg-fb: #1d1a14;
+  --ws-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ws-display: "Geist", "Inter", system-ui, sans-serif;
+  --ws-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Spring easings are regenerated from beUI's spring constants by the script when linear() is supported. */
+  --ws-sl: cubic-bezier(.16, 1, .3, 1); --ws-sl-ms: 340ms;
+  --ws-sw: cubic-bezier(.16, 1, .3, 1); --ws-sw-ms: 260ms;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ws-bg-fb: #171612; --ws-fg-fb: #efece3; --ws-border-fb: #38352d;
+    --ws-muted-fb: #a8a393; --ws-accent-fb: #e0a043; --ws-accent-fg-fb: #1b1812;
+  }
+}
+:root {
+  --ws-bg: var(--background, var(--ws-bg-fb));
+  --ws-fg: var(--foreground, var(--ws-fg-fb));
+  --ws-border: var(--border, var(--ws-border-fb));
+  --ws-muted: var(--muted-foreground, var(--ws-muted-fb));
+  --ws-accent: var(--accent, var(--ws-accent-fb));
+  --ws-accent-fg: var(--accent-foreground, var(--ws-accent-fg-fb));
+  --ws-surface: color-mix(in oklab, var(--ws-fg) 4%, var(--ws-bg));
+  --ws-stage: color-mix(in oklab, var(--ws-fg) 8%, var(--ws-bg));
+}
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--ws-bg); color: var(--ws-fg);
+  font: 400 14px/1.5 var(--ws-sans); -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+h1, h2, h3, h4 { font-family: var(--ws-display); font-weight: 500; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 28px 20px 64px; }
+.eyebrow { font: 500 11px/1.4 var(--ws-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ws-muted); }
+.muted { color: var(--ws-muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+:focus-visible { outline: 2px solid var(--ws-fg); outline-offset: 2px; }
+.masthead { display: grid; gap: 10px; padding-bottom: 20px; border-bottom: 1px solid var(--ws-border); }
+.masthead h1 { font-size: clamp(26px, 4vw, 38px); line-height: 1.08; }
+.masthead .lede { max-width: 72ch; color: var(--ws-muted); }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; min-height: 32px;
+  font: 500 13px/1.2 var(--ws-sans); color: var(--ws-fg); text-decoration: none;
+  background: transparent; border: 1px solid var(--ws-border); border-radius: 9px; cursor: pointer;
+}
+.btn:hover { background: var(--ws-stage); }
+.btn[aria-pressed="true"] { background: var(--ws-accent); color: var(--ws-accent-fg); border-color: transparent; }
+.btn[aria-disabled="true"] { opacity: .65; cursor: default; }
+.btn svg { width: 14px; height: 14px; flex: none; }
+.seg { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.ctl { display: grid; gap: 4px; align-content: start; }
+.ctl-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.panel { border: 1px solid var(--ws-border); border-radius: 14px; background: var(--ws-surface); padding: 16px 18px; }
+.grid-2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.panel h3 { font-size: 15px; margin-bottom: 8px; }
+.panel ul, .panel ol { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ws-fg); }
+.panel li { padding-left: 2px; }
+.panel li::marker { color: var(--ws-muted); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-end; margin: 20px 0 8px; }
+
+/* Overview */
+.intro-grid { display: grid; gap: 16px; margin-top: 20px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); }
+.ov-grid { display: grid; gap: 16px; margin-top: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+.ov-card { min-width: 0; display: grid; gap: 10px; align-content: start; border: 1px solid var(--ws-border); border-radius: 16px; padding: 10px; background: var(--ws-surface); }
+.ov-card:hover { border-color: color-mix(in oklab, var(--ws-fg) 35%, var(--ws-border)); }
+.thumb-link { display: block; text-decoration: none; border-radius: 10px; }
+.thumb-frame { position: relative; overflow: hidden; border-radius: 10px; background: var(--ws-stage); pointer-events: none; }
+.thumb-scale { position: absolute; left: 0; top: 0; width: 360px; transform-origin: 0 0; }
+.ov-meta { display: grid; gap: 6px; padding: 2px 4px 4px; }
+.ov-title { display: flex; align-items: center; gap: 8px; }
+.num { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--ws-fg); color: var(--ws-bg); font: 500 12px/1 var(--ws-mono); flex: none; }
+.ov-title h3 { font-size: 16px; }
+.ov-trade { font-size: 13px; color: var(--ws-muted); }
+.ov-trade b { color: var(--ws-fg); font-weight: 600; }
+.data-table { width: 100%; border-collapse: collapse; font: 400 12px/1.4 var(--ws-mono); }
+.data-table th, .data-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--ws-border); vertical-align: top; }
+.data-table th { color: var(--ws-muted); font-weight: 500; }
+.data-wrap { overflow-x: auto; margin-top: 10px; }
+.tag { display: inline-block; padding: 0 6px; border-radius: 6px; border: 1px solid var(--ws-border); font-size: 11px; }
+.tag.real { background: var(--ws-accent); color: var(--ws-accent-fg); border-color: transparent; }
+details.panel > summary { cursor: pointer; font: 500 14px var(--ws-display); }
+
+/* Expanded view */
+.view-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.view-nav .seg { gap: 6px; }
+.view-head { display: grid; gap: 8px; margin-bottom: 4px; }
+.view-head h2 { font-size: clamp(24px, 3.4vw, 32px); display: flex; gap: 12px; align-items: center; }
+.view-head h2:focus { outline: none; }
+.view-head h2:focus-visible { outline: 2px solid var(--ws-fg); outline-offset: 4px; border-radius: 6px; }
+.view-head .lede { max-width: 76ch; color: var(--ws-muted); }
+.tradeoff { max-width: 76ch; padding: 10px 14px; border-left: 3px solid var(--ws-accent); background: var(--ws-surface); border-radius: 0 10px 10px 0; }
+.tradeoff b { font-weight: 600; }
+.sim-note { font: 400 12px/1.4 var(--ws-mono); color: var(--ws-muted); min-height: 17px; }
+.stage { display: grid; grid-template-columns: 392px minmax(0, 1fr); gap: 24px; align-items: start; margin-top: 12px; }
+@media (max-width: 1120px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+.stage-col { display: grid; gap: 10px; min-width: 0; }
+.stage-box { border: 1px solid var(--ws-border); border-radius: 16px; background: var(--ws-stage); padding: 14px; min-width: 0; }
+.chat-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ws-muted); }
+.chat-pill { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border: 1px dashed var(--ws-border); border-radius: 999px; color: var(--ws-fg); background: var(--ws-surface); }
+.chat-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ws-muted); }
+.closeup-scroll { overflow-x: auto; }
+.caption { font-size: 12px; color: var(--ws-muted); }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.stack > .ade-mock.cu { justify-self: start; }
+.notes { margin-top: 20px; }
+.hint { font-size: 12px; color: var(--ws-muted); max-width: 90ch; }
+
+/* ==========================================================================
+   The mock: ADE's fixed palette, scoped under .ade-mock (src/styles.css tokens).
+   ========================================================================== */
+.ade-mock {
+  --ink: oklch(0.18 0.006 70); --paper: oklch(0.945 0.02 90); --panel: oklch(0.977 0.01 90);
+  --amber: oklch(0.69 0.15 65); --amber-deep: oklch(0.55 0.13 65);
+  --teal: oklch(0.47 0.07 190); --teal-deep: oklch(0.38 0.06 190);
+  --line: oklch(0.86 0.03 85); --dim: oklch(0.59 0.03 85); --danger: oklch(0.55 0.18 28);
+  --surface: var(--panel); --surface-muted: oklch(0.92 0.02 88); --text-secondary: oklch(0.43 0.025 80);
+  --accent-foreground: oklch(0.18 0.006 70);
+  /* Diff colours are not ADE tokens yet; beUI uses emerald/rose. */
+  --add: oklch(0.52 0.12 155); --del: oklch(0.55 0.18 15);
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Geist", "Inter", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --speed: 1;
+  position: relative; width: min(100%, 360px); color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+  font: 400 14px/1.4 var(--sans); text-align: left;
+}
+.ade-mock[data-theme="dark"] {
+  --ink: oklch(0.95 0.012 90); --paper: oklch(0.19 0.006 75); --panel: oklch(0.215 0.007 75);
+  --amber: oklch(0.77 0.15 70); --amber-deep: oklch(0.85 0.11 78);
+  --teal: oklch(0.75 0.09 185); --teal-deep: oklch(0.84 0.07 185);
+  --line: oklch(0.3 0.012 80); --dim: oklch(0.65 0.022 85); --danger: oklch(0.72 0.17 28);
+  --surface-muted: oklch(0.26 0.009 75); --text-secondary: oklch(0.78 0.016 85);
+  --accent-foreground: oklch(0.18 0.006 70);
+  --add: oklch(0.78 0.15 155); --del: oklch(0.74 0.16 15);
+}
+.ade-mock *, .ade-mock *::before, .ade-mock *::after { box-sizing: border-box; }
+.ade-mock button { font: inherit; color: inherit; }
+.ade-mock :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.ade-mock .ic { width: 16px; height: 16px; flex: none; display: block; }
+.ade-mock ul, .ade-mock ol { list-style: none; margin: 0; padding: 0; }
+.ade-mock p { margin: 0; }
+.ade-mock h2 { margin: 0; font-weight: 400; }
+.ade-mock .label-mono { font: 400 12px/1.4 var(--mono); color: var(--dim); }
+.ade-mock .mt8 { margin-top: 8px; }
+
+/* Pane chrome (ActivityPanel.tsx) */
+.ade-mock .pane-scroll { max-height: 720px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ade-mock[data-compact="true"] .pane-scroll { height: 330px; max-height: 330px; overflow: hidden; }
+.ade-mock .pane-body { display: grid; gap: 24px; padding: 16px; }
+.ade-mock .pane-body, .ade-mock .bu-list, .ade-mock .lg-list, .ade-mock .rl, .ade-mock .rl-turn, .ade-mock .rl-steps, .ade-mock .oc-list, .ade-mock .oc-card,
+.ade-mock .oc-sec, .ade-mock .oc-items, .ade-mock .bu-content, .ade-mock .oc-trace, .ade-mock .oc-problem, .ade-mock .cu-zoom { grid-template-columns: minmax(0, 1fr); }
+.ade-mock .pane-body > section { min-width: 0; }
+.ade-mock .row-between { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.ade-mock .dim12 { font-size: 12px; color: var(--dim); }
+.ade-mock .card-panel { border: 1px solid var(--line); background: var(--surface); border-radius: 26px; }
+.ade-mock details.ctx { margin-top: 8px; padding: 12px 16px; font-size: 12px; }
+.ade-mock details.ctx summary { cursor: pointer; user-select: none; }
+.ade-mock details.ctx dl { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px 12px; margin: 12px 0 0; overflow-wrap: anywhere; }
+.ade-mock details.ctx dt { color: var(--dim); } .ade-mock details.ctx dd { margin: 0; }
+.ade-mock .btn-amber {
+  border: 0; border-radius: 18px; background: var(--amber); color: var(--accent-foreground);
+  font-weight: 500; font-size: 12px; padding: 6px 12px; cursor: default;
+}
+.ade-mock .logs h2:focus { outline: none; }
+
+/* Rows shared by every option (beUI trace row: icon, bold label, mono pill, diff counts) */
+.ade-mock .tr {
+  display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto; align-items: center;
+  column-gap: 10px; min-height: 32px; padding: 2px 6px; border-radius: 8px; font-size: 13px; line-height: 20px;
+}
+.ade-mock .tr-ic { display: grid; place-items: center; width: 16px; height: 16px; color: var(--dim); }
+.ade-mock .tr-label { font-weight: 500; color: var(--ink); white-space: nowrap; }
+.ade-mock .tr-pill, .ade-mock .tr-text {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ade-mock .tr-pill {
+  justify-self: start; max-width: 100%; background: var(--surface-muted); border-radius: 10px;
+  padding: 3px 10px; font: 400 11.5px/16px var(--mono); color: var(--text-secondary);
+}
+.ade-mock .tr-text { color: var(--dim); font-size: 12.5px; }
+.ade-mock .tr-diff { display: flex; gap: 8px; font: 400 11.5px/16px var(--mono); font-variant-numeric: tabular-nums; }
+.ade-mock .tr-diff .add { color: var(--add); } .ade-mock .tr-diff .del { color: var(--del); }
+.ade-mock .tr[data-status="err"] .tr-ic, .ade-mock .tr[data-status="err"] .tr-label { color: var(--danger); }
+.ade-mock .tr[data-status="err"] .tr-pill { background: color-mix(in oklab, var(--danger) 12%, transparent); color: var(--danger); }
+.ade-mock .tr[data-status="running"] .tr-label { color: var(--text-secondary); }
+.ade-mock .spin .ic { animation: ws-spin calc(900ms / var(--speed)) linear infinite; }
+@keyframes ws-spin { to { transform: rotate(360deg); } }
+.ade-mock .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; animation: ws-pulse calc(1.6s / var(--speed)) ease-in-out infinite; }
+@keyframes ws-pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+
+/* Motion: ADE's own rise, and beUI's fade + spring lift */
+@keyframes ws-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.ade-mock .rise { animation: ws-rise calc(480ms / var(--speed)) cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes ws-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ws-lift { from { transform: translateY(6px); } to { transform: none; } }
+.ade-mock .rise-bu {
+  animation: ws-fade calc(180ms / var(--speed)) cubic-bezier(.16, 1, .3, 1) both,
+             ws-lift calc(var(--ws-sl-ms) / var(--speed)) var(--ws-sl) both;
+}
+.ade-mock[data-paused="true"] *, .ade-mock[data-paused="true"] *::before { animation-play-state: paused !important; }
+.ade-mock[data-reduce="true"] *, .ade-mock[data-reduce="true"] *::before, .ade-mock[data-reduce="true"] *::after,
+.ade-mock[data-instant="true"] *, .ade-mock[data-instant="true"] *::before, .ade-mock[data-instant="true"] *::after {
+  animation: none !important; transition: none !important;
+}
+
+/* beUI text shimmer (text-shimmer.ts): 110deg sweep, 200% size, 1.8s */
+.ade-mock .shimmer {
+  display: inline-block; font-weight: 500; color: transparent;
+  background-image: linear-gradient(110deg, var(--dim) 30%, var(--ink) 50%, var(--dim) 70%);
+  background-size: 200% 100%; -webkit-background-clip: text; background-clip: text;
+  animation: ws-shimmer calc(1.8s / var(--speed)) linear infinite;
+}
+@keyframes ws-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.ade-mock[data-reduce="true"] .shimmer, .ade-mock[data-instant="true"] .shimmer { color: var(--dim); background: none; -webkit-background-clip: border-box; background-clip: border-box; }
+
+/* Option 1: Ledger */
+.ade-mock .lg-box { border: 1px solid var(--line); background: var(--paper); border-radius: 12px; padding: 8px; }
+.ade-mock .lg-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 4px 6px; font: 400 12px/1.4 var(--mono); color: var(--dim); }
+.ade-mock .lg-noise-btn { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 2px 4px; border-radius: 6px; color: var(--dim); font: inherit; cursor: pointer; }
+.ade-mock .lg-noise-btn:hover { color: var(--ink); }
+.ade-mock .lg-noise-btn[hidden] { display: none; }
+.ade-mock .lg-noise-btn .ic, .ade-mock .bu-trigger .ic { width: 14px; height: 14px; }
+.ade-mock .chev { transition: transform calc(var(--ws-sw-ms) / var(--speed)) var(--ws-sw); }
+.ade-mock [aria-expanded="true"] > .chev, .ade-mock [aria-expanded="true"] .chev { transform: rotate(180deg); }
+.ade-mock .lg-list { display: grid; gap: 2px; max-height: 420px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ade-mock .lg-list > li.noise { display: none; }
+.ade-mock .lg-list[data-noise="show"] > li.noise { display: flex; align-items: center; gap: 12px; padding: 3px 6px 3px 12px; font-size: 12px; color: var(--dim); }
+.ade-mock .lg-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--dim); }
+.ade-mock .lg-extra:empty { display: none; }
+.ade-mock .lg-res, .ade-mock .lg-text { margin: -3px 6px 6px 32px; font-size: 12px; line-height: 1.4; color: var(--dim); }
+.ade-mock .lg-res { display: flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 11.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ade-mock .lg-res .ic { width: 12px; height: 12px; color: var(--teal); }
+.ade-mock .lg-res.bad { color: var(--danger); white-space: normal; }
+.ade-mock .lg-text { color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ade-mock .lg-empty { font-size: 13px; color: var(--dim); padding: 6px 8px; }
+.ade-mock .lg-list:not(:empty) + .lg-empty { display: none; }
+
+/* Option 2: beUI turn disclosures */
+.ade-mock .bu-list { display: grid; gap: 6px; }
+.ade-mock .bu-status, .ade-mock .bu-trigger { display: flex; align-items: center; height: 28px; min-width: 0; gap: 6px; }
+.ade-mock .bu-status[hidden], .ade-mock .bu-trigger[hidden] { display: none; }
+.ade-mock .bu-trigger { background: none; border: 0; padding: 0 2px; margin: 0 -2px; border-radius: 6px; text-align: left; font-weight: 500; color: var(--dim); cursor: pointer; max-width: 100%; }
+.ade-mock .bu-trigger:hover { color: var(--ink); }
+.ade-mock .bu-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ade-mock .bu-sum .bad { color: var(--danger); }
+.ade-mock .bu-sum .bad .ic { display: inline-block; vertical-align: -2px; width: 14px; height: 14px; margin-right: 3px; }
+.ade-mock .bu-trigger .chev { opacity: .7; }
+.ade-mock .bu-region {
+  overflow: hidden; height: 0; opacity: 0; clip-path: inset(0 0 100% 0); transform: translateY(-4px); transform-origin: top;
+  pointer-events: none;
+  transition: opacity calc(140ms / var(--speed)) cubic-bezier(.16, 1, .3, 1), clip-path calc(140ms / var(--speed)) cubic-bezier(.16, 1, .3, 1), transform calc(140ms / var(--speed)) cubic-bezier(.16, 1, .3, 1);
+}
+.ade-mock .bu-region[data-open="true"] {
+  opacity: 1; clip-path: inset(0 0 0% 0); transform: none; pointer-events: auto;
+  transition-duration: calc(220ms / var(--speed));
+}
+.ade-mock .bu-viewport { overflow-y: hidden; padding-right: 4px; scrollbar-width: none; }
+.ade-mock .bu-viewport[data-scroll="true"] { overflow-y: auto; }
+.ade-mock .bu-viewport::-webkit-scrollbar { display: none; }
+.ade-mock .bu-content { display: grid; gap: 2px; padding: 8px 0; transition: transform calc(var(--ws-sl-ms) / var(--speed)) var(--ws-sl); }
+.ade-mock .bu-row .tr { min-height: 32px; padding-block: 2px; }
+.ade-mock .bu-row .tr-pill { justify-self: stretch; }
+.ade-mock .bu-row .tr-text { grid-column: 3; }
+
+/* Option 3: Rail */
+.ade-mock .rl { position: relative; display: grid; gap: 10px; }
+.ade-mock .rl::before { content: ""; position: absolute; left: 11px; top: 14px; bottom: 14px; width: 2px; background: var(--line); border-radius: 2px; }
+.ade-mock .rl-turn { position: relative; display: grid; gap: 4px; }
+.ade-mock .rl-head { position: relative; display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.ade-mock .rl-node { position: relative; z-index: 1; display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 50%; background: var(--panel); border: 2px solid var(--line); color: var(--dim); }
+.ade-mock .rl-node .ic { width: 12px; height: 12px; stroke-width: 2.6; }
+.ade-mock [data-status="working"] > .rl-head .rl-node { border-color: var(--amber); color: var(--amber-deep); }
+.ade-mock [data-status="done"] > .rl-head .rl-node { border-color: var(--teal); color: var(--teal); }
+.ade-mock [data-status="failed"] > .rl-head .rl-node { border-color: var(--danger); color: var(--danger); }
+.ade-mock .rl-htext { display: grid; min-width: 0; }
+.ade-mock .rl-title { font-weight: 600; font-size: 13px; }
+.ade-mock .rl-sub { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ade-mock [data-status="failed"] > .rl-head .rl-sub { color: var(--danger); }
+.ade-mock .rl-steps { display: grid; gap: 2px; }
+.ade-mock .rl-step { position: relative; padding-left: 34px; }
+.ade-mock .rl-dot { position: absolute; z-index: 1; left: 7px; top: 12px; width: 8px; height: 8px; border-radius: 50%; background: var(--panel); border: 2px solid var(--dim); }
+.ade-mock .rl-step[data-status="running"] .rl-dot { border-color: var(--amber); background: var(--amber); }
+.ade-mock .rl-step[data-status="err"] .rl-dot { border-color: var(--danger); background: var(--danger); }
+.ade-mock .rl-step[data-status="ok"] .rl-dot { border-color: var(--teal); }
+.ade-mock .rl-step .tr { padding-left: 0; }
+.ade-mock .rl-child, .ade-mock .rl-text { position: relative; margin: -2px 0 6px 8px; padding-left: 16px; font-size: 12px; line-height: 1.4; color: var(--dim); }
+.ade-mock .rl-child { display: flex; align-items: center; gap: 5px; }
+.ade-mock .rl-child .ic { width: 12px; height: 12px; color: var(--teal); }
+.ade-mock .rl-child::before { content: ""; position: absolute; left: 0; top: -8px; width: 8px; height: 17px; border-left: 1.5px solid var(--line); border-bottom: 1.5px solid var(--line); border-bottom-left-radius: 6px; }
+.ade-mock .rl-child.bad { color: var(--danger); } .ade-mock .rl-child.bad .ic { color: var(--danger); }
+.ade-mock .rl-text { margin-left: 26px; padding-left: 0; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ade-mock .rl-child[hidden], .ade-mock .rl-text[hidden] { display: none; }
+
+/* Option 4: Outcomes first */
+.ade-mock .oc-list { display: grid; gap: 10px; }
+.ade-mock .oc-card { border: 1px solid var(--line); background: var(--surface); border-radius: 18px; padding: 12px 14px; display: grid; gap: 10px; }
+.ade-mock .oc-card[data-status="failed"] { border-color: color-mix(in oklab, var(--danger) 45%, var(--line)); }
+.ade-mock .oc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ade-mock .oc-chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 500; color: var(--text-secondary); background: var(--surface-muted); }
+.ade-mock .oc-chip .ic { width: 12px; height: 12px; }
+.ade-mock [data-status="done"] .oc-chip { color: var(--teal-deep); background: color-mix(in oklab, var(--teal) 14%, transparent); }
+.ade-mock [data-status="failed"] .oc-chip { color: var(--danger); background: color-mix(in oklab, var(--danger) 13%, transparent); }
+.ade-mock [data-status="working"] .oc-chip { color: var(--amber-deep); background: color-mix(in oklab, var(--amber) 16%, transparent); }
+.ade-mock .oc-sec { display: grid; gap: 2px; }
+.ade-mock .oc-sec[hidden], .ade-mock .oc-also[hidden], .ade-mock .oc-none[hidden], .ade-mock .oc-now[hidden], .ade-mock .oc-trace[hidden] { display: none; }
+.ade-mock .oc-h { font: 500 12px/1.4 var(--sans); color: var(--ink); margin: 0; padding-left: 6px; }
+.ade-mock .oc-items { display: grid; gap: 2px; }
+.ade-mock .oc-res { display: flex; align-items: center; gap: 5px; margin: -2px 6px 4px 32px; font-size: 12px; color: var(--dim); }
+.ade-mock .oc-res .ic { width: 12px; height: 12px; color: var(--teal); }
+.ade-mock .oc-problem { display: grid; gap: 2px; padding: 8px 10px; border-radius: 12px; background: color-mix(in oklab, var(--danger) 10%, transparent); }
+.ade-mock .oc-problem .tr { padding-inline: 0; min-height: 28px; }
+.ade-mock .oc-problem .oc-res { color: var(--danger); margin: -2px 0 2px 26px; }
+.ade-mock .oc-also, .ade-mock .oc-none, .ade-mock .oc-now { font-size: 12px; color: var(--dim); padding-left: 6px; }
+.ade-mock .oc-now { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
+.ade-mock .oc-steps-btn { display: inline-flex; align-items: center; gap: 4px; justify-self: start; background: none; border: 0; border-radius: 8px; padding: 4px 6px; margin-left: 0; font-size: 12px; font-weight: 500; color: var(--text-secondary); cursor: pointer; }
+.ade-mock .oc-steps-btn:hover { color: var(--ink); background: var(--surface-muted); }
+.ade-mock .oc-steps-btn .ic { width: 14px; height: 14px; }
+.ade-mock .oc-trace { border-top: 1px solid var(--line); padding-top: 6px; display: grid; gap: 2px; }
+
+/* Close-ups */
+.ade-mock.cu { display: inline-block; width: auto; max-width: none; }
+.ade-mock .cu-zoom { zoom: 2; width: 300px; padding: 12px 14px; display: grid; gap: 10px; }
+.ade-mock .cu-zoom > .bu-turn { display: block; }
+.ade-mock .cu-zoom .rl { gap: 6px; }
+.ade-mock .cu-zoom .lg-box { padding: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="top">
+  <header class="masthead">
+    <p class="eyebrow">ADE design workshop</p>
+    <h1>Activity pane: Logs</h1>
+    <p class="lede">Four directions for the Logs section of the right-hand Activity pane. Every option renders the same session (three turns, 30 rows run through ADE's own formatter), so what differs is layout and motion, not content. Everything inside a framed pane is a mock: its buttons do nothing and nothing here touches the network.</p>
+  </header>
+  <p class="sr-only" id="sr-status" role="status" aria-live="polite"></p>
+
+  <main>
+  <!-- ============================== Overview ============================== -->
+  <section id="overview" aria-labelledby="ov-h">
+    <div class="intro-grid">
+      <div class="panel">
+        <h3 id="ov-h">What is wrong today</h3>
+        <ul>
+          <li>Routine events take whole rows and say nothing a person can act on: “Session started”, “Turn started”, “Turn completed”, “Step started”, and unknown events like “auto retry end”.</li>
+          <li>Every tool call is followed by a separate “Tool finished” row, so one action costs two rows.</li>
+          <li>Text glyphs (▸ and ⚠) stand in for icons.</li>
+          <li>Every turn lands in one long scroll.</li>
+        </ul>
+        <p class="hint" style="margin-top:10px">The chat already shows a one-line live status (“Reading the project”). Wording here stays plain: no tool names, no JSON.</p>
+      </div>
+      <div class="panel">
+        <h3>How to read the previews</h3>
+        <ul>
+          <li><b>Live</b> streams the run in and holds on the last step. <b>Complete</b> shows the finished run. <b>Error</b> is the same run where the last file read fails.</li>
+          <li><b>Replay</b> plays the arrival again; <b>Pause</b> and speed change only that option; <b>Reset</b> stops everything and shows the finished run with every disclosure back at its default.</li>
+          <li>Theme and Reduce motion apply to every mock. Your system's reduce-motion setting is honoured automatically.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="toolbar" role="group" aria-label="Preview controls">
+      <div class="ctl"><span class="eyebrow" id="ov-theme-l">Theme (mock only)</span>
+        <div class="seg" role="group" aria-labelledby="ov-theme-l">
+          <button type="button" class="btn" data-act="theme:light" aria-pressed="true">ADE light</button>
+          <button type="button" class="btn" data-act="theme:dark" aria-pressed="false">ADE dark</button>
+        </div></div>
+      <div class="ctl"><span class="eyebrow" id="ov-motion-l">Motion</span>
+        <div class="seg" role="group" aria-labelledby="ov-motion-l">
+          <button type="button" class="btn" data-act="reduce" aria-pressed="false">Reduce motion</button>
+          <button type="button" class="btn" data-act="previews-pause">Pause previews</button>
+        </div></div>
+    </div>
+
+    <div class="ov-grid" id="ov-grid"></div>
+
+    <div class="grid-2" style="margin-top:20px">
+      <div class="panel">
+        <h3>Questions to settle</h3>
+        <ol>
+          <li>Should routine events be hidden everywhere? Only Ledger keeps a “show them” escape hatch.</li>
+          <li>Should a failed step always force its turn open, as options 2 and 4 do here?</li>
+          <li>Folding a result into its tool row needs the tool call id, which <code>formatSessionLogs</code> drops today. In this log a <code>find</code> and a <code>read</code> overlap and the read result arrives first, so pairing by position would attach results to the wrong rows.</li>
+        </ol>
+      </div>
+      <div class="panel">
+        <h3>Assumptions baked into every mock</h3>
+        <ul>
+          <li>Tool names become plain verbs: edit → Edited, read → Read, find → Looked for, bash → Ran, dev_server_status → Checked the preview.</li>
+          <li>The +N/−N counts come from the edit result's <code>details.diff</code> in the raw log; the formatter does not expose them yet.</li>
+          <li>Result text is trimmed to a plain phrase (“Replaced 2 blocks”) instead of the agent-facing message.</li>
+          <li>Reads show no result line; their content is noise to a person.</li>
+        </ul>
+      </div>
+    </div>
+
+    <details class="panel" style="margin-top:16px">
+      <summary>Sample data: 30 formatter rows per variant</summary>
+      <p class="hint" style="margin-top:8px" id="data-note"></p>
+      <div class="data-wrap"><table class="data-table" id="data-table"><thead><tr><th>Source</th><th>Log line</th><th>Variant</th><th>Tone</th><th>Title</th><th>Body (from the formatter)</th></tr></thead><tbody></tbody></table></div>
+    </details>
+  </section>
+
+  <!-- ============================== Expanded views are built by script ============================== -->
+  <div id="views"></div>
+  </main>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ========================================================================
+   Data: rows from src/lib/ade/formatLogs.mjs run over the real session log
+   (conversation 7e5e8f2c…) plus rows marked "added" (a plan, a permission, replies, bash steps).
+   ======================================================================== */
+const DATA = {"conversation":"7e5e8f2c","rows":[{"src":"real","n":2,"tone":"info","title":"Session started"},{"src":"real","n":3,"tone":"info","title":"Turn started"},{"src":"added","tone":"info","title":"Updated its plan","body":"Remove the unused import from the Settings page"},{"src":"real","n":15,"tone":"info","title":"auto retry end"},{"src":"real","n":16,"tone":"tool","title":"Used edit","body":"pages/Settings.tsx","call":"c1","tool":"edit"},{"src":"real","n":17,"tone":"output","title":"Tool finished","body":"Successfully replaced 1 block(s) in src/pages/Settings.tsx.","call":"c1","res":"Replaced 1 block","add":1,"del":1},{"src":"added","tone":"info","title":"Agent wrote a reply","body":"Removed the unused EmptyState import from the Settings page."},{"src":"real","n":20,"tone":"info","title":"Turn completed"},{"src":"real","n":323,"tone":"info","title":"Turn started"},{"src":"real","n":318,"tone":"tool","title":"Used read","body":"layout/AppShell.tsx","call":"c2","tool":"read"},{"src":"real","n":319,"tone":"output","title":"Tool finished","body":"} function InferenceStatusCard() { const { active } = useWorkspace(); const { probe, probing } = useProviderProbe(true)…","call":"c2","res":"Read 95 lines"},{"src":"real","n":332,"tone":"tool","title":"Used edit","body":"layout/AppShell.tsx","call":"c3","tool":"edit"},{"src":"real","n":333,"tone":"output","title":"Tool finished","body":"Successfully replaced 2 block(s) in src/components/layout/AppShell.tsx.","call":"c3","res":"Replaced 2 blocks","add":15,"del":2},{"src":"added","tone":"system","title":"Asked for your permission","body":"Run npm run typecheck","call":"p1"},{"src":"added","tone":"system","title":"You allowed","body":"Run npm run typecheck — Allow for this session","call":"p1"},{"src":"added","tone":"tool","title":"Used bash","body":"npm run typecheck","call":"c20","tool":"bash"},{"src":"added","tone":"output","title":"Tool finished","body":"> tsc --noEmit No errors.","call":"c20","res":"No type errors"},{"src":"added","tone":"tool","title":"Used bash","body":"npm test -- AppShell","call":"c21","tool":"bash"},{"src":"added","tone":"output","title":"Tool finished","body":"Test Files 1 passed (1) Tests 4 passed (4)","call":"c21","res":"4 tests passed"},{"src":"added","tone":"info","title":"Agent wrote a reply","body":"Fixed the provider label in the sidebar status card. Type checks and the 4 related tests pass."},{"src":"real","n":336,"tone":"info","title":"Turn completed"},{"src":"real","n":104,"tone":"info","title":"Turn started"},{"src":"real","n":113,"tone":"tool","title":"Used dev_server_status","call":"c6","tool":"dev_server_status"},{"src":"real","n":114,"tone":"output","title":"Tool finished","body":"Dev server running — open http://localhost:42633 with computer_open_url. {\"found\":true,\"status\":\"running\",\"port\":42633,…","call":"c6","res":"Preview is running on port 42633"},{"src":"real","n":67,"tone":"tool","title":"Used find","body":".env*","call":"c7","tool":"find"},{"src":"added","v":"ok","tone":"tool","title":"Used read","body":".env.example","call":"c22","tool":"read"},{"src":"real","n":99,"v":"err","tone":"tool","title":"Used read","body":".env","call":"c9","tool":"read"},{"src":"added","v":"ok","tone":"output","title":"Tool finished","body":"VITE_API_URL=http://localhost:8787 VITE_DEMO_MODE=false","call":"c22","res":"Read 2 lines"},{"src":"real","n":100,"v":"err","tone":"error","title":"read failed","body":"ENOENT: no such file or directory, access '~/Work/spec-flow/.env'","call":"c9","res":"No such file: .env"},{"src":"real","n":70,"tone":"output","title":"Tool finished","body":".env.example","call":"c7","res":"Found 1 file: .env.example"},{"src":"added","v":"ok","tone":"info","title":"Agent wrote a reply","body":"The API address lives in .env.example, so there is nothing to change."},{"src":"added","v":"err","tone":"info","title":"Agent wrote a reply","body":"I couldn't find a .env file in this project. I can create one from .env.example if you want."},{"src":"real","n":117,"tone":"info","title":"Turn completed"}],"realCount":20,"addedCount":13};
+const ICONS = {"chevronDown":"<path d=\"m6 9 6 6 6-6\"/>","chevronLeft":"<path d=\"m15 18-6-6 6-6\"/>","chevronRight":"<path d=\"m9 18 6-6-6-6\"/>","check":"<path d=\"M20 6 9 17l-5-5\"/>","pencil":"<path d=\"M13 21h8\"/><path d=\"m15 5 4 4\"/><path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z\"/>","file":"<path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\"/><path d=\"M14 2v5a1 1 0 0 0 1 1h5\"/><path d=\"M10 9H8\"/><path d=\"M16 13H8\"/><path d=\"M16 17H8\"/>","search":"<path d=\"m21 21-4.34-4.34\"/><circle cx=\"11\" cy=\"11\" r=\"8\"/>","terminal":"<path d=\"m7 11 2-2-2-2\"/><path d=\"M11 13h4\"/><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" ry=\"2\"/>","monitor":"<rect width=\"20\" height=\"14\" x=\"2\" y=\"3\" rx=\"2\"/><line x1=\"8\" x2=\"16\" y1=\"21\" y2=\"21\"/><line x1=\"12\" x2=\"12\" y1=\"17\" y2=\"21\"/>","plan":"<path d=\"M13 5h8\"/><path d=\"M13 12h8\"/><path d=\"M13 19h8\"/><path d=\"m3 17 2 2 4-4\"/><path d=\"m3 7 2 2 4-4\"/>","reply":"<path d=\"M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z\"/>","shield":"<path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\"/><path d=\"m9 12 2 2 4-4\"/>","ask":"<path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\"/><path d=\"M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3\"/><path d=\"M12 17h.01\"/>","alert":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><line x1=\"12\" x2=\"12\" y1=\"8\" y2=\"12\"/><line x1=\"12\" x2=\"12.01\" y1=\"16\" y2=\"16\"/>","spinner":"<path d=\"M21 12a9 9 0 1 1-6.219-8.56\"/>","folderSearch":"<path d=\"M10.7 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v4.1\"/><path d=\"m21 21-1.9-1.9\"/><circle cx=\"17\" cy=\"17\" r=\"3\"/>","filePen":"<path d=\"M14.364 13.634a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506l4.013-4.009a1 1 0 0 0-3.004-3.004z\"/><path d=\"M14.487 7.858A1 1 0 0 1 14 7V2\"/><path d=\"M20 19.645V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l2.516 2.516\"/><path d=\"M8 18h1\"/>","replay":"<path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\"/><path d=\"M3 3v5h5\"/>","pause":"<rect x=\"14\" y=\"3\" width=\"5\" height=\"18\" rx=\"1\"/><rect x=\"5\" y=\"3\" width=\"5\" height=\"18\" rx=\"1\"/>","play":"<path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\"/>","arrowLeft":"<path d=\"m12 19-7-7 7-7\"/><path d=\"M19 12H5\"/>","arrowRight":"<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>","sun":"<circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2\"/><path d=\"M12 20v2\"/><path d=\"m4.93 4.93 1.41 1.41\"/><path d=\"m17.66 17.66 1.41 1.41\"/><path d=\"M2 12h2\"/><path d=\"M20 12h2\"/><path d=\"m6.34 17.66-1.41 1.41\"/><path d=\"m19.07 4.93-1.41 1.41\"/>","moon":"<path d=\"M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401\"/>","circle":"<circle cx=\"12\" cy=\"12\" r=\"10\"/>","dot":"<path d=\"M5 12h14\"/>","eye":"<path d=\"M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>","sparkles":"<path d=\"M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z\"/><path d=\"M20 2v4\"/><path d=\"M22 4h-4\"/><circle cx=\"4\" cy=\"20\" r=\"2\"/>","circleCheck":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/>","x":"<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>"};
+
+const OPTIONS = [
+  { n: 1, name: 'Ledger', short: 'Today’s list, cleaned',
+    tradeoff: 'Smallest change, full history visible, but a long session is still one long scroll.',
+    lede: 'Today’s flat list, tidied. Routine events fold into a hidden count, each tool call and its result share one row, and icons plus mono pills replace the ▸ and ⚠ glyphs.',
+    watch: ['The header counts steps and says how many routine events are hidden; the toggle brings them back in order.', 'Result lines sit under edits, commands and failed steps. Reads stay quiet.', 'The list is a capped scroller that follows new rows only while you are at the bottom, as it does today.'] },
+  { n: 2, name: 'Turn disclosures (beUI)', short: 'One collapsible per turn',
+    tradeoff: 'Compact and closest to beUI, but live history is clipped and the shimmer repeats the chat’s status line.',
+    lede: 'One collapsible per turn, modelled on beUI Agent Activity. While a turn runs it shows a shimmering label over a capped viewport that glides to keep the newest row visible; when it ends it folds into a plain summary with a chevron.',
+    watch: ['The shimmer label says what the chat status line (shown above the mock) already says.', 'The viewport is 208px, beUI’s default. Older rows slide away under the top fade while a turn is live.', 'A turn with a failed step stays open, so a problem is never hidden behind a summary.'] },
+  { n: 3, name: 'Rail', short: 'Vertical timeline',
+    tradeoff: 'Clearest order and cause→effect, but taller per event.',
+    lede: 'A vertical timeline. Each turn is a node on the rail, steps hang off it in order, and a tool’s result sits underneath it as an indented child line, so cause and effect read top to bottom.',
+    watch: ['Every step that has a result gets a child line, including reads.', 'The turn node shows state with an icon and colour: spinner, check, or alert.', 'There is no inner scroller; the pane itself scrolls, so the whole history is one continuous rail.'] },
+  { n: 4, name: 'Outcomes first', short: 'What changed, then the trace',
+    tradeoff: 'Best for non-developers checking results, but the order of steps is hidden until expanded.',
+    lede: 'Each turn leads with what it changed: files with +/− counts, commands and how they went, and any problem. “Show N steps” reveals the order of events underneath.',
+    watch: ['A failed step becomes a Problem block at the top of its card.', 'A turn that only looked around says “No changes”.', 'A live card shows a Now line instead of a shimmer; outcomes appear as results arrive.'] },
+];
+
+/* ======================= helpers ======================= */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const svg = (name, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
+let uidN = 0; const uid = () => 'w' + (++uidN);
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + 's'}`;
+const base = (p) => String(p || '').split('/').pop();
+
+/* beUI spring constants -> CSS linear() easing (analytic step response). */
+function spring(k, c, m) {
+  const w0 = Math.sqrt(k / m), z = c / (2 * Math.sqrt(k * m));
+  const f = (t) => {
+    if (z < 1) { const wd = w0 * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * w0 * t) * (Math.cos(wd * t) + (z * w0 / wd) * Math.sin(wd * t)); }
+    if (z === 1) return 1 - Math.exp(-w0 * t) * (1 + w0 * t);
+    const s = Math.sqrt(z * z - 1), r1 = -w0 * (z - s), r2 = -w0 * (z + s);
+    return 1 - (r2 * Math.exp(r1 * t) - r1 * Math.exp(r2 * t)) / (r2 - r1);
+  };
+  let last = 0;
+  for (let t = 0; t < 3; t += 0.008) if (Math.abs(f(t) - 1) > 0.003) last = t;
+  const dur = Math.min(1.2, last + 0.016), N = Math.min(40, Math.max(6, Math.ceil(dur / 0.016)));
+  const pts = [];
+  for (let i = 0; i <= N; i++) pts.push(+f(dur * i / N).toFixed(4));
+  pts[0] = 0; pts[N] = 1;
+  return { ease: `linear(${pts.join(', ')})`, ms: Math.round(dur * 1000) };
+}
+if (window.CSS && CSS.supports && CSS.supports('transition-timing-function', 'linear(0, 1)')) {
+  const SL = spring(360, 32, 0.6), SW = spring(460, 30, 0.55); // SPRING_LAYOUT, SPRING_SWAP
+  const st = document.documentElement.style;
+  st.setProperty('--ws-sl', SL.ease); st.setProperty('--ws-sl-ms', SL.ms + 'ms');
+  st.setProperty('--ws-sw', SW.ease); st.setProperty('--ws-sw-ms', SW.ms + 'ms');
+}
+
+/* ======================= global app state ======================= */
+const sysReduce = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false, addEventListener() {} };
+const app = { theme: 'light', reduceToggle: false, previewsPaused: false };
+const reduceNow = () => app.reduceToggle || sysReduce.matches;
+const sr = (msg) => { const el = $('#sr-status'); el.textContent = ''; setTimeout(() => { el.textContent = msg; }, 30); };
+
+/* ======================= run model ======================= */
+const TOOL = {
+  edit:    { icon: 'pencil',       done: 'Edited',      ing: 'Editing',      fail: 'Couldn’t edit' },
+  read:    { icon: 'file',         done: 'Read',        ing: 'Reading',      fail: 'Couldn’t read' },
+  find:    { icon: 'folderSearch', done: 'Looked for',  ing: 'Looking for',  fail: 'Couldn’t search' },
+  grep:    { icon: 'search',       done: 'Searched for', ing: 'Searching for', fail: 'Couldn’t search' },
+  run:     { icon: 'terminal',     done: 'Ran',         ing: 'Running',      fail: 'Command failed' },
+  preview: { icon: 'monitor',      done: 'Checked the preview', ing: 'Checking the preview', fail: 'Couldn’t check the preview' },
+  tool:    { icon: 'sparkles',     done: 'Used a tool', ing: 'Working',      fail: 'Tool failed' },
+};
+function toolKind(tool) {
+  const t = String(tool || '').toLowerCase();
+  if (/^(edit|write|apply_patch|str_replace)/.test(t)) return 'edit';
+  if (/^(read|view|cat)/.test(t)) return 'read';
+  if (/^(find|glob|ls|list)/.test(t)) return 'find';
+  if (/^(grep|rg|search)/.test(t)) return 'grep';
+  if (/^(bash|shell|exec)/.test(t)) return 'run';
+  if (/^dev_server_/.test(t)) return 'preview';
+  return 'tool';
+}
+/* Same phrases as phraseForActivity in formatLogs.mjs, for the live label. */
+function phraseFor(step) {
+  switch (step.kind) {
+    case 'edit': return 'Updating ' + base(step.target);
+    case 'read': case 'find': case 'grep': return 'Reading the project';
+    case 'run': return 'Running a check';
+    case 'preview': return 'Checking the preview';
+    case 'plan': return 'Planning the work';
+    case 'reply': return 'Writing a reply';
+    case 'perm': return 'Waiting for your answer';
+    default: return 'Working';
+  }
+}
+const isSearch = (k) => k === 'find' || k === 'grep';
+
+class Run {
+  constructor() { this.reset(); }
+  reset() { this.turns = []; this.cur = null; this.calls = new Map(); this.phrase = 'Starting'; this.seq = 0; }
+  apply(row) {
+    const t = row.title;
+    if (t === 'Turn started') {
+      const turn = { i: this.turns.length, n: this.turns.length + 1, steps: [], status: 'working' };
+      this.turns.push(turn); this.cur = turn; this.phrase = 'Starting';
+      return { k: 'turnStart', turn, title: t };
+    }
+    if (t === 'Turn completed') {
+      this.cur.status = 'done';
+      return { k: 'turnEnd', turn: this.cur, title: t };
+    }
+    if (row.tone === 'info' && (t === 'Session started' || t === 'auto retry end')) return { k: 'noise', turn: this.cur, title: t };
+    let step = null;
+    const turn = this.cur;
+    if (t === 'Updated its plan') step = { kind: 'plan', text: row.body };
+    else if (t === 'Agent wrote a reply') step = { kind: 'reply', text: row.body };
+    else if (t === 'Asked for your permission') step = { kind: 'perm', target: row.body, status: 'asked', call: row.call };
+    else if (row.tone === 'tool') step = { kind: toolKind(row.tool), tool: row.tool, target: row.body || '', status: 'running', call: row.call };
+    if (step) {
+      step.id = 's' + (++this.seq); turn.steps.push(step);
+      if (step.call) this.calls.set(step.call, step);
+      this.phrase = phraseFor(step);
+      return { k: 'step', turn, step };
+    }
+    const target = row.call && this.calls.get(row.call);
+    if (target) {
+      if (target.kind === 'perm') { target.status = t === 'You allowed' ? 'allowed' : 'rejected'; this.phrase = 'Still working on the next step'; }
+      else if (row.tone === 'error') { target.status = 'err'; target.res = row.res || row.body; }
+      else { target.status = 'ok'; target.res = row.res; if (row.add != null) target.add = row.add; if (row.del != null) target.del = row.del; }
+      if (target.kind !== 'perm') this.phrase = 'Still working on the next step';
+      return { k: 'update', turn, step: target };
+    }
+    return { k: 'noise', turn, title: t };
+  }
+}
+
+/* Turn timelines. `hold` stops Live on the last step so it can be inspected. */
+function delayFor(row) {
+  const t = row.title;
+  if (t === 'Session started') return 300;
+  if (t === 'auto retry end') return 450;
+  if (t === 'Turn started') return 650;
+  if (t === 'Turn completed') return 800;
+  if (t === 'Updated its plan') return 700;
+  if (t === 'Agent wrote a reply') return 900;
+  if (t === 'Asked for your permission') return 650;
+  if (t === 'You allowed') return 1200;
+  if (row.tone === 'tool') return 600;
+  return 800;
+}
+function timeline(variant, hold) {
+  let rows = DATA.rows.filter((r) => !r.v || r.v === variant);
+  if (hold) {
+    const idx = rows.findIndex((r) => r.tone === 'tool' && r.call === 'c22');
+    rows = rows.slice(0, idx + 1);
+  }
+  return rows.map((row, i) => {
+    let d = delayFor(row);
+    if (i > 0 && (row.tone === 'output' || row.tone === 'error') && (rows[i - 1].tone === 'output' || rows[i - 1].tone === 'error')) d = 450;
+    return { row, d };
+  });
+}
+
+/* Reference runs used for close-ups. */
+function fullRun(variant) { const r = new Run(); DATA.rows.filter((x) => !x.v || x.v === variant).forEach((x) => r.apply(x)); return r; }
+const REF = { ok: fullRun('ok'), err: fullRun('err') };
+const SAMPLE = {
+  edit: REF.ok.turns[0].steps.find((s) => s.kind === 'edit'),
+  editBig: REF.ok.turns[1].steps.find((s) => s.kind === 'edit'),
+  fail: REF.err.turns[2].steps.find((s) => s.status === 'err'),
+  turnDone: REF.ok.turns[1], turnFail: REF.err.turns[2], turnOne: REF.ok.turns[0],
+};
+
+/* Plain summary of a turn: "Edited 1 file · ran 2 commands". */
+function summarize(turn) {
+  const c = { edit: new Set(), run: 0, read: 0, search: 0, preview: 0, fail: 0 };
+  for (const s of turn.steps) {
+    if (s.status === 'err') { c.fail++; continue; }
+    if (s.kind === 'edit') c.edit.add(s.target);
+    else if (s.kind === 'run') c.run++;
+    else if (s.kind === 'read') c.read++;
+    else if (isSearch(s.kind)) c.search++;
+    else if (s.kind === 'preview') c.preview++;
+  }
+  const parts = [];
+  if (c.fail) parts.push({ t: plural(c.fail, 'step') + ' failed', bad: true });
+  if (c.edit.size) parts.push({ t: 'edited ' + plural(c.edit.size, 'file') });
+  if (c.run) parts.push({ t: 'ran ' + plural(c.run, 'command') });
+  if (c.read) parts.push({ t: 'read ' + plural(c.read, 'file') });
+  if (c.search) parts.push({ t: 'searched the project' });
+  if (c.preview) parts.push({ t: 'checked the preview' });
+  if (!parts.length) parts.push({ t: turn.steps.some((s) => s.kind === 'reply') ? 'wrote a reply' : 'no steps yet' });
+  const shown = parts.slice(0, 3);
+  shown.forEach((p, i) => { if (!p.bad && i === 0) p.t = p.t.charAt(0).toUpperCase() + p.t.slice(1); });
+  return { parts: shown, text: shown.map((p) => p.t).join(' · '), failed: c.fail };
+}
+function summaryHTML(turn) {
+  const s = summarize(turn);
+  return s.parts.map((p) => p.bad ? `<span class="bad">${svg('alert')}${esc(p.t)}</span>` : esc(p.t)).join(' · ');
+}
+
+/* ======================= row builders ======================= */
+function labelFor(step) {
+  if (step.kind === 'plan') return 'Updated the plan';
+  if (step.kind === 'reply') return 'Replied';
+  if (step.kind === 'perm') return step.status === 'asked' ? 'Asked permission' : step.status === 'allowed' ? 'You allowed' : 'You declined';
+  const d = TOOL[step.kind] || TOOL.tool;
+  return step.status === 'running' ? d.ing : step.status === 'err' ? d.fail : d.done;
+}
+function iconFor(step) {
+  if (step.status === 'running') return 'spinner';
+  if (step.status === 'err') return 'alert';
+  if (step.kind === 'plan') return 'plan';
+  if (step.kind === 'reply') return 'reply';
+  if (step.kind === 'perm') return step.status === 'asked' ? 'ask' : 'shield';
+  return (TOOL[step.kind] || TOOL.tool).icon;
+}
+/* text: 'inline' puts reply/plan text in the row; 'below' leaves room for the wrapper to add it. */
+function fillRow(el, step, o = {}) {
+  el.dataset.status = step.status || '';
+  el.dataset.kind = step.kind;
+  const long = step.kind === 'plan' || step.kind === 'reply';
+  const running = step.status === 'running';
+  let mid = '';
+  if (long) mid = o.text === 'inline' ? `<span class="tr-text" title="${esc(step.text)}">${esc(step.text)}</span>` : '<span></span>';
+  else if (step.target) mid = `<span class="tr-pill" title="${esc(step.target)}">${esc(step.target)}</span>`;
+  else mid = '<span></span>';
+  const diff = step.kind === 'edit' && step.status === 'ok' && (step.add > 0 || step.del > 0)
+    ? `<span class="tr-diff">${step.add > 0 ? `<span class="add">+${step.add}</span>` : ''}${step.del > 0 ? `<span class="del">−${step.del}</span>` : ''}</span>` : '';
+  el.innerHTML = `<span class="tr-ic${running ? ' spin' : ''}">${svg(iconFor(step))}</span><span class="tr-label">${esc(labelFor(step))}</span>${mid}${diff}`;
+}
+function trRow(step, o) { const el = document.createElement('div'); el.className = 'tr'; fillRow(el, step, o); return el; }
+
+/* ======================= mock pane chrome ======================= */
+function buildPane({ compact = false } = {}) {
+  const root = document.createElement('div');
+  root.className = 'ade-mock';
+  root.dataset.theme = app.theme; root.dataset.reduce = String(reduceNow()); root.dataset.paused = 'false'; root.dataset.compact = String(compact);
+  const top = compact ? '' : `
+    <section>
+      <h2 class="label-mono">Agent context</h2>
+      <details class="card-panel ctx">
+        <summary class="label-mono" data-fk="ctx">Agent context · 60 candidate files</summary>
+        <dl><dt>Project</dt><dd>spec-flow · main</dd><dt>Agent</dt><dd>pi</dd><dt>Model</dt><dd>agent default</dd></dl>
+      </details>
+    </section>
+    <section>
+      <div class="row-between">
+        <h2 class="label-mono">Checks (0)</h2>
+        <button type="button" class="btn-amber" data-mock="checks" aria-label="Run project checks (mock button, does nothing)" title="Mock button: does nothing">Run project checks</button>
+      </div>
+      <div class="mt8"><p class="dim12 checks-note"></p></div>
+    </section>`;
+  root.innerHTML = `<aside aria-label="Activity pane (mock)"><div class="pane-scroll"><div class="pane-body">${top}
+    <section class="logs"><h2 class="label-mono" tabindex="-1">Logs</h2><div class="mt8 logs-mount"></div></section></div></div></aside>`;
+  const pane = {
+    root, scroller: $('.pane-scroll', root), mount: $('.logs-mount', root), heading: $('.logs h2', root),
+    setMode(mode) {
+      const note = $('.checks-note', root), btn = $('[data-mock="checks"]', root);
+      if (!note) return;
+      note.textContent = mode === 'live' ? 'Checks are available after this turn finishes and the session is ready to review.' : 'Checks haven’t run yet.';
+      btn.hidden = mode === 'live';
+    },
+    closeCtx() { const d = $('details.ctx', root); if (d) d.open = false; },
+  };
+  return pane;
+}
+
+/* scroll following: stick to the bottom only while the reader is already near it */
+function trackStick(sc) {
+  sc.dataset.stick = 'true';
+  sc.addEventListener('scroll', () => { sc.dataset.stick = String(sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80); }, { passive: true });
+}
+function follow(scrollers) {
+  for (const sc of scrollers) if (sc.dataset.stick !== 'false') sc.scrollTop = sc.scrollHeight;
+}
+
+/* ======================= simulation ======================= */
+class Sim {
+  constructor(pane, factory, { loop = false, onStatus, onPhrase, speed = 1 } = {}) {
+    this.pane = pane; this.root = pane.root; this.run = new Run();
+    this.loop = loop; this.onStatus = onStatus || (() => {}); this.onPhrase = onPhrase || (() => {});
+    this.speed = speed; this.paused = false; this.suspended = false;
+    this.timer = 0; this.remaining = null; this.due = 0; this.events = []; this.idx = 0; this.mode = 'complete';
+    this.pendingFk = null; this.instantTimer = 0;
+    this.root.style.setProperty('--speed', String(speed));
+    trackStick(pane.scroller);
+    const ctx = {
+      sim: this, root: this.root, mount: pane.mount,
+      reduce: () => this.root.dataset.reduce === 'true',
+      scrollers: () => [pane.scroller],
+    };
+    this.ctx = ctx;
+    this.view = factory(pane.mount, ctx);
+  }
+  _clearTimers() { clearTimeout(this.timer); this.timer = 0; this.remaining = null; clearTimeout(this.instantTimer); }
+  play(mode, animate) {
+    const active = document.activeElement;
+    const fk = active && this.root.contains(active) ? active.dataset.fk || null : null;
+    this._clearTimers();
+    this.mode = mode; this.paused = false; this.root.dataset.paused = 'false';
+    this.run.reset(); this.pane.closeCtx(); this.pane.setMode(mode);
+    this.pane.scroller.dataset.stick = 'true'; this.pane.scroller.scrollTop = 0;
+    this.view.reset(mode);
+    this.events = timeline(mode === 'error' ? 'err' : 'ok', mode === 'live');
+    if (this.loop) this.events.push({ loopWait: true, d: 3600 });
+    this.idx = 0; this.pendingFk = fk;
+    this.onPhrase(this.run.phrase);
+    if (!animate) {
+      this.root.dataset.instant = 'true';
+      while (this.idx < this.events.length) { const ev = this.events[this.idx++]; if (!ev.loopWait) this._apply(ev, false); }
+      this._finish();
+      this.instantTimer = setTimeout(() => requestAnimationFrame(() => { this.root.dataset.instant = 'false'; }), 30);
+      return;
+    }
+    this.root.dataset.instant = 'false';
+    this.onStatus(`Streaming · event 0 of ${this.total()}`);
+    this._next();
+  }
+  total() { return this.events.filter((e) => !e.loopWait).length; }
+  _apply(ev, animate) {
+    const ch = this.run.apply(ev.row);
+    this.view.onChange(ch, animate);
+    this.onPhrase(this.run.phrase);
+    this._restoreFocus(false);
+  }
+  _restoreFocus(final) {
+    if (!this.pendingFk) return;
+    const el = this.root.querySelector(`[data-fk="${this.pendingFk}"]`);
+    if (el && el.offsetParent !== null) { el.focus({ preventScroll: true }); this.pendingFk = null; }
+    else if (final) { this.pendingFk = null; this.pane.heading.focus({ preventScroll: true }); }
+  }
+  _next() {
+    if (this.paused || this.suspended || this.timer) return;
+    if (this.idx >= this.events.length) { this._finish(); return; }
+    const ev = this.events[this.idx];
+    const wait = this.remaining != null ? this.remaining : ev.d / this.speed;
+    this.remaining = null; this.due = performance.now() + wait;
+    this.timer = setTimeout(() => {
+      this.timer = 0;
+      this.idx++;
+      if (ev.loopWait) { this.play(this.mode, !reduceNow()); return; }
+      this._apply(ev, true);
+      this.onStatus(`Streaming · event ${this.idx} of ${this.total()}`);
+      this._next();
+    }, wait);
+  }
+  _finish() {
+    this.view.onFinish(this.mode);
+    this._restoreFocus(true);
+    const m = { live: 'Live: holding on the last step (the final turn never finishes here; pick Complete to see the finish).', complete: 'Complete: the run has finished.', error: 'Error: the run finished with a failed step.' };
+    this.onStatus(m[this.mode]);
+    if (this.mode !== 'live') this.onPhrase('Idle, the turn has finished');
+  }
+  _halt() { if (this.timer) { clearTimeout(this.timer); this.timer = 0; this.remaining = Math.max(0, this.due - performance.now()); } }
+  pause() { this.paused = true; this.root.dataset.paused = 'true'; this._halt(); this.onStatus(`Paused at event ${this.idx} of ${this.total()}`); }
+  resume() { this.paused = false; this.root.dataset.paused = 'false'; this.onStatus(`Streaming · event ${this.idx} of ${this.total()}`); this._next(); }
+  suspend() { this.suspended = true; this._halt(); }
+  wake() { if (!this.suspended) return; this.suspended = false; if (!this.paused) this._next(); this.view.relayout && this.view.relayout(); }
+  setSpeed(s) {
+    const old = this.speed; if (s === old) return;
+    const running = !!this.timer;
+    if (running) this._halt();
+    this.speed = s; this.root.style.setProperty('--speed', String(s));
+    if (this.remaining != null) this.remaining *= old / s;
+    if (running) this._next();
+  }
+  stop() { this._clearTimers(); }
+}
+
+/* ======================= Option 1: Ledger ======================= */
+const LEDGER_RES = new Set(['edit', 'run', 'find', 'preview']);
+function ledgerFill(li, step) {
+  fillRow($('.tr', li), step, { text: 'below' });
+  const ex = $('.lg-extra', li);
+  let h = '';
+  if ((step.kind === 'plan' || step.kind === 'reply') && step.text) h = `<p class="lg-text">${esc(step.text)}</p>`;
+  else if (step.status === 'err') h = `<p class="lg-res bad">${esc(step.res)}</p>`;
+  else if (step.status === 'ok' && step.res && LEDGER_RES.has(step.kind)) h = `<p class="lg-res">${svg('check')}${esc(step.res)}</p>`;
+  ex.innerHTML = h;
+}
+function ledgerItem(step) {
+  const li = document.createElement('li'); li.className = 'lg-item';
+  li.innerHTML = '<div class="tr"></div><div class="lg-extra"></div>';
+  ledgerFill(li, step); return li;
+}
+function makeLedger(mount, ctx) {
+  const id = uid();
+  mount.innerHTML = `<div class="lg-box"><div class="lg-head"><span class="lg-count"></span>
+    <button type="button" class="lg-noise-btn" data-fk="noise" aria-expanded="false" aria-controls="${id}"><span class="lg-noise-label"></span>${svg('chevronDown', 'chev')}</button></div>
+    <ul class="lg-list" id="${id}" role="list" data-noise="hide"></ul><p class="lg-empty">No activity events yet.</p></div>`;
+  const list = $('.lg-list', mount), btn = $('.lg-noise-btn', mount), count = $('.lg-count', mount), label = $('.lg-noise-label', mount);
+  const steps = new Map(); let noiseN = 0, open = false;
+  trackStick(list);
+  ctx.scrollers = () => [list, ctx.sim.pane.scroller];
+  const head = () => {
+    count.textContent = steps.size ? plural(steps.size, 'step') : 'No steps yet';
+    btn.hidden = noiseN === 0;
+    label.textContent = open ? `Showing ${plural(noiseN, 'routine event')}` : `${plural(noiseN, 'routine event')} hidden`;
+    btn.setAttribute('aria-expanded', String(open));
+    list.dataset.noise = open ? 'show' : 'hide';
+  };
+  btn.addEventListener('click', () => { open = !open; head(); });
+  const fol = () => follow(ctx.scrollers());
+  head();
+  return {
+    reset() { list.innerHTML = ''; steps.clear(); noiseN = 0; open = false; list.dataset.stick = 'true'; list.scrollTop = 0; head(); },
+    onChange(ch, animate) {
+      const fx = animate && !ctx.reduce();
+      if (ch.k === 'noise' || ch.k === 'turnStart' || ch.k === 'turnEnd') {
+        const li = document.createElement('li'); li.className = 'lg-item noise';
+        li.innerHTML = `<span class="lg-dot"></span>${esc(ch.title)}`;
+        list.append(li); noiseN++; head();
+      } else if (ch.k === 'step') {
+        const li = ledgerItem(ch.step); if (fx) li.classList.add('rise');
+        list.append(li); steps.set(ch.step.id, li); head();
+      } else if (ch.k === 'update') {
+        ledgerFill(steps.get(ch.step.id), ch.step);
+      }
+      fol();
+    },
+    onFinish() { fol(); },
+    relayout() {},
+    closeups(mode) {
+      const step = mode === 'error' ? SAMPLE.fail : SAMPLE.edit;
+      const row = document.createElement('ul'); row.className = 'lg-list'; row.append(ledgerItem(step));
+      const box = document.createElement('div'); box.className = 'lg-box';
+      const stepN = REF.ok.turns.reduce((a, t) => a + t.steps.length, 0);
+      const noiseN = DATA.rows.filter((r) => r.tone === 'info' && ['Session started', 'Turn started', 'Turn completed', 'auto retry end'].includes(r.title)).length;
+      box.innerHTML = `<div class="lg-head"><span>${plural(stepN, 'step')}</span><span class="lg-noise-btn">${plural(noiseN, 'routine event')} hidden${svg('chevronDown', 'chev')}</span></div>`;
+      const rowBox = document.createElement('div'); rowBox.className = 'lg-box'; rowBox.append(row);
+      return [
+        { caption: mode === 'error' ? 'A failed row: the result folds in and stays visible' : 'One row: icon, label, mono pill, diff counts, folded result', el: rowBox },
+        { caption: 'The list header: step count and the hidden-events toggle', el: box },
+      ];
+    },
+  };
+}
+
+/* ======================= Option 2: beUI turn disclosures ======================= */
+const BU_MAXH = 208;
+function makeBeui(mount, ctx) {
+  mount.innerHTML = '<div class="bu-list"></div>';
+  const listEl = $('.bu-list', mount);
+  const turns = new Map();
+  ctx.scrollers = () => [ctx.sim.pane.scroller];
+  const mask = (capped, working) => !capped ? '' : working
+    ? 'linear-gradient(to bottom, transparent, black 12px)'
+    : 'linear-gradient(to bottom, transparent, black 12px, black calc(100% - 12px), transparent)';
+
+  function layout(t) {
+    if (t.closeTimer) return;
+    const working = t.turn.status === 'working';
+    const open = working || t.open;
+    const ch = t.content.offsetHeight;
+    const capped = ch > BU_MAXH;
+    const vpH = working ? BU_MAXH : Math.min(ch, BU_MAXH);
+    const y = working ? Math.min(0, vpH - ch) : 0;
+    t.region.style.height = (open ? vpH : 0) + 'px';
+    t.viewport.style.height = vpH + 'px';
+    const m = mask(capped, working);
+    t.viewport.style.maskImage = m; t.viewport.style.webkitMaskImage = m;
+    t.viewport.dataset.scroll = String(capped && open && !working);
+    t.content.style.transform = `translateY(${y}px)`;
+  }
+  function setOpen(t, open, animate = true) {
+    t.open = open; clearTimeout(t.closeTimer); t.closeTimer = 0;
+    t.btn.setAttribute('aria-expanded', String(open));
+    t.region.dataset.open = String(open);
+    t.region.inert = !open; t.region.setAttribute('aria-hidden', String(!open));
+    if (!open && animate && !ctx.reduce() && ctx.root.dataset.instant !== 'true') {
+      t.closeTimer = setTimeout(() => { t.closeTimer = 0; layout(t); }, 160 / ctx.sim.speed);
+    } else layout(t);
+  }
+  function addTurn(turn) {
+    const id = uid();
+    const el = document.createElement('div'); el.className = 'bu-turn'; el.dataset.state = 'working';
+    el.innerHTML = `<div class="bu-status" role="status"><span class="shimmer">Starting…</span></div>
+      <button type="button" class="bu-trigger" id="${id}-t" aria-expanded="false" aria-controls="${id}-c" data-fk="turn-${turn.n}" hidden><span class="bu-sum"></span>${svg('chevronDown', 'chev')}</button>
+      <div class="bu-region" id="${id}-c" role="region" aria-labelledby="${id}-t" data-open="true"><div class="bu-viewport"><div class="bu-content" role="list"></div></div></div>`;
+    const t = { turn, el, open: false, closeTimer: 0, status: $('.bu-status', el), label: $('.shimmer', el), btn: $('.bu-trigger', el), sum: $('.bu-sum', el), region: $('.bu-region', el), viewport: $('.bu-viewport', el), content: $('.bu-content', el), rows: new Map() };
+    t.ro = new ResizeObserver(() => layout(t)); t.ro.observe(t.content);
+    t.btn.addEventListener('click', () => { setOpen(t, !t.open); if (t.open) requestAnimationFrame(() => { t.viewport.scrollTop = 0; }); });
+    turns.set(turn.i, t); listEl.append(el);
+    layout(t);
+    return t;
+  }
+  const fol = () => follow(ctx.scrollers());
+  return {
+    reset() { turns.forEach((t) => { t.ro.disconnect(); clearTimeout(t.closeTimer); }); turns.clear(); listEl.innerHTML = ''; },
+    onChange(ch, animate) {
+      const fx = animate && !ctx.reduce();
+      if (ch.k === 'noise') return;
+      if (ch.k === 'turnStart') { addTurn(ch.turn); fol(); return; }
+      const t = turns.get(ch.turn.i);
+      if (ch.k === 'step') {
+        const row = document.createElement('div'); row.className = 'bu-row'; row.setAttribute('role', 'listitem');
+        row.append(trRow(ch.step, { text: 'inline' })); if (fx) row.classList.add('rise-bu');
+        t.content.append(row); t.rows.set(ch.step.id, row);
+      } else if (ch.k === 'update') {
+        fillRow($('.tr', t.rows.get(ch.step.id)), ch.step, { text: 'inline' });
+      } else if (ch.k === 'turnEnd') {
+        const s = summarize(ch.turn);
+        t.el.dataset.state = 'done';
+        t.status.hidden = true; t.btn.hidden = false; t.sum.innerHTML = summaryHTML(ch.turn);
+        t.btn.setAttribute('aria-label', `Turn ${ch.turn.n}: ${s.text}`);
+        setOpen(t, s.failed > 0, animate);
+      }
+      if (t.turn.status === 'working') t.label.textContent = ctx.sim.run.phrase + '…';
+      layout(t); fol();
+    },
+    onFinish() { turns.forEach(layout); fol(); },
+    relayout() { turns.forEach(layout); },
+    closeups(mode) {
+      const step = mode === 'error' ? SAMPLE.fail : SAMPLE.editBig;
+      const rowWrap = document.createElement('div'); rowWrap.className = 'bu-row'; rowWrap.setAttribute('role', 'listitem');
+      rowWrap.append(trRow(step, { text: 'inline' }));
+      const hd = document.createElement('div'); hd.style.display = 'grid'; hd.style.gap = '6px';
+      const turn = mode === 'error' ? SAMPLE.turnFail : SAMPLE.turnDone;
+      hd.innerHTML = `<div class="bu-turn"><div class="bu-status"><span class="shimmer">Reading the project…</span></div></div>
+        <div class="bu-turn"><span class="bu-trigger" style="cursor:default"><span class="bu-sum">${summaryHTML(turn)}</span>${svg('chevronDown', 'chev')}</span></div>`;
+      return [
+        { caption: 'One trace row: icon, bold label, mono pill, +/− counts', el: rowWrap },
+        { caption: 'Turn header: shimmering label while live, then the summary with a chevron', el: hd },
+      ];
+    },
+  };
+}
+
+/* ======================= Option 3: Rail ======================= */
+function railFill(li, step) {
+  li.dataset.status = step.status || '';
+  fillRow($('.tr', li), step, { text: 'below' });
+  const child = $('.rl-child', li), text = $('.rl-text', li);
+  const long = (step.kind === 'plan' || step.kind === 'reply') && step.text;
+  text.hidden = !long; text.textContent = long ? step.text : '';
+  const res = step.status === 'err' || (step.status === 'ok' && step.res);
+  child.hidden = !res;
+  child.className = 'rl-child' + (step.status === 'err' ? ' bad' : '');
+  child.innerHTML = res ? `${svg(step.status === 'err' ? 'alert' : 'check')}<span>${esc(step.res)}</span>` : '';
+}
+function railStep(step) {
+  const li = document.createElement('li'); li.className = 'rl-step';
+  li.innerHTML = '<span class="rl-dot"></span><div class="tr"></div><div class="rl-child" hidden></div><p class="rl-text" hidden></p>';
+  railFill(li, step); return li;
+}
+function railNode(turn, status, phrase) {
+  const s = summarize(turn);
+  const icon = status === 'working' ? svg('spinner') : status === 'failed' ? svg('alert') : svg('check');
+  const sub = status === 'working' ? `Working · ${phrase}` : s.text;
+  return { icon, sub };
+}
+function makeRail(mount, ctx) {
+  mount.innerHTML = '<ol class="rl" role="list"></ol>';
+  const ol = $('.rl', mount); const turns = new Map(), rows = new Map();
+  ctx.scrollers = () => [ctx.sim.pane.scroller];
+  const fol = () => follow(ctx.scrollers());
+  function head(t) {
+    const turn = t.turn;
+    const failed = turn.status === 'done' && turn.steps.some((s) => s.status === 'err');
+    const status = turn.status === 'working' ? 'working' : failed ? 'failed' : 'done';
+    t.el.dataset.status = status;
+    const n = railNode(turn, status, ctx.sim.run.phrase);
+    t.node.innerHTML = n.icon; t.sub.textContent = n.sub;
+    t.node.classList.toggle('spin', status === 'working');
+  }
+  return {
+    reset() { ol.innerHTML = ''; turns.clear(); rows.clear(); },
+    onChange(ch, animate) {
+      const fx = animate && !ctx.reduce();
+      if (ch.k === 'noise') return;
+      if (ch.k === 'turnStart') {
+        const li = document.createElement('li'); li.className = 'rl-turn';
+        li.innerHTML = `<div class="rl-head"><span class="rl-node"></span><div class="rl-htext"><span class="rl-title">Turn ${ch.turn.n}</span><span class="rl-sub"></span></div></div><ol class="rl-steps" role="list"></ol>`;
+        if (fx) li.classList.add('rise');
+        const t = { turn: ch.turn, el: li, node: $('.rl-node', li), sub: $('.rl-sub', li), steps: $('.rl-steps', li) };
+        turns.set(ch.turn.i, t); ol.append(li); head(t); fol(); return;
+      }
+      const t = turns.get(ch.turn.i);
+      if (ch.k === 'step') { const li = railStep(ch.step); if (fx) li.classList.add('rise'); t.steps.append(li); rows.set(ch.step.id, li); }
+      else if (ch.k === 'update') railFill(rows.get(ch.step.id), ch.step);
+      head(t); fol();
+    },
+    onFinish() { turns.forEach(head); fol(); },
+    relayout() {},
+    closeups(mode) {
+      const step = mode === 'error' ? SAMPLE.fail : SAMPLE.editBig;
+      const wrap = document.createElement('div'); wrap.className = 'rl';
+      const ul = document.createElement('ul'); ul.className = 'rl-steps'; ul.append(railStep(step)); wrap.append(ul);
+      const turn = mode === 'error' ? SAMPLE.turnFail : SAMPLE.turnDone;
+      const hd = document.createElement('div'); hd.className = 'rl'; hd.style.gap = '14px';
+      const mk = (status, tt, num) => { const n = railNode(turn, status, 'Reading the project'); const d = document.createElement('div'); d.className = 'rl-turn'; d.dataset.status = status; d.innerHTML = `<div class="rl-head"><span class="rl-node">${n.icon}</span><div class="rl-htext"><span class="rl-title">Turn ${num}</span><span class="rl-sub">${esc(n.sub)}</span></div></div>`; return d; };
+      hd.append(mk('working', turn, turn.n)); hd.append(mk(mode === 'error' ? 'failed' : 'done', turn, turn.n));
+      return [
+        { caption: 'A step on the rail with its result as an indented child line', el: wrap },
+        { caption: 'The same turn header while it runs, then when it ends' + (mode === 'error' ? ' with a failed step' : ''), el: hd },
+      ];
+    },
+  };
+}
+
+/* ======================= Option 4: Outcomes first ======================= */
+function outcomesOf(turn) {
+  const files = new Map(), cmds = [], problems = [];
+  for (const s of turn.steps) {
+    if (s.status === 'err') problems.push(s);
+    else if (s.kind === 'edit' && s.status === 'ok') { const f = files.get(s.target) || { target: s.target, add: 0, del: 0 }; f.add += s.add || 0; f.del += s.del || 0; files.set(s.target, f); }
+    else if (s.kind === 'run' && s.status === 'ok') cmds.push(s);
+  }
+  return { files: [...files.values()], cmds, problems };
+}
+function alsoText(turn) {
+  const c = { read: 0, search: 0, preview: 0 };
+  for (const s of turn.steps) { if (s.status === 'err') continue; if (s.kind === 'read') c.read++; else if (isSearch(s.kind)) c.search++; else if (s.kind === 'preview') c.preview++; }
+  const p = [];
+  if (c.read) p.push('read ' + plural(c.read, 'file'));
+  if (c.search) p.push('searched the project');
+  if (c.preview) p.push('checked the preview');
+  return p.length ? 'Also ' + p.join(' · ') : '';
+}
+function fileItem(f) {
+  const d = document.createElement('div'); d.className = 'tr'; d.dataset.status = 'ok';
+  d.innerHTML = `<span class="tr-ic">${svg('filePen')}</span><span class="tr-pill" title="${esc(f.target)}">${esc(f.target)}</span><span></span><span class="tr-diff">${f.add > 0 ? `<span class="add">+${f.add}</span>` : ''}${f.del > 0 ? `<span class="del">−${f.del}</span>` : ''}</span>`;
+  d.style.gridTemplateColumns = '16px minmax(0, auto) 1fr auto';
+  return d;
+}
+function cmdItem(s) {
+  const w = document.createElement('div');
+  w.innerHTML = `<div class="tr" data-status="ok"><span class="tr-ic">${svg('terminal')}</span><span class="tr-pill" title="${esc(s.target)}">${esc(s.target)}</span><span></span></div><p class="oc-res">${svg('check')}${esc(s.res || 'Done')}</p>`;
+  $('.tr', w).style.gridTemplateColumns = '16px minmax(0, auto) 1fr';
+  return w;
+}
+function problemItem(s) {
+  const w = document.createElement('div'); w.className = 'oc-problem';
+  w.innerHTML = `<div class="tr" data-status="err"><span class="tr-ic">${svg('alert')}</span><span class="tr-label">${esc(labelFor(s))}</span><span class="tr-pill" title="${esc(s.target)}">${esc(s.target)}</span></div><p class="oc-res">${esc(s.res)}</p>`;
+  return w;
+}
+function makeOutcomes(mount, ctx) {
+  mount.innerHTML = '<div class="oc-list"></div>';
+  const listEl = $('.oc-list', mount); const cards = new Map();
+  ctx.scrollers = () => [ctx.sim.pane.scroller];
+  const fol = () => follow(ctx.scrollers());
+  function refresh(c, fx) {
+    const turn = c.turn, o = outcomesOf(turn);
+    const sync = (map, key, make, parent, upd) => { let el = map.get(key); if (!el) { el = make(); if (fx) el.classList.add('rise'); parent.append(el); map.set(key, el); } else if (upd) upd(el); return el; };
+    o.problems.forEach((s) => sync(c.pEls, s.id, () => problemItem(s), c.problems));
+    o.files.forEach((f) => sync(c.fEls, f.target, () => fileItem(f), c.fItems, (el) => { const n = fileItem(f); el.innerHTML = n.innerHTML; }));
+    o.cmds.forEach((s) => sync(c.cEls, s.id, () => cmdItem(s), c.cItems));
+    c.fSec.hidden = !o.files.length; c.fH.textContent = 'Changed ' + plural(o.files.length, 'file');
+    c.cSec.hidden = !o.cmds.length; c.cH.textContent = 'Ran ' + plural(o.cmds.length, 'command');
+    const n = turn.steps.length;
+    c.stepsLabel.textContent = c.trace.hidden ? `Show ${plural(n, 'step')}` : `Hide ${plural(n, 'step')}`;
+    const done = turn.status !== 'working';
+    const failed = turn.steps.some((s) => s.status === 'err');
+    c.el.dataset.status = !done ? 'working' : failed ? 'failed' : 'done';
+    c.chip.innerHTML = !done ? `<span class="pulse"></span>Working` : failed ? `${svg('alert')}Needs attention` : `${svg('check')}Done`;
+    c.now.hidden = done; c.nowText.textContent = ctx.sim.run.phrase;
+    const also = alsoText(turn);
+    c.also.hidden = !done || !also; c.also.textContent = also;
+    const none = done && !o.files.length && !o.cmds.length && !o.problems.length;
+    c.none.hidden = !none;
+    if (!done && !o.files.length && !o.cmds.length && !o.problems.length) { c.none.hidden = false; c.none.textContent = 'Nothing has changed yet.'; }
+    else c.none.textContent = 'No changes. This turn only looked around.';
+  }
+  return {
+    reset() { cards.clear(); listEl.innerHTML = ''; },
+    onChange(ch, animate) {
+      const fx = animate && !ctx.reduce();
+      if (ch.k === 'noise') return;
+      if (ch.k === 'turnStart') {
+        const id = uid();
+        const el = document.createElement('article'); el.className = 'oc-card'; el.dataset.status = 'working';
+        el.innerHTML = `<div class="oc-head"><span class="label-mono">Turn ${ch.turn.n}</span><span class="oc-chip"></span></div>
+          <div class="oc-problems"></div>
+          <section class="oc-sec oc-files" hidden><h3 class="oc-h"></h3><div class="oc-items"></div></section>
+          <section class="oc-sec oc-cmds" hidden><h3 class="oc-h"></h3><div class="oc-items"></div></section>
+          <p class="oc-none" hidden></p><p class="oc-also" hidden></p>
+          <p class="oc-now"><span class="pulse"></span><span>Now: <span class="oc-now-t"></span></span></p>
+          <button type="button" class="oc-steps-btn" data-fk="steps-${ch.turn.n}" aria-expanded="false" aria-controls="${id}"><span class="oc-steps-l"></span>${svg('chevronDown', 'chev')}</button>
+          <div class="oc-trace" id="${id}" hidden role="list"></div>`;
+        const c = { turn: ch.turn, el, chip: $('.oc-chip', el), problems: $('.oc-problems', el), fSec: $('.oc-files', el), fH: $('.oc-files .oc-h', el), fItems: $('.oc-files .oc-items', el), cSec: $('.oc-cmds', el), cH: $('.oc-cmds .oc-h', el), cItems: $('.oc-cmds .oc-items', el), none: $('.oc-none', el), also: $('.oc-also', el), now: $('.oc-now', el), nowText: $('.oc-now-t', el), btn: $('.oc-steps-btn', el), stepsLabel: $('.oc-steps-l', el), trace: $('.oc-trace', el), pEls: new Map(), fEls: new Map(), cEls: new Map(), rows: new Map() };
+        c.btn.addEventListener('click', () => { const open = c.trace.hidden; c.trace.hidden = !open; c.btn.setAttribute('aria-expanded', String(open)); refresh(c, false); });
+        if (fx) el.classList.add('rise');
+        cards.set(ch.turn.i, c); listEl.append(el); refresh(c, false); fol(); return;
+      }
+      const c = cards.get(ch.turn.i);
+      if (ch.k === 'step') {
+        const r = document.createElement('div'); r.setAttribute('role', 'listitem'); r.append(trRow(ch.step, { text: 'inline' }));
+        c.trace.append(r); c.rows.set(ch.step.id, r);
+      } else if (ch.k === 'update') fillRow($('.tr', c.rows.get(ch.step.id)), ch.step, { text: 'inline' });
+      refresh(c, fx); fol();
+    },
+    onFinish() { cards.forEach((c) => refresh(c, false)); fol(); },
+    relayout() {},
+    closeups(mode) {
+      const turn = mode === 'error' ? SAMPLE.turnFail : SAMPLE.turnDone;
+      const o = outcomesOf(turn);
+      const row = document.createElement('div'); row.style.display = 'grid'; row.style.gap = '6px';
+      if (mode === 'error') row.append(problemItem(SAMPLE.fail)); else row.append(fileItem(o.files[0]));
+      const hd = document.createElement('div'); hd.className = 'oc-card'; hd.dataset.status = mode === 'error' ? 'failed' : 'done';
+      hd.innerHTML = `<div class="oc-head"><span class="label-mono">Turn ${turn.n}</span><span class="oc-chip">${mode === 'error' ? svg('alert') + 'Needs attention' : svg('check') + 'Done'}</span></div>
+        <span class="oc-steps-btn" style="cursor:default">Show ${plural(turn.steps.length, 'step')}${svg('chevronDown', 'chev')}</span>`;
+      return [
+        { caption: mode === 'error' ? 'The problem block that leads a failed card' : 'One outcome row: file, +/− counts', el: row },
+        { caption: 'Card header: status chip and the “Show N steps” disclosure', el: hd },
+      ];
+    },
+  };
+}
+
+const FACTORIES = [null, makeLedger, makeBeui, makeRail, makeOutcomes];
+
+/* ======================= theme / motion sync ======================= */
+function allMocks() { return $$('.ade-mock'); }
+function applyGlobals() {
+  const reduce = String(reduceNow());
+  allMocks().forEach((m) => { m.dataset.theme = app.theme; m.dataset.reduce = reduce; });
+  $$('[data-act^="theme:"]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.act === 'theme:' + app.theme)));
+  $$('[data-act="reduce"]').forEach((b) => {
+    b.setAttribute('aria-pressed', reduce);
+    if (sysReduce.matches) { b.setAttribute('aria-disabled', 'true'); b.title = 'Following your system’s reduce-motion setting'; }
+    else { b.removeAttribute('aria-disabled'); b.title = ''; }
+  });
+}
+sysReduce.addEventListener && sysReduce.addEventListener('change', () => { applyGlobals(); restartThumbs(); });
+
+/* ======================= overview thumbnails ======================= */
+const thumbs = [];
+function buildThumbs() {
+  const grid = $('#ov-grid');
+  OPTIONS.forEach((o) => {
+    const card = document.createElement('article'); card.className = 'ov-card';
+    card.innerHTML = `<a class="thumb-link" href="#${o.n}" aria-label="Open option ${o.n}: ${esc(o.name)}"><div class="thumb-frame" aria-hidden="true"><div class="thumb-scale" inert></div></div></a>
+      <div class="ov-meta"><div class="ov-title"><span class="num" aria-hidden="true">${o.n}</span><h3>${esc(o.name)}</h3></div>
+      <p class="ov-trade"><b>Tradeoff.</b> ${esc(o.tradeoff)}</p>
+      <div><a class="btn" href="#${o.n}">Open option ${o.n} ${svg('arrowRight')}</a></div></div>`;
+    grid.append(card);
+    const frame = $('.thumb-frame', card), scale = $('.thumb-scale', card);
+    const pane = buildPane({ compact: true });
+    scale.append(pane.root);
+    const sim = new Sim(pane, FACTORIES[o.n], { loop: true, speed: 2 });
+    const fit = () => { const s = Math.min(1, frame.clientWidth / 360); scale.style.transform = `scale(${s})`; frame.style.height = Math.ceil(pane.root.offsetHeight * s) + 'px'; };
+    new ResizeObserver(fit).observe(frame);
+    thumbs.push({ sim, frame, fit });
+  });
+}
+function startThumbs() { thumbs.forEach((t) => { t.sim.suspended = false; t.sim.play('complete', !reduceNow()); if (app.previewsPaused) t.sim.pause(); t.fit(); }); applyGlobals(); }
+function restartThumbs() { if (thumbs.length && currentView === 0) startThumbs(); }
+function setThumbsPaused(p) {
+  app.previewsPaused = p;
+  thumbs.forEach((t) => { if (p) { t.sim.pause(); } else if (t.sim.paused) { t.sim.resume(); } });
+  $$('[data-act="previews-pause"]').forEach((b) => { b.textContent = p ? 'Resume previews' : 'Pause previews'; });
+}
+
+/* ======================= expanded views ======================= */
+const views = {};
+let currentView = -1;
+const DEFAULT_MODE = () => (reduceNow() ? 'complete' : 'live');
+function buildView(n) {
+  const o = OPTIONS[n - 1];
+  const prev = OPTIONS[(n + 2) % 4], next = OPTIONS[n % 4];
+  const sec = document.createElement('section'); sec.id = 'view-' + n; sec.hidden = true;
+  sec.setAttribute('aria-labelledby', `h-${n}`);
+  const seg = (label, id, buttons) => `<div class="ctl"><span class="eyebrow" id="${id}">${label}</span><div class="seg" role="group" aria-labelledby="${id}">${buttons}</div></div>`;
+  const b = (act, text, pressed, extra = '') => `<button type="button" class="btn" data-act="${act}" data-view="${n}" ${pressed === null ? '' : `aria-pressed="${pressed}"`} ${extra}>${text}</button>`;
+  sec.innerHTML = `
+    <nav class="view-nav" aria-label="Option navigation">
+      <a class="btn" href="#overview">${svg('arrowLeft')} Back to overview</a>
+      <span class="seg">
+        <a class="btn" href="#${prev.n}" aria-label="Previous option: ${prev.n}, ${esc(prev.name)}">${svg('arrowLeft')} Previous <span class="muted">${prev.n}</span></a>
+        <a class="btn" href="#${next.n}" aria-label="Next option: ${next.n}, ${esc(next.name)}">Next <span class="muted">${next.n}</span> ${svg('arrowRight')}</a>
+      </span>
+    </nav>
+    <header class="view-head">
+      <p class="eyebrow">Option ${n} of 4</p>
+      <h2 id="h-${n}" tabindex="-1"><span class="num" aria-hidden="true">${n}</span>${esc(o.name)}</h2>
+      <p class="lede">${esc(o.lede)}</p>
+      <p class="tradeoff"><b>Tradeoff.</b> ${esc(o.tradeoff)}</p>
+    </header>
+    <div class="toolbar" role="group" aria-label="Simulation controls for option ${n}">
+      ${seg('State', `st-${n}`, b('state:live', 'Live', false) + b('state:complete', 'Complete', false) + b('state:error', 'Error', false))}
+      ${seg('Theme (mock only)', `th-${n}`, `<button type="button" class="btn" data-act="theme:light" aria-pressed="true">ADE light</button><button type="button" class="btn" data-act="theme:dark" aria-pressed="false">ADE dark</button>`)}
+      ${seg('Motion', `mo-${n}`, b('replay', svg('replay') + ' Replay', null) + b('pause', 'Pause', null, 'data-role="pause"') + `<button type="button" class="btn" data-act="reduce" aria-pressed="false">Reduce motion</button>`)}
+      ${seg('Speed', `sp-${n}`, b('speed:0.5', '0.5×', false) + b('speed:1', '1×', true) + b('speed:2', '2×', false))}
+      ${seg('Baseline', `rs-${n}`, b('reset', 'Reset', null, 'title="Stop everything and show the finished run with every disclosure at its default"'))}
+    </div>
+    <p class="sim-note" data-role="note"></p>
+    <div class="stage">
+      <div class="stage-col">
+        <h3 class="eyebrow">In context · mock pane, about 360px wide</h3>
+        <div class="stage-box">
+          <div class="stack">
+            <p class="chat-line"><span>Chat status line (outside this pane):</span><span class="chat-pill"><span class="chat-dot" aria-hidden="true"></span><span data-role="chat">Starting</span></span></p>
+            <div data-role="pane"></div>
+          </div>
+        </div>
+        <p class="hint">Buttons inside the framed pane are inert mocks. Disclosures inside it (hidden-events toggle, turn summaries, “Show N steps”) do work.</p>
+      </div>
+      <div class="stage-col">
+        <h3 class="eyebrow">Close-up · 2×</h3>
+        <div class="stage-box"><div class="closeup-scroll"><div class="stack" data-role="closeups"></div></div></div>
+        <div class="panel notes" style="margin-top:6px">
+          <h3>What to watch</h3>
+          <ul>${o.watch.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>
+        </div>
+      </div>
+    </div>`;
+  $('#views').append(sec);
+  const pane = buildPane();
+  $('[data-role="pane"]', sec).append(pane.root);
+  const noteEl = $('[data-role="note"]', sec), chatEl = $('[data-role="chat"]', sec);
+  const sim = new Sim(pane, FACTORIES[n], { onStatus: (t) => { noteEl.textContent = t; }, onPhrase: (t) => { chatEl.textContent = t; } });
+  const v = { n, sec, pane, sim, closeEl: $('[data-role="closeups"]', sec), pauseBtn: $('[data-role="pause"]', sec) };
+  v.drawCloseups = () => {
+    v.closeEl.innerHTML = '';
+    sim.view.closeups(sim.mode).forEach((c) => {
+      const mock = document.createElement('div'); mock.className = 'ade-mock cu';
+      mock.dataset.theme = app.theme; mock.dataset.reduce = String(reduceNow()); mock.dataset.paused = 'false';
+      mock.setAttribute('aria-hidden', 'true');
+      const z = document.createElement('div'); z.className = 'cu-zoom'; z.append(c.el); mock.append(z);
+      const fig = document.createElement('div'); fig.className = 'stack'; fig.style.gap = '6px';
+      const cap = document.createElement('p'); cap.className = 'caption'; cap.textContent = c.caption;
+      fig.append(mock, cap); v.closeEl.append(fig);
+    });
+  };
+  v.sync = () => {
+    $$('[data-act^="state:"]', sec).forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.act === 'state:' + sim.mode)));
+    $$('[data-act^="speed:"]', sec).forEach((x) => x.setAttribute('aria-pressed', String(Number(x.dataset.act.slice(6)) === sim.speed)));
+    v.pauseBtn.innerHTML = sim.paused ? svg('play') + ' Resume' : svg('pause') + ' Pause';
+  };
+  v.play = (mode, animate) => { sim.play(mode, animate); v.drawCloseups(); v.sync(); };
+  views[n] = v;
+  const mode = DEFAULT_MODE();
+  v.play(mode, mode === 'live');
+  applyGlobals();
+  return v;
+}
+
+/* ======================= routing ======================= */
+function parseHash() { const m = /^#([1-4])$/.exec(location.hash); return m ? Number(m[1]) : 0; }
+function show(n, moveFocus) {
+  const from = currentView; currentView = n;
+  $('#overview').hidden = n !== 0;
+  if (n === 0) {
+    if (!thumbs.length) { buildThumbs(); startThumbs(); } else thumbs.forEach((t) => { t.sim.wake(); t.fit(); });
+  } else thumbs.forEach((t) => t.sim.suspend());
+  for (let i = 1; i <= 4; i++) {
+    const v = views[i];
+    if (i === n) {
+      const nv = v || buildView(i);
+      nv.sec.hidden = false; nv.sim.wake(); nv.sync();
+    } else if (v) { v.sec.hidden = true; v.sim.suspend(); }
+  }
+  document.title = n ? `${OPTIONS[n - 1].name} · Activity pane Logs · ADE design workshop` : 'Activity pane: Logs · ADE design workshop';
+  if (moveFocus && from !== -1) {
+    const target = n ? $(`#h-${n}`) : $('#ov-h');
+    if (target) { target.setAttribute('tabindex', '-1'); target.focus(); }
+  }
+  if (from !== -1) sr(n ? `Option ${n}: ${OPTIONS[n - 1].name}` : 'Overview of all four options');
+}
+window.addEventListener('hashchange', () => show(parseHash(), true));
+
+/* ======================= actions ======================= */
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-act]');
+  if (btn) {
+    const act = btn.dataset.act, view = btn.dataset.view ? views[btn.dataset.view] : null;
+    if (act.startsWith('theme:')) { app.theme = act.slice(6); applyGlobals(); sr(`Theme: ADE ${app.theme}`); return; }
+    if (act === 'reduce') { if (sysReduce.matches) return; app.reduceToggle = !app.reduceToggle; applyGlobals(); restartThumbs(); sr(`Reduce motion ${app.reduceToggle ? 'on' : 'off'}`); return; }
+    if (act === 'previews-pause') { setThumbsPaused(!app.previewsPaused); return; }
+    if (!view) return;
+    const sim = view.sim;
+    if (act.startsWith('state:')) { const mode = act.slice(6); view.play(mode, mode === 'live'); sr(`Option ${view.n}: ${mode} state`); }
+    else if (act === 'replay') { view.play(sim.mode, true); sr(`Option ${view.n}: replaying`); }
+    else if (act === 'pause') { sim.paused ? sim.resume() : sim.pause(); view.sync(); }
+    else if (act.startsWith('speed:')) { sim.setSpeed(Number(act.slice(6))); view.sync(); }
+    else if (act === 'reset') { sim.setSpeed(1); view.play('complete', false); sr(`Option ${view.n}: reset`); }
+    return;
+  }
+  const mock = e.target.closest('[data-mock]');
+  if (mock) e.preventDefault();
+});
+
+/* ======================= data table ======================= */
+(function dataTable() {
+  const tb = $('#data-table tbody');
+  tb.innerHTML = DATA.rows.map((r) => `<tr><td><span class="tag ${r.src}">${r.src}</span></td><td>${r.n ?? ''}</td><td>${r.v === 'ok' ? 'Complete' : r.v === 'err' ? 'Error' : 'both'}</td><td>${esc(r.tone)}</td><td>${esc(r.title)}</td><td>${esc(r.body || '')}</td></tr>`).join('');
+  const okReal = DATA.rows.filter((r) => r.src === 'real' && r.v !== 'err').length, okAdded = DATA.rows.filter((r) => r.src === 'added' && r.v !== 'err').length;
+  const erReal = DATA.rows.filter((r) => r.src === 'real' && r.v !== 'ok').length, erAdded = DATA.rows.filter((r) => r.src === 'added' && r.v !== 'ok').length;
+  $('#data-note').textContent = `Rows are formatLogLine output over lines from session ${DATA.conversation}… ("real", with the log line number) or lines written to cover what that log lacks: a plan, a permission, replies, two shell commands, and a successful read ("added"). Real rows from separate turns are spliced into three. Complete: ${okReal} real + ${okAdded} added. Error: ${erReal} real + ${erAdded} added (the failing read of .env is real). Home paths are shortened and long bodies trimmed.`;
+})();
+
+/* ======================= boot ======================= */
+applyGlobals();
+show(parseHash(), false);
+})();
+</script>
+</body>
+</html>
