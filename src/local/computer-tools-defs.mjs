@@ -2,7 +2,8 @@
 // Chrome) exposes to coding agents (Codex, OpenCode via MCP; Pi via its extension). Kept in this
 // shebang-free module so Vite's SSR transform can import it — the executable
 // stdio entry lives in computer-mcp.mjs. ADE injects ADE_API (the serving
-// ADE instance's loopback base URL) and ADE_PROJECT_ID alongside it. MCP
+// ADE instance's loopback base URL), ADE_PROJECT_ID and the turn's
+// ADE_SESSION_ID alongside it. MCP
 // servers run outside Codex's workspace-write sandbox, so these calls work
 // where shell curls to the loopback API could be blocked. Plain Node, no
 // dependencies.
@@ -261,8 +262,26 @@ export const TOOLS = [
   {
     name: "dev_server_start",
     description:
-      "Start this project's dev server through ADE (re-scans package.json first) and wait until its port accepts connections. Never start a server yourself with nohup/&.",
-    inputSchema: { type: "object", properties: {} },
+      "Start this project's dev server through ADE and wait until its port accepts connections. With a package.json dev script, call it with no arguments (ADE re-scans package.json first). Without one, pass command (one program and its arguments, no shell operators) and cwd; ADE asks the user to approve the command once, then reuses it on later starts. Never start a server yourself with nohup/&.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description:
+            'Only when there is no package.json dev script: the program and its arguments, e.g. "pyxplain-ui" or "uvicorn app:app --port {port}". {port} becomes the port ADE picks, which is also in PORT (HOST is 127.0.0.1).',
+        },
+        cwd: {
+          type: "string",
+          description: 'The folder it runs in, relative to the project root (default ".")',
+        },
+        port: {
+          type: "integer",
+          description:
+            "Only for an app that always listens on this fixed port and ignores PORT and {port}",
+        },
+      },
+    },
   },
   {
     name: "dev_server_stop",
@@ -323,7 +342,12 @@ const text = (value, isError = false) => ({
   ...(isError ? { isError: true } : {}),
 });
 
-export function createToolCaller({ api, projectId, fetchImpl = fetch }) {
+/**
+ * @param {{ api: string, projectId: string, sessionId?: string, fetchImpl?: typeof fetch }} options
+ *   sessionId: the ADE session whose turn runs these tools, so a dev command proposal waits for
+ *   the user's answer in that session
+ */
+export function createToolCaller({ api, projectId, sessionId = "", fetchImpl = fetch }) {
   const base = `${api}/api/projects/${encodeURIComponent(projectId)}`;
   async function call(method, url, body) {
     const response = await fetchImpl(url, {
@@ -383,11 +407,24 @@ export function createToolCaller({ api, projectId, fetchImpl = fetch }) {
       }
       if (DEV[name]) {
         const [method, suffix] = DEV[name];
-        const { status, payload } = await call(method, `${base}/dev${suffix}`);
+        // Start may long-poll while the user decides on a proposed command (up to 5 minutes).
+        const proposal =
+          name === "dev_server_start"
+            ? {
+                command: args.command,
+                cwd: args.cwd,
+                port: args.port,
+                ...(sessionId ? { sessionId } : {}),
+              }
+            : undefined;
+        const { status, payload } = await call(method, `${base}/dev${suffix}`, proposal);
         const port = payload.port > 0 ? payload.port : null;
-        const summary = port
-          ? `Dev server ${payload.status} — open http://localhost:${port} with computer_open_url.`
-          : `Dev server ${payload.status ?? "unknown"}.`;
+        const summary =
+          payload.status === "awaiting_approval"
+            ? "Waiting for the user to approve this dev command in ADE."
+            : port
+              ? `Dev server ${payload.status} — open http://localhost:${port} with computer_open_url.`
+              : `Dev server ${payload.status ?? "unknown"}.`;
         return text(`${summary}\n${JSON.stringify(payload)}`, status >= 400 && status !== 409);
       }
       return text(`Unknown tool: ${name}`, true);

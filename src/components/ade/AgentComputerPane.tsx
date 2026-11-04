@@ -3,14 +3,19 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Globe, LoaderCircle, RotateCw } from "lucide-react";
 import type { AgentComputer, Project, SessionSummary } from "@/lib/ade/types";
 import {
+  answerDevCommand,
   computerControl,
   computerProfile,
   computerStatus,
+  forgetDevCommand,
+  useAde,
   useSession,
   useSessionLogs,
 } from "@/lib/ade/store";
 import { copyText } from "@/lib/ade/clipboard";
+import { warnUser } from "@/components/ade/NoticeDialog";
 import { summarizeChecks } from "./ChecksList";
+import { DevCommandRequestCard } from "./DevCommandRequestCard";
 import { BrowserChromeRow } from "./browser/BrowserChromeRow";
 import { BrowserSurface } from "./browser/BrowserSurface";
 import { useBrowserPreview } from "./browser/browserPreviewContext";
@@ -51,6 +56,7 @@ export function AgentComputerPane({
   onToneChange?: (tone: ComputerTone) => void;
 }) {
   const queryClient = useQueryClient();
+  const { refresh: refreshWorkspace } = useAde();
   const computerQuery = useQuery({
     queryKey: ["computer", project.id],
     queryFn: () => computerStatus(project.id),
@@ -65,6 +71,7 @@ export function AgentComputerPane({
   const control = browser.control?.controller === "you";
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [forgetting, setForgetting] = useState(false);
   const autoStarted = useRef(new Set<string>());
   const browserFrameRef = useRef<HTMLDivElement>(null);
   const onToneChangeRef = useRef(onToneChange);
@@ -125,6 +132,22 @@ export function AgentComputerPane({
     autoStarted.current.add(project.id);
     void apply(computerControl(project.id, "start"));
   }, [active, status, project.id, apply]);
+
+  const forgetCommand = async () => {
+    setForgetting(true);
+    try {
+      await forgetDevCommand(project.id);
+      await refreshWorkspace();
+    } catch (e) {
+      void warnUser(e instanceof Error ? e.message : String(e));
+    } finally {
+      setForgetting(false);
+    }
+  };
+  const { devCommand, pendingDevCommand } = project;
+  const devCommandTitle = devCommand
+    ? `${devCommand.command}${devCommand.cwd === "." ? "" : ` (in ${devCommand.cwd})`}${devCommand.port ? ` on port ${devCommand.port}` : ""}`
+    : "";
 
   const copySetup = async () => {
     if (!computer?.setupCommand) return;
@@ -337,6 +360,18 @@ export function AgentComputerPane({
             {browser.actionError}
           </p>
         )}
+        {pendingDevCommand && (
+          <div className="mt-3">
+            <DevCommandRequestCard
+              key={pendingDevCommand.id}
+              request={pendingDevCommand}
+              onAnswer={async (allow) => {
+                await answerDevCommand(project.id, pendingDevCommand.id, allow);
+                await refreshWorkspace();
+              }}
+            />
+          </div>
+        )}
         {running && (
           <div className="mt-2 flex flex-wrap gap-2">
             <button
@@ -399,6 +434,28 @@ export function AgentComputerPane({
                     </button>
                   </>
                 )}
+              </span>
+            </div>
+          )}
+          {devCommand && (
+            <div className={DETAIL_ROW}>
+              <span className={`${DETAIL_LABEL} shrink-0`}>Dev command</span>
+              <span className="flex min-w-0 items-center gap-1">
+                <span
+                  className="min-w-0 truncate font-mono text-xs text-ink"
+                  title={devCommandTitle}
+                >
+                  {devCommand.command}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void forgetCommand()}
+                  disabled={forgetting}
+                  title="ADE asks you again before the next start; a running server keeps running"
+                  className="h-6 shrink-0 rounded-xs px-2 text-xs text-dim transition-colors hover:text-ink disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-amber"
+                >
+                  Forget
+                </button>
               </span>
             </div>
           )}

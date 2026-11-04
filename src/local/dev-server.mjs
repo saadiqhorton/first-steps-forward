@@ -4,6 +4,18 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { spawnCommand as spawn, stopProcess as stopChild } from "./spawn.mjs";
 import { packageManager } from "./project-scripts.mjs";
+import {
+  DevCommandError,
+  devCommandEnv,
+  resolveDevCommand,
+  splitCommand,
+  withPort,
+} from "./dev-command.mjs";
+
+// How long a starting dev server gets to accept a connection: a package script is a Node dev
+// server; an approved command may first build or load a model (a Python UI, a Go binary).
+const SCRIPT_LISTEN_MS = 10_000;
+const COMMAND_LISTEN_MS = 30_000;
 
 /**
  * Each project's single ADE-managed dev server: the records in
@@ -62,7 +74,7 @@ export function createDevServers({ state, save }) {
    * listens within the window, so the caller can surface the captured stderr
    * tail and reset the port instead of reporting a stale "running".
    */
-  async function waitForListening(proc, timeoutMs = 10000) {
+  async function waitForListening(proc, timeoutMs = SCRIPT_LISTEN_MS) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (!children.has(proc.id)) return false;
@@ -80,6 +92,7 @@ export function createDevServers({ state, save }) {
    * "running", and an honest failure that resets the port.
    */
   async function startDevServer(proc, project) {
+    if (proc.source === "approved") return startApprovedCommand(proc, project);
     // Map launch flags to the framework actually in the project: next
     // rejects --host outright (it takes -H/--hostname), vite and other
     // --host users take --host/--port, unknown scripts get only the port
@@ -99,9 +112,55 @@ export function createDevServers({ state, save }) {
       ...(framework === "unknown" ? { env: { PORT: String(proc.port), HOST: "127.0.0.1" } } : {}),
     };
     spawnProcess(proc, project, launch);
-    // "running" is only reported once the port accepts a connection;
-    // otherwise surface the captured stderr tail and reset the port.
-    const up = await waitForListening(proc);
+    return settleStart(proc, SCRIPT_LISTEN_MS);
+  }
+  /**
+   * Launch the command the user approved for this project (project.devCommand), checked again
+   * at every start: its folder must still resolve inside the project. No framework flags, only
+   * PORT/HOST and {port}; a fixed port is probed instead of allocating one.
+   */
+  async function startApprovedCommand(proc, project) {
+    listenedProcs.delete(proc.id);
+    const refuse = async (message) => {
+      proc.port = 0;
+      proc.status = "stopped";
+      proc.output = [...(proc.output ?? []), message].slice(-300);
+      proc.updatedAt = now();
+      await save();
+      return proc;
+    };
+    let resolved;
+    try {
+      if (!project.devCommand)
+        throw new DevCommandError("this project has no approved dev command any more");
+      resolved = await resolveDevCommand(project.devCommand, project.path);
+    } catch (error) {
+      return refuse(`ADE did not run the dev command: ${error.message}`);
+    }
+    if (resolved.port) {
+      if (await probeConnection(resolved.port))
+        return refuse(
+          `Port ${resolved.port} is already in use, so ADE did not start \`${resolved.command}\`. Stop whatever listens there first.`,
+        );
+      proc.port = resolved.port;
+    } else proc.port = await allocatePort();
+    const env = await devCommandEnv({
+      dir: resolved.dir,
+      root: await fs.realpath(project.path),
+      port: proc.port,
+    });
+    const [bin, ...args] = withPort(resolved.argv, proc.port);
+    // Where the process runs: how ADE recognises it after a restart (see processRunsIn).
+    proc.dir = resolved.dir;
+    spawnProcess(proc, project, { bin, args, env, cwd: resolved.dir });
+    return settleStart(proc, COMMAND_LISTEN_MS);
+  }
+  /**
+   * "running" is only reported once the port accepts a connection; otherwise surface the
+   * captured stderr tail and reset the port.
+   */
+  async function settleStart(proc, timeoutMs) {
+    const up = await waitForListening(proc, timeoutMs);
     if (up) {
       proc.status = "running";
     } else {
@@ -114,7 +173,7 @@ export function createDevServers({ state, save }) {
       proc.port = 0;
       proc.output.push(
         alive
-          ? `The dev server did not accept a connection on port ${allocatedPort} within 10 seconds; ADE stopped it. Its output is above.`
+          ? `The dev server did not accept a connection on port ${allocatedPort} within ${timeoutMs / 1000} seconds; ADE stopped it. Its output is above.`
           : "The dev server exited before it could listen; its error output is above.",
       );
       proc.status = "stopped";
@@ -130,13 +189,28 @@ export function createDevServers({ state, save }) {
    */
   function devServerStatus(project) {
     const proc = state.processes.find((p) => p.projectId === project.id);
-    if (!proc)
-      return project.devScriptNote
-        ? "status unknown (package.json could not be read)"
-        : "no dev script detected";
-    if (proc.status === "running") return `running on 127.0.0.1:${proc.port}`;
-    if (proc.status === "starting") return "starting";
-    return proc.startedAt ? "stopped" : "stopped (never started this session)";
+    if (!proc && project.devScriptNote) return "status unknown (package.json could not be read)";
+    const source = devCommandSource(project, proc);
+    if (!proc) return project.devCommand ? `stopped; ${source}` : source;
+    const status =
+      proc.status === "running"
+        ? `running on 127.0.0.1:${proc.port}`
+        : proc.status === "starting"
+          ? "starting"
+          : proc.startedAt
+            ? "stopped"
+            : "stopped (never started this session)";
+    return `${status}; ${source}`;
+  }
+  /** Which dev command applies: the package script, the approved command, or none yet. */
+  function devCommandSource(project, proc) {
+    if (proc && proc.source !== "approved") return `package.json dev script (${proc.command})`;
+    const approved = project.devCommand;
+    if (approved)
+      return `approved dev command \`${approved.command}\` in ${approved.cwd === "." ? "the project root" : approved.cwd}${approved.port ? ` on fixed port ${approved.port}` : ""} (dev_server_start runs it with no new approval)`;
+    if (proc)
+      return `dev command \`${proc.command}\`, no longer approved (the next start needs a new approval)`;
+    return "no dev command yet: propose one with dev_server_start({ command, cwd })";
   }
   /**
    * Strip dev-server flags an earlier start may have left in the stored base
@@ -157,9 +231,10 @@ export function createDevServers({ state, save }) {
     return out;
   }
   function spawnProcess(proc, project, launch = {}) {
+    const bin = launch.bin ?? proc.bin;
     const args = launch.args ?? proc.args;
-    const child = spawn(proc.bin, args, {
-      cwd: project.path,
+    const child = spawn(bin, args, {
+      cwd: launch.cwd ?? project.path,
       env: { ...process.env, ...(launch.env ?? {}) },
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
@@ -170,7 +245,7 @@ export function createDevServers({ state, save }) {
     // waitForListening); the start route flips it to "running" or back.
     proc.status = "starting";
     proc.startedAt = now();
-    proc.output = [`$ ${proc.bin} ${args.join(" ")}`];
+    proc.output = [`$ ${bin} ${args.join(" ")}`];
     children.set(proc.id, child);
     const line = (data) => {
       proc.output = [...proc.output, ...data.toString().split(/\r?\n/).filter(Boolean)].slice(-300);
@@ -210,6 +285,8 @@ export function createDevServers({ state, save }) {
       const manager = await packageManager(project, pkg);
       return { pkg, devCommand: pkg.scripts?.dev ? `${manager} run dev` : "", note: null };
     } catch (error) {
+      // No package.json at all (a Python, Go or Rust project) is simply no dev script.
+      if (error?.code === "ENOENT") return { pkg: {}, devCommand: "", note: null };
       return {
         pkg: {},
         devCommand: "",
@@ -237,12 +314,23 @@ export function createDevServers({ state, save }) {
       changed = true;
     }
     if (!devCommand) {
+      if (project.devCommand) return approvedRecord(project, existing, changed);
       // No dev script: retire a stopped record, but never one currently running.
       if (existing && existing.status !== "running" && !children.has(existing.id)) {
         state.processes = state.processes.filter((p) => p.id !== existing.id);
         return { proc: null, changed: true };
       }
       return { proc: existing ?? null, changed };
+    }
+    if (existing?.source === "approved") {
+      // A dev script appeared: it wins from the next start. A running approved command keeps
+      // its record until it stops.
+      if (existing.status === "running" || children.has(existing.id))
+        return { proc: existing, changed };
+      delete existing.source;
+      delete existing.cwd;
+      delete existing.dir;
+      changed = true;
     }
     if (existing) {
       if (existing.command !== devCommand) {
@@ -281,7 +369,48 @@ export function createDevServers({ state, save }) {
     state.processes.push(proc);
     return { proc, changed: true };
   }
-  return { children, devStartClaims, startDevServer, devServerStatus, refreshDevProcess };
+  /**
+   * The record for a project that runs its approved dev command: the command as approved (with
+   * its {port} tokens) and its folder, so the processes list shows what really runs. A record
+   * that is running keeps what its live child was started with.
+   */
+  function approvedRecord(project, existing, changed) {
+    const { command, cwd } = project.devCommand;
+    let argv = [];
+    try {
+      argv = splitCommand(command);
+    } catch {}
+    const fields = { source: "approved", command, cwd, bin: argv[0] ?? "", args: argv.slice(1) };
+    if (!existing) {
+      const proc = {
+        id: id(),
+        projectId: project.id,
+        name: "Development server",
+        ...fields,
+        port: 0,
+        status: "stopped",
+        output: [],
+      };
+      state.processes.push(proc);
+      return { proc, changed: true };
+    }
+    if (existing.status === "running" || children.has(existing.id))
+      return { proc: existing, changed };
+    for (const [key, value] of Object.entries(fields)) {
+      if (JSON.stringify(existing[key]) === JSON.stringify(value)) continue;
+      existing[key] = value;
+      changed = true;
+    }
+    return { proc: existing, changed };
+  }
+  return {
+    children,
+    devStartClaims,
+    startDevServer,
+    devServerStatus,
+    devCommandSource,
+    refreshDevProcess,
+  };
 }
 /**
  * The dev-server flag family the project's framework accepts: `next` rejects

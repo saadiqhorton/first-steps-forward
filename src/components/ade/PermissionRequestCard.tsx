@@ -1,14 +1,43 @@
 import { useState } from "react";
 import { warnUser } from "@/components/ade/NoticeDialog";
+import { DevCommandRequestCard } from "@/components/ade/DevCommandRequestCard";
 import { useAde } from "@/lib/ade/store";
-import type { PendingPermission } from "@/lib/ade/types";
+import type { DevCommandRequest, PendingPermission } from "@/lib/ade/types";
+
+const isDevCommandRequest = (
+  request: PendingPermission | DevCommandRequest,
+): request is DevCommandRequest => request.kind === "dev_command";
+
+/**
+ * A question a session is waiting on: an ACP agent's permission request, or
+ * ADE's own "Run this dev command?" when the agent proposed one.
+ */
+export function PermissionRequestCard({
+  sessionId,
+  request,
+  agentName,
+}: {
+  sessionId: string;
+  request: PendingPermission | DevCommandRequest;
+  agentName: string;
+}) {
+  const { answerPermission } = useAde();
+  if (isDevCommandRequest(request))
+    return (
+      <DevCommandRequestCard
+        request={request}
+        onAnswer={(allow) => answerPermission(sessionId, request.id, allow ? "allow" : "deny")}
+      />
+    );
+  return <AgentPermissionCard sessionId={sessionId} request={request} agentName={agentName} />;
+}
 
 /**
  * An ACP agent's permission request. The turn is paused until one of the
  * agent's own options is chosen; ADE adds none of its own. Title, detail and
  * option names are agent-supplied and rendered as plain text.
  */
-export function PermissionRequestCard({
+function AgentPermissionCard({
   sessionId,
   request,
   agentName,

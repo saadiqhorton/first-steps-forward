@@ -35,6 +35,30 @@ export interface Project {
   missing?: boolean;
   defaultAgent: AgentId;
   addedAt: number;
+  /** The dev command the user approved for a project without a package.json dev script. */
+  devCommand?: ApprovedDevCommand;
+  /** A proposed dev command waiting on the user that no session holds (shown in the right pane). */
+  pendingDevCommand?: DevCommandRequest;
+}
+
+/** A dev command the user approved once; ADE runs it whenever the agent starts the dev server. */
+export interface ApprovedDevCommand {
+  command: string;
+  /** Folder relative to the project root; "." is the root. */
+  cwd: string;
+  /** Only for apps that always listen on a fixed port. */
+  port?: number;
+  approvedAt: number;
+}
+
+/** ADE's own question when an agent proposes a dev command: "Run this dev command?" */
+export interface DevCommandRequest {
+  id: string;
+  kind: "dev_command";
+  command: string;
+  cwd: string;
+  port?: number;
+  requestedAt: number;
 }
 
 export interface LocalProcess {
@@ -49,6 +73,10 @@ export interface LocalProcess {
   output?: string[];
   startedAt?: number;
   updatedAt?: number;
+  /** "approved": the project's approved dev command, not a package.json dev script. */
+  source?: "approved";
+  /** Where an approved command runs, relative to the project root. */
+  cwd?: string;
 }
 
 export type SessionStatus = "working" | "verifying" | "ready" | "complete" | "stopped" | "blocked";
@@ -216,8 +244,8 @@ export interface Session {
   queuedMessages?: string[];
   /** Prompt to run as soon as the current CLI process exits. */
   steerNow?: string;
-  /** ACP agents only: questions the running turn is waiting on. */
-  pendingPermissions?: PendingPermission[];
+  /** Questions waiting on the user: an ACP agent's permission requests, and dev command proposals. */
+  pendingPermissions?: (PendingPermission | DevCommandRequest)[];
 }
 
 export type SessionSummary = Pick<

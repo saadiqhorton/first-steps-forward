@@ -142,6 +142,40 @@ test("dev server tools report the URL to open, and failures are tool errors", as
   assert.equal(unconnected.isError, true);
 });
 
+test("dev_server_start sends a proposed command with the session, and waiting is no error", async () => {
+  const bodies = [];
+  const callTool = createToolCaller({
+    api: "http://127.0.0.1:3000",
+    projectId: "p1",
+    sessionId: "s1",
+    fetchImpl: async (url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return {
+        status: 202,
+        json: async () => ({ status: "awaiting_approval", port: 0, message: "Still waiting" }),
+      };
+    },
+  });
+  const waiting = await callTool("dev_server_start", {
+    command: "pyxplain-ui",
+    cwd: "ui",
+    port: 8000,
+  });
+  assert.deepEqual(bodies[0], { command: "pyxplain-ui", cwd: "ui", port: 8000, sessionId: "s1" });
+  assert.equal(waiting.isError, undefined);
+  assert.match(waiting.content[0].text, /^Waiting for the user to approve this dev command in ADE/);
+  assert.match(waiting.content[0].text, /Still waiting/);
+  await callTool("dev_server_start");
+  assert.deepEqual(bodies[1], { sessionId: "s1" });
+  const tools = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]));
+  assert.deepEqual(Object.keys(tools.dev_server_start.inputSchema.properties), [
+    "command",
+    "cwd",
+    "port",
+  ]);
+  assert.match(tools.dev_server_start.description, /ADE asks the user to approve/);
+});
+
 const SCRIPT = fileURLToPath(new URL("./computer-mcp.mjs", import.meta.url));
 
 /** Runs the stdio server at `script` through initialize and tools/list. Stops early if it exits. */

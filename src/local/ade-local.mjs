@@ -21,6 +21,7 @@ import { createSessionLogs } from "./session-logs.mjs";
 import { SourceError } from "./project-sources.mjs";
 import { body, json, PayloadTooLarge } from "./http.mjs";
 import { createDevServers } from "./dev-server.mjs";
+import { createDevCommandApprovals, DevCommandError } from "./dev-command.mjs";
 import { createAgentStatus } from "./agent-status.mjs";
 import { terminal } from "./routes/terminal.mjs";
 import { editor } from "./routes/editor.mjs";
@@ -42,6 +43,12 @@ const state = { projects: [], sessions: [], processes: [], agents: [], workflows
 const { children, devStartClaims, startDevServer, devServerStatus, refreshDevProcess } =
   createDevServers({ state, save });
 export { refreshDevProcess };
+// "Run this dev command?" questions waiting on the user, one per project (docs/adr/0005).
+const devApprovals = createDevCommandApprovals({
+  state,
+  save,
+  emit: (scope) => eventHub.emit(scope),
+});
 const {
   harnessJobs,
   agentStatus,
@@ -83,11 +90,16 @@ const turns = createSessionTurns({
   logs: sessionLogs,
   emit: (scope) => eventHub.emit(scope),
   turnEnded: () => refreshBootstrapInBackground(eventHub.activeProjects()),
-  turnContext: (project) => ({
-    computer: computerContext(project),
-    devServer: devServerStatus(project),
-    agentBrowser: agentComputerFor(project),
-  }),
+  turnContext: async (project, session) => {
+    // The manifest says which dev command applies now, not as of the last bootstrap poll.
+    const { changed } = await refreshDevProcess(project).catch(() => ({ changed: false }));
+    if (changed) save().catch(() => {});
+    return {
+      computer: computerContext(project, session?.id),
+      devServer: devServerStatus(project),
+      agentBrowser: agentComputerFor(project),
+    };
+  },
 });
 // Viewers reach the stream through /preview-stream on the server that serves
 // the UI and API (see handleUpgrade); it never listens on its own.
@@ -191,7 +203,7 @@ async function load() {
     if (await sessionLogs.migrate(state.sessions)) changed = true;
     for (const p of state.processes) {
       const project = state.projects.find((item) => item.id === p.projectId);
-      const running = !!(p.pid && project && (await processMatches(p.pid, project.path)));
+      const running = !!(p.pid && project && (await processMatches(p.pid, p.dir ?? project.path)));
       if (p.status !== (running ? "running" : "stopped") || (!running && p.pid)) changed = true;
       p.status = running ? "running" : "stopped";
       if (!running) delete p.pid;
@@ -310,7 +322,11 @@ function syncClientRefreshTimer(count) {
   }
 }
 eventHub.onClientsChanged(syncClientRefreshTimer);
-const safeProject = (p) => ({ ...p });
+// A dev command request no session holds is shown on its project (the right pane).
+const safeProject = (p) => {
+  const pendingDevCommand = devApprovals.unattached(p.id);
+  return pendingDevCommand ? { ...p, pendingDevCommand } : { ...p };
+};
 /**
  * Records where the serving HTTP server listens, so agents get a base URL that
  * reaches it from this machine. A wildcard bind is reachable on 127.0.0.1; a
@@ -330,9 +346,13 @@ export function setListenAddress(address) {
  * What a CLI needs to drive this project's agent computer: the MCP server
  * (Codex/OpenCode) or Pi extension path, plus the real loopback base URL of
  * the serving ADE instance. Null when that URL is not known yet — the tools
- * are then omitted rather than pointed at a guessed address.
+ * are then omitted rather than pointed at a guessed address. With the turn's
+ * session id, the tools tell ADE which session asks (a dev command proposal
+ * waits for the user's answer in that session).
+ * @param {{ id: string }} project
+ * @param {string} [sessionId]
  */
-export function computerContext(project) {
+export function computerContext(project, sessionId) {
   const api = listenBaseUrl;
   if (!api) return null;
   // Beside this file, not the working directory: the published `ade` runs from wherever
@@ -342,7 +362,11 @@ export function computerContext(project) {
     node: process.execPath,
     mcpScript: path.join(local, "computer-mcp.mjs"),
     piExtension: path.join(local, "computer-pi-extension.mjs"),
-    env: { ADE_API: api, ADE_PROJECT_ID: project.id },
+    env: {
+      ADE_API: api,
+      ADE_PROJECT_ID: project.id,
+      ...(sessionId ? { ADE_SESSION_ID: sessionId } : {}),
+    },
   };
 }
 /** The project's agent computer status, with the browser profile it uses. */
@@ -576,6 +600,8 @@ export async function handle(req, res) {
       devStartClaims,
       startDevServer,
       refreshDevProcess,
+      devServerStatus,
+      devApprovals,
       handled: false,
       json: (...args) => {
         json(...args);
@@ -592,6 +618,7 @@ export async function handle(req, res) {
     if (
       error instanceof SourceError ||
       error instanceof TurnRefused ||
+      error instanceof DevCommandError ||
       error instanceof PayloadTooLarge
     )
       return json(res, error.status, { error: error.message });
@@ -601,6 +628,10 @@ export async function handle(req, res) {
 /** Test-only: pin agent rows so route tests are not raced by CLI probes. */
 export function _setAgentsForTest(agents) {
   state.agents = agents;
+}
+/** Test-only: how long dev/start waits for the user to answer a dev command request. */
+export function _setDevApprovalWaitForTest(ms) {
+  devApprovals.setWaitMs(ms);
 }
 /** Test-only: read a live session without the bootstrap route's CLI probes. */
 export function _getSessionForTest(sessionId) {

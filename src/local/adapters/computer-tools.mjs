@@ -1,5 +1,5 @@
 // How each CLI receives ADE's agent-computer tools for one turn. `computer`
-// is { node, mcpScript, piExtension, env: { ADE_API, ADE_PROJECT_ID } } or
+// is { node, mcpScript, piExtension, env: { ADE_API, ADE_PROJECT_ID, ADE_SESSION_ID } } or
 // null when the computer can't be offered (then nothing is added).
 import { TOOLS } from "../computer-tools-defs.mjs";
 

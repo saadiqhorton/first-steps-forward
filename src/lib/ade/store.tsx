@@ -182,6 +182,15 @@ export const computerControl = (projectId: string, op: "start" | "stop" | "clear
   request<AgentComputer>(`/api/projects/${projectId}/computer/${op}`, "POST");
 export const computerProfile = (projectId: string, profile: AgentComputer["profile"]) =>
   request<AgentComputer>(`/api/projects/${projectId}/computer/profile`, "POST", { profile });
+/** Answer a dev command request no session holds (the right pane shows it on the project). */
+export const answerDevCommand = (projectId: string, requestId: string, allow: boolean) =>
+  request(`/api/projects/${projectId}/dev/command/answer`, "POST", {
+    requestId,
+    decision: allow ? "allow" : "deny",
+  });
+/** Forget the project's approved dev command; the next start asks the user again. */
+export const forgetDevCommand = (projectId: string) =>
+  request(`/api/projects/${projectId}/dev/command/forget`, "POST");
 export const harnessJob = (agentId: AgentId) =>
   request<HarnessJob>(`/api/agents/${agentId}/harness`);
 export const optionCapabilities = (agentId: AgentId, model?: string) => {

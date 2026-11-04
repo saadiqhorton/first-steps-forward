@@ -263,10 +263,11 @@ test("a Codex turn runs to ready with the agent's reply", { skip }, async () => 
   assert.ok(first.args.includes("workspace-write"));
   assert.match(promptOf(first), /^Safety instructions:/);
   assert.match(promptOf(first), /Task: tidy the readme wording$/);
-  // The agent browser tools reach ADE's real URL through Codex's MCP config.
+  // The agent browser tools reach ADE's real URL through Codex's MCP config, and tell ADE
+  // which session asks.
   assert.ok(
     first.args.includes(
-      'mcp_servers.ade_computer.env={ADE_API="http://127.0.0.1:3000",ADE_PROJECT_ID="p-turn"}',
+      `mcp_servers.ade_computer.env={ADE_API="http://127.0.0.1:3000",ADE_PROJECT_ID="p-turn",ADE_SESSION_ID="${id}"}`,
     ),
   );
 });
@@ -600,6 +601,15 @@ test(
     assert.match(
       prompt,
       /only with the dev_server_start\/dev_server_stop\/dev_server_status tools; never start a server yourself/,
+    );
+    // Without a dev script the agent proposes a command for the user to approve once.
+    assert.match(
+      prompt,
+      /no package\.json dev script and no approved dev command, propose one: call dev_server_start with command .* and cwd .*ADE asks the user to approve it once/,
+    );
+    assert.match(
+      prompt,
+      /dev server at turn start: [^;]*; package\.json dev script \(npm run dev\)/,
     );
     assert.match(prompt, /verify it in your agent browser/);
     assert.match(prompt, /instead of asking the user which frontend port/);

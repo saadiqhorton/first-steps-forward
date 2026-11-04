@@ -20,6 +20,7 @@ export async function sessionActions(ctx) {
     UNSUPPORTED_RISK,
     save,
     resolveSessionOptions,
+    devApprovals,
     json,
   } = ctx;
   if (
@@ -113,9 +114,25 @@ export async function sessionActions(ctx) {
       return json(res, 200, await turns.stop(s));
     } else if (parts[2] === "permission") {
       const data = await body(req);
+      const asked = (s.pendingPermissions ?? []).find((p) => p.id === data.requestId);
+      // ADE's own "Run this dev command?" question: Allow stores the project's dev command.
+      if (asked?.kind === "dev_command") {
+        if (!["allow", "deny"].includes(data.optionId))
+          return json(res, 400, { error: 'Answer "allow" or "deny".' });
+        const project = state.projects.find((p) => p.id === s.projectId);
+        if (!project) return json(res, 404, { error: "Project not found." });
+        await devApprovals.answer(project, asked.id, data.optionId === "allow");
+        return json(res, 200, s);
+      }
       return json(res, 200, await turns.answer(s, data.requestId, data.optionId));
     } else if (parts[2] === "complete") {
-      return json(res, 200, await turns.complete(s));
+      const completed = await turns.complete(s);
+      // A completed session no longer asks anything.
+      if (completed.pendingPermissions) {
+        devApprovals.cancelForSession(completed);
+        await save();
+      }
+      return json(res, 200, completed);
     } else if (parts[2] === "reopen") {
       return json(res, 200, await turns.reopen(s));
     } else if (parts[2] === "checks") {

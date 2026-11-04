@@ -477,13 +477,21 @@ test("bootstrap dev-script re-scan refreshes the process record with a stable id
   const dir = mkdtempSync(path.join(os.tmpdir(), "ade-devscan-"));
   const project = { id: "proj-devscan", name: "devscan", path: dir };
 
-  // Unreadable package.json: a distinct note, not a silent "no script".
+  // No package.json at all (a Python or Go project): simply no dev script, not a read error,
+  // so the agent is told to propose a dev command.
   let res = await refreshDevProcess(project);
+  assert.equal(res.proc, null);
+  assert.equal(project.devScriptNote, undefined);
+
+  // Unreadable package.json: a distinct note, not a silent "no script".
+  mkdirSync(path.join(dir, "package.json"));
+  res = await refreshDevProcess(project);
   assert.equal(res.proc, null);
   assert.equal(res.changed, true);
   assert.match(project.devScriptNote, /could not be read or parsed/);
 
   // Readable but no scripts.dev: no record, and the note clears.
+  rmSync(path.join(dir, "package.json"), { recursive: true });
   writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "x", scripts: {} }));
   res = await refreshDevProcess(project);
   assert.equal(res.proc, null);

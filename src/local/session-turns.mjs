@@ -125,7 +125,7 @@ const SAFETY_PREAMBLE =
  * @param {() => Promise<void>} deps.save persists the workspace
  * @param {Record<string, AgentAdapter>} deps.adapters agent adapters by id
  * @param {string} deps.dataDir ADE's data folder
- * @param {(project: Project) => TurnContext} deps.turnContext dev server, agent browser and tool wiring for a project
+ * @param {(project: Project, session: Session) => TurnContext | Promise<TurnContext>} deps.turnContext dev server, agent browser and tool wiring for a project's turn
  * @param {{ append: (id: string, text: string) => Promise<unknown>, flush: (id: string) => Promise<void> }} [deps.logs]
  * @param {(scope: string) => void} [deps.emit]
  * @param {(session: Session) => void} [deps.turnEnded]
@@ -190,13 +190,23 @@ export function createSessionTurns({
     slot.controller.abort();
     if (slot.child) stopProcess(slot.child);
   };
-  /** Answer every open permission request "cancelled" (the turn is ending) and clear them. */
+  /**
+   * Answer every open permission request "cancelled" (the turn is ending) and clear them. A
+   * dev command request stays: it is about the project, not this turn, and the dev server
+   * route answers it (see dev-command.mjs).
+   */
   const dropPermissions = (session) => {
+    const kept = [];
     for (const request of session.pendingPermissions ?? []) {
+      if (request.kind === "dev_command") {
+        kept.push(request);
+        continue;
+      }
       waiters.get(request.id)?.({ outcome: "cancelled" });
       waiters.delete(request.id);
     }
-    delete session.pendingPermissions;
+    if (kept.length) session.pendingPermissions = kept;
+    else delete session.pendingPermissions;
   };
   /** Files that were already dirty before this turn are the user's, not the agent's. */
   const flagBaseline = (session, changes) => {
@@ -287,7 +297,7 @@ export function createSessionTurns({
         "No deployments, publishing, or external/shared-system changes without the user",
         "Do not revert or overwrite user changes",
         "The devServer status is ADE's observed snapshot at turn start. If it includes a running URL, use that URL instead of asking the user which frontend port to open. Do not infer that other services are running from the frontend alone.",
-        "Start, stop, and inspect the dev server only with the dev_server_start/dev_server_stop/dev_server_status tools; never start a server yourself (no nohup, &, disown, or a foreground dev command) and never leave one running that ADE does not manage",
+        "Start, stop, and inspect the dev server only with the dev_server_start/dev_server_stop/dev_server_status tools; never start a server yourself (no nohup, &, disown, or a foreground dev command) and never leave one running that ADE does not manage. When the project has no package.json dev script and no approved dev command, propose one: call dev_server_start with command (one program and its arguments, no shell operators; {port} becomes the port ADE picks, also in PORT) and cwd (its folder relative to the project root), and ADE asks the user to approve it once",
         "After changing anything visible, verify it in your agent browser (computer_open_url, screenshots, clicks, typing) before reporting done, and say what you checked; if the browser tools fail, report the exact error instead of claiming it works",
       ],
       relevantFiles: candidates.slice(0, 60),
@@ -432,7 +442,7 @@ export function createSessionTurns({
       if (project.uncommittedFiles?.length)
         session.baselineFiles = (await getDiff(project)).files.map((f) => f.path);
       else delete session.baselineFiles;
-      const context = turnContext(project);
+      const context = await turnContext(project, session);
       session.manifest = await buildManifest(session, project, agent, context);
       addLog(
         session,

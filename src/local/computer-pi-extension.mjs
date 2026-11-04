@@ -21,6 +21,7 @@ export default async function adeComputer(pi) {
   const callTool = createToolCaller({
     api: (process.env.ADE_API ?? "").replace(/\/+$/, ""),
     projectId: process.env.ADE_PROJECT_ID ?? "",
+    sessionId: process.env.ADE_SESSION_ID ?? "",
   });
   for (const tool of TOOLS) {
     pi.registerTool({

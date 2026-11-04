@@ -163,6 +163,7 @@ export async function projects(ctx) {
     state.sessions = state.sessions.filter((s) => s.projectId !== parts[1]);
     await Promise.all(removedSessions.map((session) => sessionLogs.remove(session.id)));
     state.processes = state.processes.filter((x) => x.projectId !== parts[1]);
+    ctx.devApprovals.cancelForProject(parts[1]);
     await save();
     return json(res, 200, {
       removed: parts[1],

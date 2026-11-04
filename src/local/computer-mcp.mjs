@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // stdio MCP server entry for ADE's agent computer: screenshots, mouse,
 // keyboard, a browser, and the project's dev server. Spawned by Codex and
-// OpenCode with ADE_API (the serving ADE instance's loopback base URL) and
-// ADE_PROJECT_ID in the environment. Tool definitions and call logic live
+// OpenCode with ADE_API (the serving ADE instance's loopback base URL),
+// ADE_PROJECT_ID and ADE_SESSION_ID in the environment. Tool definitions and call logic live
 // in computer-tools-defs.mjs (shebang-free so Vite SSR can import them).
 import { createInterface } from "node:readline";
 import { createToolCaller, handleMessage } from "./computer-tools-defs.mjs";
@@ -11,6 +11,7 @@ async function main() {
   const callTool = createToolCaller({
     api: (process.env.ADE_API ?? "").replace(/\/+$/, ""),
     projectId: process.env.ADE_PROJECT_ID ?? "",
+    sessionId: process.env.ADE_SESSION_ID ?? "",
   });
   const lines = createInterface({ input: process.stdin });
   for await (const line of lines) {
