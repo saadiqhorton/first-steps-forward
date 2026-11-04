@@ -29,18 +29,18 @@ function AttachmentChips({ attachments }: { attachments: MessageAttachment[] }) 
       {attachments.map((a) => (
         <div
           key={a.id}
-          className="flex max-w-[220px] items-center gap-2 rounded-lg border border-line bg-panel px-2 py-1.5"
+          className="flex max-w-56 items-center gap-2 rounded-lg border border-line bg-panel px-2 py-1"
         >
           {a.kind === "image" ? (
             <img
               src={`/api/attachments/${a.id}`}
               alt={a.name}
-              className="size-12 rounded object-cover"
+              className="size-12 rounded-xs object-cover"
             />
           ) : (
-            <File className="size-4 shrink-0 text-dim" aria-hidden />
+            <File className="size-4 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
           )}
-          <span className="min-w-0 truncate text-[12px]" title={a.name}>
+          <span className="min-w-0 truncate text-xs" title={a.name}>
             {a.name}
             {a.kind === "file" ? (
               <span className="text-dim"> · {formatAttachmentSize(a.size)}</span>
@@ -68,7 +68,7 @@ export function SessionMessage({
   const attachmentRow = attachments.length ? <AttachmentChips attachments={attachments} /> : null;
 
   const content = structured ? (
-    <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-ink/5 p-3 font-mono text-[11px] leading-relaxed">
+    <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-ink/5 p-3 font-mono text-xs leading-relaxed">
       {text}
     </pre>
   ) : role === "agent" ? (
@@ -85,14 +85,14 @@ export function SessionMessage({
     return (
       <div className="flex min-w-0 justify-end">
         <Collapsible className="min-w-0 max-w-[min(85%,100%)]">
-          <CollapsibleTrigger className="flex w-full flex-col items-stretch gap-2 rounded-lg bg-surface-muted px-3.5 py-2 text-left font-mono text-[11px] text-ink/80 transition-colors hover:text-ink [&[data-state=open]_.show]:hidden [&[data-state=closed]_.hide]:hidden">
+          <CollapsibleTrigger className="flex w-full flex-col items-stretch gap-2 rounded-xl bg-surface-muted px-4 py-2 text-left font-mono text-xs text-ink/80 transition-colors hover:text-ink [&[data-state=open]_.show]:hidden [&[data-state=closed]_.hide]:hidden">
             <span className="flex w-full items-center gap-2">
               <span className="show truncate">Your prompt · {lineCount} lines</span>
               <span className="hide">Hide prompt</span>
             </span>
             {attachmentRow}
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-1.5 min-w-0 overflow-hidden rounded-lg data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down bg-surface-muted px-4 py-2.5 text-[13.5px] leading-relaxed text-ink [overflow-wrap:anywhere]">
+          <CollapsibleContent className="mt-2 min-w-0 overflow-hidden rounded-xl data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down bg-surface-muted px-4 py-3 text-sm leading-5.5 text-ink [overflow-wrap:anywhere]">
             <div className="whitespace-pre-wrap break-words">{text}</div>
           </CollapsibleContent>
         </Collapsible>
@@ -100,18 +100,27 @@ export function SessionMessage({
     );
   }
 
+  // ADE's own notices sit in the margin of the conversation, quieter than replies.
+  if (role === "system") {
+    return (
+      <div className="min-w-0 max-w-[min(85%,100%)] border-l-2 border-line pl-3 text-[13px] leading-5 text-[color:var(--text-secondary)] [overflow-wrap:anywhere]">
+        <div className="label-section mb-1 text-dim">ADE</div>
+        {content}
+        {attachmentRow}
+      </div>
+    );
+  }
+
   return (
     <div className={`flex min-w-0 ${role === "user" ? "justify-end" : "justify-start"}`}>
       <div
-        className={`min-w-0 max-w-[min(85%,100%)] overflow-hidden rounded-lg px-4 py-2.5 text-[13.5px] leading-relaxed [overflow-wrap:anywhere] ${role === "user" ? "bg-surface-muted text-ink" : role === "system" ? "border border-amber/40 bg-amber/10" : "card-panel"}`}
+        className={`min-w-0 max-w-[min(85%,100%)] overflow-hidden px-4 py-3 text-sm leading-5.5 [overflow-wrap:anywhere] ${role === "user" ? "rounded-xl bg-surface-muted text-ink" : "card-panel"}`}
       >
-        {role !== "user" && (
-          <div className="label-mono mb-1">{role === "system" ? "ADE" : agentName}</div>
-        )}
+        {role === "agent" && <div className="label-section mb-1">{agentName}</div>}
         {collapseAgent ? (
           <Collapsible>
-            <p className="line-clamp-3 font-mono text-[11px] text-dim">{text.slice(0, 320)}</p>
-            <CollapsibleTrigger className="mt-2 rounded text-left font-mono text-[11px] text-teal underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal [&[data-state=open]_.show]:hidden [&[data-state=closed]_.hide]:hidden">
+            <p className="line-clamp-3 font-mono text-xs text-dim">{text.slice(0, 320)}</p>
+            <CollapsibleTrigger className="mt-2 rounded text-left font-mono text-xs text-teal underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal [&[data-state=open]_.show]:hidden [&[data-state=closed]_.hide]:hidden">
               <span className="show">Show structured output · {lineCount} lines</span>
               <span className="hide">Hide details</span>
             </CollapsibleTrigger>

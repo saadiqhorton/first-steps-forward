@@ -42,9 +42,9 @@ export function RightRail(props: {
         aria-label="Show right panel"
         title="Show right panel (Ctrl+/)"
         onClick={onExpand}
-        className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+        className="grid size-7 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
       >
-        <ExpandIcon className="size-4" aria-hidden />
+        <ExpandIcon className="size-4" strokeWidth={1.5} aria-hidden />
       </button>
 
       <div className={dividerClass} />
@@ -67,7 +67,7 @@ export function RightRail(props: {
                     : "text-dim hover:bg-ink/[0.04] hover:text-ink"
                 }`}
               >
-                <Icon className="size-4" aria-hidden />
+                <Icon className="size-4" strokeWidth={1.5} aria-hidden />
               </button>
 
               {isComputer && (
@@ -86,7 +86,7 @@ export function RightRail(props: {
 
       {!isVertical && (
         <div className="ml-auto flex items-center">
-          <span className="text-[12px] text-dim whitespace-nowrap">
+          <span className="text-xs text-dim whitespace-nowrap">
             {RIGHT_PANE_TABS.find((t) => t.id === tab)?.label}
           </span>
         </div>

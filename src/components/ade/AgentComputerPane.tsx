@@ -27,6 +27,10 @@ const PROFILE_OPTIONS: Array<{ value: AgentComputer["profile"]; label: string; t
 
 const megabytes = (bytes: number) => Math.round(bytes / 1_000_000);
 
+const DETAIL_ROW = "flex h-9 items-center justify-between gap-3 px-4";
+const DETAIL_LABEL = "min-w-0 truncate text-[13px] text-[var(--text-secondary)]";
+const DETAIL_VALUE = "shrink-0 font-mono text-xs tabular-nums text-ink";
+
 /**
  * The project's agent browser: headless Chrome on this machine that the coding agent drives
  * itself (screenshots, mouse, keyboard, page snapshots) to run and manually test the project.
@@ -179,39 +183,32 @@ export function AgentComputerPane({
 
   const placeholder = (
     <div
-      className={`relative flex aspect-[16/10] flex-col rounded-xl border border-line bg-[#141716] text-center text-white shadow-sm ${dock === "side" ? "mx-3" : ""} @max-[20rem]/computer:aspect-auto`}
+      className={`relative flex aspect-[16/10] flex-col rounded-xl border border-line bg-deck text-center text-deck-foreground ${dock === "side" ? "mx-3" : ""} @max-[20rem]/computer:aspect-auto`}
     >
-      <div
-        className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[radial-gradient(ellipse_at_center,rgba(218,174,92,0.10),transparent_58%)]"
-        aria-hidden
-      />
       <div className="flex-1 grid place-items-center px-5 py-6 @max-[20rem]/computer:px-4 @max-[20rem]/computer:py-5">
         <div className="relative w-full max-w-sm">
-          <div className="mx-auto mb-4 grid size-14 @max-[20rem]/computer:size-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-amber">
+          <div className="mx-auto mb-3 grid place-items-center">
             {preparing || (!computer && !error) ? (
               <LoaderCircle
-                className="size-6 @max-[20rem]/computer:size-5 animate-spin"
-                aria-hidden
-              />
-            ) : (
-              <Globe
-                className="size-6 @max-[20rem]/computer:size-5"
+                className="size-5 animate-spin text-amber"
                 strokeWidth={1.5}
                 aria-hidden
               />
+            ) : (
+              <Globe className="size-5 text-deck-foreground/50" strokeWidth={1.5} aria-hidden />
             )}
           </div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/45 @max-[20rem]/computer:hidden">
+          <div className="text-xs text-deck-foreground/50 @max-[20rem]/computer:hidden">
             {project.name} · local browser
           </div>
-          <h2 className="mt-2 text-lg font-medium tracking-tight">{screenTitle}</h2>
-          <p className="mx-auto mt-2 max-w-xs text-[12px] leading-relaxed text-white/65 @max-[20rem]/computer:line-clamp-3">
+          <h2 className="mt-2 text-lg font-medium">{screenTitle}</h2>
+          <p className="mx-auto mt-2 max-w-xs text-xs leading-relaxed text-deck-foreground/65 @max-[20rem]/computer:line-clamp-3">
             {screenDescription}
           </p>
           {status === "installing" && progress && (
             <div className="mx-auto mt-4 max-w-xs">
               <div
-                className="h-1.5 overflow-hidden rounded-full bg-white/10"
+                className="h-1.5 overflow-hidden rounded-full bg-deck-foreground/10"
                 role="progressbar"
                 aria-label="Browser download"
                 aria-valuemin={0}
@@ -223,7 +220,7 @@ export function AgentComputerPane({
                   style={{ width: `${progress.unpacking ? 100 : percent}%` }}
                 />
               </div>
-              <div className="mt-2 font-mono text-[10px] text-white/45">
+              <div className="mt-2 font-mono text-xs tabular-nums text-deck-foreground/50">
                 {progress.unpacking
                   ? "unpacking"
                   : `${megabytes(progress.downloadedBytes)} of ${megabytes(progress.totalBytes)} MB`}
@@ -231,8 +228,8 @@ export function AgentComputerPane({
             </div>
           )}
           {computer?.setupCommand && (
-            <div className="mx-auto mt-4 flex max-w-xs items-center gap-2 rounded-lg border border-white/10 bg-black/30 py-1.5 pr-1.5 pl-3 text-left">
-              <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/85">
+            <div className="mx-auto mt-4 flex max-w-xs items-center gap-2 rounded-lg border border-deck-foreground/10 bg-deck-foreground/[0.04] py-1 pr-1 pl-3 text-left">
+              <code className="min-w-0 flex-1 truncate font-mono text-xs text-deck-foreground/85">
                 {computer.setupCommand}
               </code>
               <button
@@ -240,12 +237,12 @@ export function AgentComputerPane({
                 onClick={() => void copySetup()}
                 aria-label="Copy setup command"
                 title="Copy"
-                className="grid size-7 shrink-0 place-items-center rounded-md text-white/60 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-amber"
+                className="grid size-7 shrink-0 place-items-center rounded-md text-deck-foreground/60 transition-colors hover:bg-deck-foreground/10 hover:text-deck-foreground focus-visible:outline-2 focus-visible:outline-amber"
               >
                 {copied ? (
-                  <Check className="size-3.5" aria-hidden />
+                  <Check className="size-4" strokeWidth={1.5} aria-hidden />
                 ) : (
-                  <Copy className="size-3.5" aria-hidden />
+                  <Copy className="size-4" strokeWidth={1.5} aria-hidden />
                 )}
               </button>
             </div>
@@ -255,12 +252,12 @@ export function AgentComputerPane({
               type="button"
               onClick={() => void run("start")}
               disabled={busy}
-              className="btn-amber mt-5 inline-flex items-center justify-center gap-2 px-4 py-2 text-[12px] disabled:opacity-50 @max-[20rem]/computer:w-full"
+              className="btn-amber mt-5 inline-flex items-center justify-center gap-2 px-4 py-2 text-xs disabled:opacity-50 @max-[20rem]/computer:w-full"
             >
               {busy ? (
-                <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+                <LoaderCircle className="size-4 animate-spin" strokeWidth={1.5} aria-hidden />
               ) : (
-                <Globe className="size-3.5" aria-hidden />
+                <Globe className="size-4" strokeWidth={1.5} aria-hidden />
               )}
               {status === "error" ? "Try starting again" : "Start browser"}
             </button>
@@ -270,15 +267,15 @@ export function AgentComputerPane({
               type="button"
               onClick={() => void refresh()}
               disabled={busy}
-              className="btn-quiet mt-5 inline-flex items-center justify-center gap-2 px-4 py-2 text-[12px] text-white disabled:opacity-50 @max-[20rem]/computer:w-full"
+              className="btn-quiet mt-5 inline-flex items-center justify-center gap-2 px-4 py-2 text-xs disabled:opacity-50 @max-[20rem]/computer:w-full"
             >
-              <RotateCw className="size-3.5" aria-hidden />
+              <RotateCw className="size-4" strokeWidth={1.5} aria-hidden />
               Check again
             </button>
           )}
         </div>
       </div>
-      <div className="flex items-center justify-between border-t border-white/10 px-4 py-2 font-mono text-[10px] text-white/45 gap-3">
+      <div className="flex items-center justify-between gap-3 border-t border-deck-foreground/10 px-4 py-2 font-mono text-xs tabular-nums text-deck-foreground/50">
         <span className="truncate">
           {computer?.screen
             ? `${computer.screen.width} × ${computer.screen.height}`
@@ -292,23 +289,23 @@ export function AgentComputerPane({
   const browserScreen =
     browser.place !== "dock" ? (
       <div className="mx-3 flex flex-col items-start gap-3 rounded-xl border border-line bg-surface-muted p-4">
-        <p className="text-[13px] text-dim">
+        <p className="text-[13px] text-[var(--text-secondary)]">
           {browser.place === "float" ? "Showing in floating window" : "Browser is hidden"}
         </p>
         <button
           type="button"
           onClick={() => browser.setPlace("dock")}
-          className="btn-quiet px-3 py-1.5 text-[12px]"
+          className="btn-quiet px-3 py-1.5 text-xs"
         >
           Dock here
         </button>
       </div>
     ) : !browser.status ? (
-      <div className="mx-3 rounded-xl border border-line bg-surface-muted p-4 text-[12px] text-dim">
+      <div className="mx-3 rounded-xl border border-line bg-surface-muted p-4 text-xs text-dim">
         Checking the browser…
       </div>
     ) : !browser.status.available ? (
-      <div className="mx-3 rounded-xl border border-line bg-surface-muted p-4 text-[12px] leading-snug text-dim">
+      <div className="mx-3 rounded-xl border border-line bg-surface-muted p-4 text-xs leading-snug text-dim">
         {browser.status.reason ?? "The browser is not available yet."}
       </div>
     ) : (
@@ -323,7 +320,7 @@ export function AgentComputerPane({
   const info = (
     <>
       <div className="px-4 pb-4">
-        <p className="mt-1 text-[12px] leading-snug text-dim">
+        <p className="mt-1 text-xs leading-snug text-dim">
           {running
             ? control
               ? "Your mouse and keyboard reach the agent's browser. Hand it back when you're done so you don't collide with the agent."
@@ -331,12 +328,12 @@ export function AgentComputerPane({
             : "The task stays beside the browser. When the agent opens the app, it appears here."}
         </p>
         {error && (
-          <p role="alert" className="mt-2 text-[12px] leading-snug text-danger">
+          <p role="alert" className="mt-2 text-xs leading-snug text-danger">
             {error}
           </p>
         )}
         {browser.actionError && (
-          <p role="alert" className="mt-2 text-[12px] leading-snug text-danger">
+          <p role="alert" className="mt-2 text-xs leading-snug text-danger">
             {browser.actionError}
           </p>
         )}
@@ -346,7 +343,7 @@ export function AgentComputerPane({
               type="button"
               onClick={() => void browser.changeControl(control ? "release" : "take")}
               aria-pressed={control}
-              className={`${control ? "btn-amber" : "btn-quiet"} px-3 py-1.5 text-[12px]`}
+              className={`${control ? "btn-amber" : "btn-quiet"} px-3 py-1.5 text-xs`}
             >
               {control ? "Hand back" : "Take control"}
             </button>
@@ -354,7 +351,7 @@ export function AgentComputerPane({
               type="button"
               onClick={() => void run("stop")}
               disabled={busy}
-              className="btn-quiet px-3 py-1.5 text-[12px] disabled:opacity-50"
+              className="btn-quiet px-3 py-1.5 text-xs disabled:opacity-50"
             >
               Turn off
             </button>
@@ -362,18 +359,16 @@ export function AgentComputerPane({
         )}
       </div>
       <div className={dock === "bottom" ? "" : "mt-auto"}>
-        <div className="border-t border-line">
-          <div className="flex items-center gap-3 border-b border-line px-3 py-2.5">
-            <span className="label-mono">Details</span>
-            <span className="ml-auto font-mono text-[10px] text-dim">
-              {session ? "this task" : "project"}
-            </span>
+        <div className="border-t border-line pb-2">
+          <div className="flex h-10 items-center gap-3 border-b border-line px-4">
+            <h3 className="label-section">Details</h3>
+            <span className="ml-auto text-xs text-dim">{session ? "this task" : "project"}</span>
           </div>
           {computer && status !== "unavailable" && (
-            <div className="flex items-center justify-between gap-3 px-3 py-2 font-mono text-[10px] text-dim">
-              <span className="min-w-0 truncate">Browser profile</span>
+            <div className={DETAIL_ROW}>
+              <span className={DETAIL_LABEL}>Browser profile</span>
               <span
-                className="flex shrink-0 items-center gap-1"
+                className="flex shrink-0 items-center gap-1 text-xs text-dim"
                 role="group"
                 aria-label="Browser profile"
               >
@@ -385,7 +380,7 @@ export function AgentComputerPane({
                     title={option.title}
                     disabled={busy}
                     onClick={() => void apply(computerProfile(project.id, option.value))}
-                    className={`rounded px-1.5 py-0.5 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-amber ${computer.profile === option.value ? "bg-surface-muted text-ink ring-1 ring-line ring-inset" : "hover:text-ink"}`}
+                    className={`h-6 rounded-xs px-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-amber ${computer.profile === option.value ? "bg-surface-muted text-ink ring-1 ring-line ring-inset" : "hover:text-ink"}`}
                   >
                     {option.label}
                   </button>
@@ -398,7 +393,7 @@ export function AgentComputerPane({
                       onClick={() => void run("clear")}
                       disabled={busy}
                       title="Sign out everywhere: clear this project's cookies, storage and cache"
-                      className="rounded px-1.5 py-0.5 hover:text-danger disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-amber"
+                      className="h-6 rounded-xs px-2 transition-colors hover:text-danger disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-amber"
                     >
                       clear
                     </button>
@@ -407,19 +402,19 @@ export function AgentComputerPane({
               </span>
             </div>
           )}
-          <div className="flex justify-between gap-3 px-3 py-2 font-mono text-[10px] text-dim">
-            <span className="min-w-0 truncate">Checks</span>
-            <span className={`shrink-0 ${checks?.verified ? "text-teal" : ""}`}>
+          <div className={DETAIL_ROW}>
+            <span className={DETAIL_LABEL}>Checks</span>
+            <span className={`${DETAIL_VALUE} ${checks?.verified ? "text-teal" : ""}`}>
               {checks ? checks.text : "—"}
             </span>
           </div>
-          <div className="flex justify-between gap-3 px-3 py-2 font-mono text-[10px] text-dim">
-            <span className="min-w-0 truncate">Working tree diff</span>
-            <span className="shrink-0">{session ? `+${added} / −${removed}` : "—"}</span>
+          <div className={DETAIL_ROW}>
+            <span className={DETAIL_LABEL}>Working tree diff</span>
+            <span className={DETAIL_VALUE}>{session ? `+${added} / −${removed}` : "—"}</span>
           </div>
-          <div className="flex justify-between gap-3 px-3 py-2 font-mono text-[10px] text-dim">
-            <span className="min-w-0 truncate">Agent output</span>
-            <span className="shrink-0">
+          <div className={DETAIL_ROW}>
+            <span className={DETAIL_LABEL}>Agent output</span>
+            <span className={DETAIL_VALUE}>
               {session ? `${sessionLogs.data?.lines.length ?? 0} lines` : "—"}
             </span>
           </div>
@@ -436,11 +431,9 @@ export function AgentComputerPane({
       <div className="flex min-h-11 items-center justify-between border-b border-line px-4 py-2 gap-3">
         <div className="min-w-0">
           <div className="text-sm font-medium">Agent browser</div>
-          <div className="mt-0.5 truncate text-[11px] text-dim">{project.name}</div>
+          <div className="mt-0.5 truncate text-xs text-dim">{project.name}</div>
         </div>
-        <span
-          className={`ml-3 inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line px-2 py-1 font-mono text-[10px] ${running ? "text-teal" : status === "error" ? "text-danger" : "text-dim"}`}
-        >
+        <span className="ml-3 inline-flex shrink-0 items-center gap-2 text-xs text-[var(--text-secondary)]">
           <span
             className={`size-1.5 rounded-full ${running ? "bg-teal" : preparing ? "bg-amber animate-pulse-soft" : status === "error" ? "bg-danger" : "bg-dim/60"}`}
             aria-hidden

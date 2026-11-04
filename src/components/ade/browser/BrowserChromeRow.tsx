@@ -29,7 +29,7 @@ import { openExternally, togglePictureInPicture } from "./browserActions";
 import { useBrowserPreview } from "./browserPreviewContext";
 
 const ICON_BUTTON =
-  "grid size-7 shrink-0 place-items-center rounded-md text-dim hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:pointer-events-none disabled:opacity-40";
+  "grid size-7 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:pointer-events-none disabled:opacity-40";
 
 /**
  * Address bar for the docked browser: history, reload, the page address (editable only while
@@ -101,7 +101,7 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
           onClick={() => send({ type: "history", delta: -1 })}
           className={ICON_BUTTON}
         >
-          <ArrowLeft className="size-3.5" aria-hidden />
+          <ArrowLeft className="size-4" strokeWidth={1.5} aria-hidden />
         </button>
         <button
           type="button"
@@ -111,7 +111,7 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
           onClick={() => send({ type: "history", delta: 1 })}
           className={ICON_BUTTON}
         >
-          <ArrowRight className="size-3.5" aria-hidden />
+          <ArrowRight className="size-4" strokeWidth={1.5} aria-hidden />
         </button>
         <button
           type="button"
@@ -121,7 +121,7 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
           onClick={() => send({ type: "reload" })}
           className={ICON_BUTTON}
         >
-          <RotateCw className="size-3.5" aria-hidden />
+          <RotateCw className="size-4" strokeWidth={1.5} aria-hidden />
         </button>
 
         <form onSubmit={submit} className="flex min-w-0 flex-1">
@@ -136,7 +136,7 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
             onChange={(event) => setDraft(event.target.value)}
             onBlur={() => setDraft(null)}
             onKeyDown={handleKey}
-            className="h-7 w-full min-w-0 rounded-md bg-paper px-2.5 font-mono text-[12px] text-ink ring-1 ring-line ring-inset outline-none placeholder:text-dim read-only:text-dim focus-visible:outline-2 focus-visible:outline-amber"
+            className="h-7 w-full min-w-0 rounded-md bg-paper px-3 font-mono text-xs text-ink ring-1 ring-line ring-inset outline-none placeholder:text-dim read-only:text-dim focus-visible:outline-2 focus-visible:outline-amber"
           />
         </form>
 
@@ -148,7 +148,7 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
           onClick={() => openExternally(url)}
           className={ICON_BUTTON}
         >
-          <ExternalLink className="size-3.5" aria-hidden />
+          <ExternalLink className="size-4" strokeWidth={1.5} aria-hidden />
         </button>
         <button
           type="button"
@@ -157,7 +157,7 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
           onClick={() => preview.setPlace("float")}
           className={ICON_BUTTON}
         >
-          <SquareArrowOutUpRight className="size-3.5" aria-hidden />
+          <SquareArrowOutUpRight className="size-4" strokeWidth={1.5} aria-hidden />
         </button>
         {supportsPictureInPicture() ? (
           <button
@@ -167,9 +167,9 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
             title={pipActive ? "Close picture in picture" : "Picture in picture"}
             disabled={!canvas}
             onClick={togglePip}
-            className={`${ICON_BUTTON} ${pipActive ? "text-amber" : ""}`}
+            className={`${ICON_BUTTON} ${pipActive ? "bg-surface-muted text-ink ring-1 ring-line ring-inset" : ""}`}
           >
-            <PictureInPicture2 className="size-3.5" aria-hidden />
+            <PictureInPicture2 className="size-4" strokeWidth={1.5} aria-hidden />
           </button>
         ) : null}
         <button
@@ -180,9 +180,9 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
           className={ICON_BUTTON}
         >
           {fullscreen ? (
-            <Shrink className="size-3.5" aria-hidden />
+            <Shrink className="size-4" strokeWidth={1.5} aria-hidden />
           ) : (
-            <Expand className="size-3.5" aria-hidden />
+            <Expand className="size-4" strokeWidth={1.5} aria-hidden />
           )}
         </button>
 
@@ -194,10 +194,7 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
         ) : null}
       </div>
       {pipError ? (
-        <p
-          role="alert"
-          className="border-b border-line bg-panel px-3 py-1.5 text-[11px] text-danger"
-        >
+        <p role="alert" className="border-b border-line bg-panel px-3 py-1.5 text-xs text-danger">
           {pipError}
         </p>
       ) : null}

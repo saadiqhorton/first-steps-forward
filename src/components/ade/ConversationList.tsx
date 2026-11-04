@@ -25,6 +25,12 @@ const FILTERS: { id: ConversationFilter; label: string }[] = [
   { id: "unread", label: "Unread" },
 ];
 
+// Arc's segmented control styles live in an unlayered CSS module, so these call-site
+// overrides need `!` to beat it from Tailwind's utilities layer. Compact enough that
+// all four filters fit the default sidebar without clipping a label.
+const FILTER_CONTROL =
+  "w-full [&>div]:gap-0! [&>div]:p-0.5! [&_button]:min-h-7! [&_button]:grow! [&_button]:px-1! [&_button]:text-xs! [&_button>span]:gap-1!";
+
 function titleOf(session: SessionSummary): string {
   const request = session.request?.trim() ?? "";
   const summary = session.summary?.trim() ?? "";
@@ -111,33 +117,37 @@ export function ConversationList() {
           params={{ projectId }}
           search={(prev) => prev}
           aria-label="New conversation"
-          className="ml-auto grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+          className="ml-auto grid size-7 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
         >
-          <Plus className="size-4" aria-hidden strokeWidth={2} />
+          <Plus className="size-4" aria-hidden strokeWidth={1.5} />
         </Link>
       </div>
 
-      <div className="shrink-0 px-3 pb-2">
+      <div className="shrink-0 px-2 pb-2">
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search conversations"
           aria-label="Search conversations"
-          className="w-full rounded-md border border-line bg-paper px-2.5 py-1.5 text-[13px] text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
+          className="h-8 w-full rounded-lg border border-line bg-paper px-3 text-[13px] text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
         />
       </div>
 
-      <div className="flex w-full shrink-0 px-3 pb-3">
+      <div className="flex w-full shrink-0 px-2 pb-3">
         <SegmentedControl
-          className="w-full max-w-none"
+          className={FILTER_CONTROL}
           label="Filters"
           value={filter}
           onValueChange={(next) => setFilter(next as ConversationFilter)}
           options={FILTERS.map((f) => ({
             value: f.id,
             label: f.label,
-            accessory: <span className="tabular-nums opacity-70">{counts[f.id]}</span>,
+            // The footer already counts the list, so "All" carries no figure; the rest show one only when non-zero.
+            accessory:
+              f.id !== "all" && counts[f.id] > 0 ? (
+                <span className="tabular-nums opacity-70">{counts[f.id]}</span>
+              ) : undefined,
           }))}
         />
       </div>
@@ -158,37 +168,37 @@ export function ConversationList() {
                   params={{ projectId, sessionId: session.id }}
                   search={(prev) => prev}
                   onClick={() => markViewed(session.id, session.updatedAt)}
-                  className={`relative isolate block w-full overflow-hidden rounded-md px-3 py-2.5 text-left transition-colors ${
+                  className={`relative isolate block w-full overflow-hidden rounded-lg px-3 py-2 text-left transition-colors ${
                     active ? "" : "hover:bg-ink/[0.04]"
                   }`}
                 >
                   {active && (
                     <GlideIndicator
                       id="conversation-active"
-                      className="absolute inset-0 -z-10 rounded-md bg-amber/10 ring-1 ring-amber/25 ring-inset"
+                      className="absolute inset-0 -z-10 rounded-lg bg-surface-muted ring-1 ring-ink/[0.08] ring-inset"
                     />
                   )}
                   <div className="flex items-start gap-2">
                     {unread && (
                       <span
-                        className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber"
+                        className="mt-2 size-1.5 shrink-0 rounded-full bg-amber"
                         aria-label="Unread"
                       />
                     )}
-                    <div className={`min-w-0 flex-1 ${unread ? "" : "pl-0"}`}>
+                    <div className="min-w-0 flex-1">
                       <p
-                        className="line-clamp-1 text-[13px] leading-snug text-ink"
+                        className="line-clamp-1 text-[13px] leading-5 text-ink"
                         title={session.request}
                       >
                         {titleOf(session)}
                       </p>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="font-mono text-[10px] text-dim">
+                      <div className="mt-1 flex h-4 items-center gap-2 overflow-hidden whitespace-nowrap">
+                        <span className="text-xs text-dim tabular-nums">
                           {agent?.short ?? session.agentId} · {format(session.updatedAt, "MMM d")}
                         </span>
                         <StatusPill status={session.status} needsYou={needsYou(session)} />
                         {showElapsed && (
-                          <span className="font-mono text-[10px] tabular-nums text-teal">
+                          <span className="font-mono text-xs tabular-nums text-teal">
                             {formatElapsed(now, turnStart)}
                           </span>
                         )}
@@ -201,20 +211,20 @@ export function ConversationList() {
           })}
         </AnimatePresence>
         {filtered.length === 0 && (
-          <p className="px-3 py-6 text-center text-[12px] text-dim">No conversations match.</p>
+          <p className="px-3 py-6 text-center text-xs text-dim">No conversations match.</p>
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-3 border-t border-line px-4 py-2.5">
-        <span className="font-mono text-[10px] text-dim tabular-nums">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-line px-3 py-3">
+        <span className="text-xs whitespace-nowrap text-dim tabular-nums">
           {filtered.length} conversation{filtered.length === 1 ? "" : "s"}
         </span>
-        <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-[12px] text-dim">
+        <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs whitespace-nowrap text-dim">
           <input
             type="checkbox"
             checked={showCompleted}
             onChange={(e) => setShowCompleted(e.target.checked)}
-            className="size-3.5 accent-[var(--amber)]"
+            className="size-3.5 accent-[var(--text-secondary)]"
           />
           Show completed
         </label>

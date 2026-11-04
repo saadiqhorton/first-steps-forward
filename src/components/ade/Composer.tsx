@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp, GitBranch, Sparkles, X } from "lucide-react";
+import { ArrowUp, GitBranch, Workflow as WorkflowIcon, X } from "lucide-react";
 import { AgentPicker, agentChipLabel, type AgentSelection } from "@/components/ade/AgentPicker";
 import { useAdeState } from "@/lib/ade/store";
 import type { Workflow } from "@/lib/ade/types";
@@ -264,23 +264,21 @@ export function Composer({
       {workflow ? (
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
           <span
-            className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-amber/40 bg-amber/10 py-1 pr-1 pl-2.5 text-[12px] text-ink"
+            className="inline-flex max-w-full items-center gap-2 rounded-full bg-surface-muted py-1 pr-1 pl-3 text-xs text-ink ring-1 ring-line"
             title={workflow.description || workflow.name}
           >
-            <Sparkles className="size-3.5 shrink-0 text-amber-deep" aria-hidden />
+            <WorkflowIcon className="size-4 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
             <span className="min-w-0 truncate font-medium">{workflow.name}</span>
-            <span className="hidden shrink-0 font-mono text-[10px] tracking-[0.08em] text-dim uppercase @[18rem]/composer:inline">
-              Workflow
-            </span>
+            <span className="hidden shrink-0 text-dim @[18rem]/composer:inline">Workflow</span>
             {onWorkflowRemove ? (
               <button
                 type="button"
                 onClick={onWorkflowRemove}
                 disabled={disabled}
                 aria-label={`Remove ${workflow.name} workflow`}
-                className="grid size-6 shrink-0 place-items-center rounded-full text-dim transition hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/40 disabled:opacity-60"
+                className="grid size-6 shrink-0 place-items-center rounded-full text-dim transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/40 disabled:opacity-60"
               >
-                <X className="size-3.5" aria-hidden />
+                <X className="size-4" strokeWidth={1.5} aria-hidden />
               </button>
             ) : null}
           </span>
@@ -296,10 +294,10 @@ export function Composer({
         disabled={!!disabledReason}
         placeholder={
           disabledReason ??
-          (workflow ? "Add instructions for this workflow (optional)…" : placeholder)
+          (workflow ? "Add instructions for this workflow (optional)" : placeholder)
         }
         rows={mode === "new" ? 3 : 1}
-        className={`block w-full resize-none bg-transparent px-4 ${workflow ? "pt-2" : "pt-3"} pb-2 text-[15px] leading-relaxed placeholder:text-dim/70 focus-visible:outline-none disabled:opacity-60`}
+        className={`block w-full resize-none bg-transparent px-4 ${workflow ? "pt-2" : "pt-3"} pb-2 text-sm leading-5.5 placeholder:text-dim/70 focus-visible:outline-none disabled:opacity-60`}
       />
       <ComposerAttachments
         drafts={drafts}
@@ -310,7 +308,7 @@ export function Composer({
         dragging={dragging}
       />
       {running ? (
-        <p className="px-4 pb-1 text-[12px] leading-relaxed text-dim">
+        <p className="px-4 pb-1 text-xs leading-5 text-dim">
           Send later waits until this step finishes. Send now stops this step and uses your message.
         </p>
       ) : null}
@@ -339,20 +337,20 @@ export function Composer({
             onClick={() => setPickerOpen((v) => !v)}
             aria-expanded={pickerOpen}
             aria-haspopup="dialog"
-            className="btn-quiet flex min-w-0 max-w-[55%] items-center gap-2 px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/40 aria-expanded:bg-ink/[0.06]"
+            className="btn-quiet flex min-w-0 max-w-[55%] items-center gap-2 px-3 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/40 aria-expanded:bg-ink/[0.06]"
           >
             <span className="min-w-0 truncate">
-              <span className="block truncate text-[12.5px] font-medium leading-tight">
-                {chip.title}
+              <span className="block truncate text-xs font-medium leading-4">{chip.title}</span>
+              <span className="block truncate font-mono text-xs leading-4 text-dim">
+                {chip.subtitle}
               </span>
-              <span className="block truncate font-mono text-[10px] text-dim">{chip.subtitle}</span>
             </span>
           </button>
           <span
-            className="@max-[22rem]/composer:hidden flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-dim"
+            className="@max-[22rem]/composer:hidden flex min-w-0 flex-1 basis-0 items-center gap-1.5 font-mono text-xs text-dim"
             title={`Branch ${branch}`}
           >
-            <GitBranch className="size-3.5 shrink-0" aria-hidden />
+            <GitBranch className="size-4 shrink-0" strokeWidth={1.5} aria-hidden />
             <span className="truncate">{branch || "unknown"}</span>
           </span>
           <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -367,7 +365,7 @@ export function Composer({
                   type="button"
                   onClick={() => void send("later")}
                   disabled={!canSend}
-                  className="btn-quiet px-3 py-1.5 text-[12px] disabled:opacity-60"
+                  className="btn-quiet px-3 py-1.5 text-xs disabled:opacity-60"
                 >
                   Send later
                 </button>
@@ -375,7 +373,7 @@ export function Composer({
                   type="button"
                   onClick={() => void send("now")}
                   disabled={!canSend}
-                  className="btn-amber px-3 py-1.5 text-[12px] disabled:opacity-60"
+                  className="btn-amber px-3 py-1.5 text-xs disabled:opacity-60"
                 >
                   Send now
                 </button>
@@ -388,17 +386,14 @@ export function Composer({
                 aria-label={sending ? "Sending" : "Send"}
                 className="btn-amber grid size-9 shrink-0 place-items-center disabled:opacity-60"
               >
-                <ArrowUp className="size-4" aria-hidden />
+                <ArrowUp className="size-4" strokeWidth={1.5} aria-hidden />
               </button>
             )}
           </div>
         </div>
       </div>
       {error ? (
-        <p
-          role="alert"
-          className="border-t border-line px-4 py-2 text-[12px] leading-relaxed text-danger"
-        >
+        <p role="alert" className="border-t border-line px-4 py-2 text-xs leading-5 text-danger">
           {error}
         </p>
       ) : null}

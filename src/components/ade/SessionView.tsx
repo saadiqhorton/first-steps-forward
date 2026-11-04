@@ -34,8 +34,7 @@ function waitingPreview(prompt: string) {
   return `${visible.slice(0, 139)}…`;
 }
 
-const stopButtonClass =
-  "shrink-0 rounded-md border border-line bg-paper px-3 py-1.5 text-[13px] font-medium text-ink";
+const stopButtonClass = "btn-quiet shrink-0 px-3 py-1.5 text-xs font-medium";
 
 function selectionFromSession(session: {
   agentId: AgentSelection["agentId"];
@@ -181,10 +180,10 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   if (!session)
     return (
       <div className="grid h-full place-items-center text-sm text-dim" role="status">
-        {detailQuery.error ? "Could not load this conversation." : "Loading conversation…"}
+        {detailQuery.error ? "Could not load this conversation" : "Loading conversation…"}
       </div>
     );
-  if (!project) return <main className="flex-1 p-8">Project not found.</main>;
+  if (!project) return <main className="flex-1 p-8">Project not found</main>;
 
   const running = ["working", "verifying"].includes(session.status);
   const switchBlockReason = running
@@ -342,7 +341,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
               {project.name}
             </Link>
             <span className="label-mono">/ task</span>
-            <span className="ml-auto font-mono text-[10px] text-dim">
+            <span className="ml-auto font-mono text-xs text-dim">
               started {timeAgo(now, session.createdAt)} · {agent?.short ?? session.agentId}
             </span>
           </div>
@@ -353,14 +352,15 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             {sessionTitle(session.request)}
           </h1>
           {session.criteria && (
-            <p className="mt-1 line-clamp-2 text-[12px] text-dim" title={session.criteria}>
-              <strong className="text-ink/70">Done when:</strong> {session.criteria}
+            <p className="mt-1 line-clamp-2 text-xs text-dim" title={session.criteria}>
+              <strong className="font-medium text-ink/70">Done when:</strong> {session.criteria}
             </p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <StatusPill status={session.status} size="md" needsYou={needsYou(session)} />
-            <span className="font-mono text-[10px] text-dim">
-              {agent?.name} · model: {session.model ?? "agent default"} · real local CLI process
+            <span className="text-xs text-dim">
+              {agent?.name ?? session.agentId} ·{" "}
+              {session.model ? <span className="font-mono">{session.model}</span> : "agent default"}
             </span>
             <div className="ml-auto flex gap-2">
               {running && (
@@ -373,7 +373,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
                   type="button"
                   onClick={() => void markComplete()}
                   disabled={completing}
-                  className="btn-amber px-3 py-1.5 text-[12px] disabled:opacity-60"
+                  className="btn-quiet px-3 py-1.5 text-xs disabled:opacity-60"
                 >
                   {completing ? "Completing…" : "Mark complete"}
                 </button>
@@ -382,7 +382,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
                 <button
                   type="button"
                   onClick={() => reopen(session.id)}
-                  className="btn-quiet px-3 py-1.5 text-[12px]"
+                  className="btn-quiet px-3 py-1.5 text-xs"
                 >
                   Reopen
                 </button>
@@ -424,7 +424,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           )}
           {session.status === "blocked" && (
             <div
-              className={`rounded border p-3 text-[12px] ${session.failureKind && session.failureKind !== "process" ? "border-amber/40 bg-amber/5" : "border-danger/30 bg-danger/5"}`}
+              className={`rounded-lg border px-4 py-3 text-[13px] leading-5 [&_strong]:font-medium ${session.failureKind && session.failureKind !== "process" ? "border-amber/40 bg-amber/5" : "border-danger/30 bg-danger/5"}`}
             >
               {session.failureKind === "provider_quota" ? (
                 <>
@@ -469,9 +469,12 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             </div>
           )}
           {session.status === "ready" && (
-            <div className="card-panel p-4 ring-1 ring-teal/40">
-              <div className="label-mono text-teal">Ready to review</div>
-              <p className="mt-1 text-[13px]">
+            <div className="card-panel p-4">
+              <div className="flex items-center gap-2 text-sm font-medium text-ink">
+                <span className="size-1.5 rounded-full bg-teal" aria-hidden />
+                Ready to review
+              </div>
+              <p className="mt-1 text-[13px] leading-5 text-[color:var(--text-secondary)]">
                 The CLI has exited. Inspect the project diff, then run checks explicitly — ADE does
                 not run them automatically.
               </p>
@@ -480,12 +483,12 @@ export function SessionView({ sessionId }: { sessionId: string }) {
                   type="button"
                   disabled={checksBusy}
                   onClick={() => void runProjectChecks()}
-                  className="btn-amber px-3 py-1.5 text-[12px] disabled:opacity-60"
+                  className="btn-amber px-3 py-1.5 text-xs disabled:opacity-60"
                 >
                   {checksBusy ? "Running…" : "Run project checks"}
                 </button>
-                <span className="font-mono text-[10px] text-dim">
-                  Or use Mark complete in the header when the result looks right.
+                <span className="text-xs text-dim">
+                  Or use Mark complete in the header when the result looks right
                 </span>
               </div>
             </div>
@@ -495,8 +498,8 @@ export function SessionView({ sessionId }: { sessionId: string }) {
 
         <div className="shrink-0 border-t border-line px-4 @lg:px-7 py-4">
           {(session.queuedMessages?.length ?? 0) > 0 && (
-            <div className="mb-3 rounded-md border border-line bg-paper px-3 py-2.5">
-              <p className="text-[12px] font-medium text-ink">Waiting to send</p>
+            <div className="mb-3 rounded-lg border border-line bg-paper px-4 py-3">
+              <p className="text-xs font-medium text-ink">Waiting to send</p>
               <ul className="mt-1 space-y-1">
                 {session.queuedMessages?.map((prompt, index) => (
                   <li key={`${index}-${waitingPreview(prompt)}`} className="text-[13px] text-dim">
@@ -508,7 +511,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
                 {!running && (
                   <button
                     type="button"
-                    className="btn-amber px-3 py-1.5 text-[12px] disabled:opacity-60"
+                    className="btn-amber px-3 py-1.5 text-xs disabled:opacity-60"
                     disabled={sending}
                     onClick={() => {
                       setSendError(null);
@@ -524,7 +527,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
                 )}
                 <button
                   type="button"
-                  className="btn-quiet px-3 py-1.5 text-[12px]"
+                  className="btn-quiet px-3 py-1.5 text-xs"
                   disabled={sending}
                   onClick={() => {
                     setSendError(null);
@@ -547,14 +550,14 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             branch={project.branch}
             running={running}
             {...(session.status === "complete"
-              ? { disabledReason: "Reopen the session to continue." }
+              ? { disabledReason: "Reopen the session to continue" }
               : {})}
             placeholder={
               running
                 ? "Write a message"
                 : session.agentStartFresh
-                  ? "Send a message to start with this agent…"
-                  : "Send a follow-up to the same agent session…"
+                  ? "Send a message to start with this agent"
+                  : "Send a follow-up"
             }
             sending={sending}
             error={sendError}

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
 
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Upload, X } from "lucide-react";
+import { Globe, Upload, X } from "lucide-react";
 import {
   buttonFromDomButton,
   modifierBits,
@@ -86,6 +86,7 @@ export function BrowserSurface({
     attachCanvas,
     releaseCanvas,
     send,
+    nav,
     viewport,
     hasFrame,
     control,
@@ -227,6 +228,10 @@ export function BrowserSurface({
     event.preventDefault();
   };
 
+  // Until the agent opens a page, Chrome paints a white about:blank: the brightest thing on a dark
+  // screen, saying nothing. Any real address shows the stream itself.
+  const blankPage = hasFrame && (!nav?.url || nav.url === "about:blank");
+
   const takeOver = () => void changeControl("take");
   const handBack = () => void changeControl("release");
 
@@ -267,8 +272,17 @@ export function BrowserSurface({
         />
       ) : null}
 
+      {blankPage ? (
+        <div className="pointer-events-none absolute inset-0 z-[1] grid place-items-center bg-paper px-4 text-center">
+          <div className="grid justify-items-center gap-2">
+            <Globe className="size-5 text-dim" strokeWidth={1.5} aria-hidden />
+            <p className="m-0 text-[13px] text-[var(--text-secondary)]">No page open yet</p>
+          </div>
+        </div>
+      ) : null}
+
       {!hasFrame ? (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center px-4 text-center text-[12px] text-dim">
+        <div className="pointer-events-none absolute inset-0 grid place-items-center px-4 text-center text-xs text-dim">
           <div className="pointer-events-auto grid justify-items-center gap-3">
             <p role="status" className="m-0">
               {streamError && streamStatus === "closed" ? streamError : placeholder}
@@ -277,7 +291,7 @@ export function BrowserSurface({
               <button
                 type="button"
                 onClick={reconnect}
-                className="btn-quiet px-3 py-1.5 text-[12px] text-ink"
+                className="btn-quiet px-3 py-1.5 text-xs text-ink"
               >
                 Try again
               </button>
@@ -289,12 +303,12 @@ export function BrowserSurface({
       {controller === "you" ? (
         <>
           <div className="pointer-events-none absolute inset-0 z-[5] border-2 border-amber" />
-          <div className="absolute top-2.5 left-1/2 z-[6] flex max-w-[calc(100%-1.25rem)] -translate-x-1/2 items-center gap-2 rounded-full bg-amber py-0.5 pr-0.5 pl-2.5 text-[12px] font-medium whitespace-nowrap text-ink shadow-lg motion-reduce:transition-none">
+          <div className="absolute top-2.5 left-1/2 z-[6] flex max-w-[calc(100%-1.25rem)] -translate-x-1/2 items-center gap-2 rounded-full bg-amber py-0.5 pr-0.5 pl-2.5 text-xs font-medium whitespace-nowrap text-ink shadow-lg motion-reduce:transition-none">
             <span className="truncate">You're driving · agent paused</span>
             <button
               type="button"
               onClick={handBack}
-              className="h-6 shrink-0 rounded-full bg-ink px-2.5 text-[12px] font-semibold text-paper"
+              className="h-6 shrink-0 rounded-full bg-ink px-3 text-xs font-medium text-paper"
             >
               Hand back
             </button>
@@ -303,13 +317,13 @@ export function BrowserSurface({
       ) : null}
 
       {controller === "agent" ? (
-        <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[5] flex items-center gap-2 rounded-full bg-panel py-0.5 pr-0.5 pl-2.5 text-[12px] whitespace-nowrap text-ink opacity-0 ring-1 ring-line ring-inset shadow-lg transition-opacity duration-150 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 motion-reduce:transition-none">
-          <span className="size-2 rounded-full bg-teal" aria-hidden />
+        <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[5] flex items-center gap-2 rounded-full bg-panel py-0.5 pr-0.5 pl-3 text-xs whitespace-nowrap text-ink opacity-0 ring-1 ring-line ring-inset shadow-lg transition-opacity duration-150 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 motion-reduce:transition-none">
+          <span className="size-1.5 rounded-full bg-teal" aria-hidden />
           <span>Agent is browsing</span>
           <button
             type="button"
             onClick={takeOver}
-            className="h-6 shrink-0 rounded-full bg-paper px-2.5 font-semibold text-ink ring-1 ring-line ring-inset"
+            className="h-6 shrink-0 rounded-full bg-paper px-3 font-medium text-ink ring-1 ring-line ring-inset"
           >
             Take over
           </button>
@@ -317,7 +331,7 @@ export function BrowserSurface({
       ) : null}
 
       {controller === "another-viewer" ? (
-        <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[5] rounded-full bg-panel px-2.5 py-0.5 text-[12px] whitespace-nowrap text-dim ring-1 ring-line ring-inset">
+        <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[5] rounded-full bg-panel px-3 py-0.5 text-xs whitespace-nowrap text-dim ring-1 ring-line ring-inset">
           Controlled in another window
         </div>
       ) : null}
@@ -325,7 +339,7 @@ export function BrowserSurface({
       {streamError && streamStatus !== "closed" && streamError !== dismissedError ? (
         <div
           role="alert"
-          className="absolute bottom-2.5 left-1/2 z-[6] flex max-w-[calc(100%-1.25rem)] -translate-x-1/2 items-center gap-2 rounded-full bg-panel py-0.5 pr-0.5 pl-3 text-[11px] text-danger shadow-lg ring-1 ring-danger/40 ring-inset"
+          className="absolute bottom-2.5 left-1/2 z-[6] flex max-w-[calc(100%-1.25rem)] -translate-x-1/2 items-center gap-2 rounded-full bg-panel py-0.5 pr-0.5 pl-3 text-xs text-danger shadow-lg ring-1 ring-danger/40 ring-inset"
         >
           <span className="min-w-0 truncate">{streamError}</span>
           <button
@@ -333,9 +347,9 @@ export function BrowserSurface({
             aria-label="Dismiss error"
             title="Dismiss"
             onClick={() => setDismissedError(streamError)}
-            className="grid size-6 shrink-0 place-items-center rounded-full text-dim hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+            className="grid size-6 shrink-0 place-items-center rounded-full text-dim transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
           >
-            <X className="size-3" aria-hidden />
+            <X className="size-3.5" strokeWidth={1.5} aria-hidden />
           </button>
         </div>
       ) : null}
@@ -373,7 +387,7 @@ function FileChooserPrompt({
     <div
       role="dialog"
       aria-label="Page file picker"
-      className="absolute top-1/2 left-1/2 z-[7] grid w-[min(20rem,calc(100%-1.5rem))] -translate-x-1/2 -translate-y-1/2 gap-2.5 rounded-xl bg-panel p-3 text-[12px] text-ink shadow-lg ring-1 ring-line ring-inset"
+      className="absolute top-1/2 left-1/2 z-[7] grid w-[min(20rem,calc(100%-1.5rem))] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-xl bg-panel p-3 text-xs text-ink shadow-lg ring-1 ring-line ring-inset"
     >
       <p className="m-0 break-words">
         The page wants {chooser.multiple ? "files" : "a file"}. Choose{" "}
@@ -394,16 +408,16 @@ function FileChooserPrompt({
         <button
           type="button"
           onClick={() => onAnswer([])}
-          className="btn-quiet px-3 py-1.5 text-[12px]"
+          className="btn-quiet px-3 py-1.5 text-xs"
         >
           Cancel
         </button>
         <button
           type="button"
           onClick={() => input.current?.click()}
-          className="btn-amber inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px]"
+          className="btn-amber inline-flex items-center gap-2 px-3 py-1.5 text-xs"
         >
-          <Upload className="size-3.5" aria-hidden />
+          <Upload className="size-4" strokeWidth={1.5} aria-hidden />
           {chooser.multiple ? "Choose files" : "Choose file"}
         </button>
       </div>
@@ -429,7 +443,7 @@ function PageDialog({
     <div
       role="dialog"
       aria-label="Page dialog"
-      className="absolute top-1/2 left-1/2 z-[7] grid w-[min(20rem,calc(100%-1.5rem))] -translate-x-1/2 -translate-y-1/2 gap-2.5 rounded-xl bg-panel p-3 text-[12px] text-ink shadow-lg ring-1 ring-line ring-inset"
+      className="absolute top-1/2 left-1/2 z-[7] grid w-[min(20rem,calc(100%-1.5rem))] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-xl bg-panel p-3 text-xs text-ink shadow-lg ring-1 ring-line ring-inset"
     >
       <p className="m-0 break-words">{dialog.message || "The page is asking for a response."}</p>
       {isPrompt ? (
@@ -445,7 +459,7 @@ function PageDialog({
           <button
             type="button"
             onClick={() => onAnswer({ accept: false })}
-            className="btn-quiet px-3 py-1.5 text-[12px]"
+            className="btn-quiet px-3 py-1.5 text-xs"
           >
             Dismiss
           </button>
@@ -453,7 +467,7 @@ function PageDialog({
         <button
           type="button"
           onClick={() => onAnswer({ accept: true, ...(isPrompt ? { promptText: text } : {}) })}
-          className="btn-amber px-3 py-1.5 text-[12px]"
+          className="btn-amber px-3 py-1.5 text-xs"
         >
           {isAlert ? "OK" : "Accept"}
         </button>

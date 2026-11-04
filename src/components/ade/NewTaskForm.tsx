@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { ArrowRight, ChevronDown, Plus, TriangleAlert } from "lucide-react";
 import { type AgentSelection } from "@/components/ade/AgentPicker";
 import { Composer } from "@/components/ade/Composer";
 import { SignInDialog } from "@/components/ade/SignInDialog";
@@ -11,6 +12,9 @@ import { agentModels, uploadAttachment, useAde, useAdeState } from "@/lib/ade/st
 import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 
 const NO_WORKFLOWS: Workflow[] = [];
+
+/** Neutral notes above the composer: informational, not a call to action. */
+const noteClass = "rounded-lg border border-line bg-surface-muted px-4 py-3 text-[13px] leading-5";
 
 export function NewTaskForm({
   projectId,
@@ -201,8 +205,12 @@ export function NewTaskForm({
     return (
       <main className="min-w-0 flex-1 px-4 py-6 @lg:px-7 @lg:py-8 @container">
         <h1 className="heading-display text-2xl @lg:text-3xl">Add a project first</h1>
-        <Link to="/projects/add" className="btn-amber mt-5 inline-block px-4 py-2 text-sm">
-          + Add project
+        <Link
+          to="/projects/add"
+          className="btn-amber mt-5 inline-flex items-center gap-1.5 px-4 py-2 text-sm"
+        >
+          <Plus className="size-4" strokeWidth={1.5} aria-hidden />
+          Add project
         </Link>
       </main>
     );
@@ -213,10 +221,15 @@ export function NewTaskForm({
         <button
           type="button"
           onClick={() => setCriteriaOpen((v) => !v)}
-          className="label-mono hover:text-ink"
+          className="label-section inline-flex items-center gap-1 transition-colors hover:text-ink"
           aria-expanded={criteriaOpen}
         >
-          Acceptance criteria (optional){criteriaOpen ? " ▴" : " ▾"}
+          Acceptance criteria (optional)
+          <ChevronDown
+            className={`size-4 transition-transform motion-reduce:transition-none ${criteriaOpen ? "rotate-180" : ""}`}
+            strokeWidth={1.5}
+            aria-hidden
+          />
         </button>
         {criteriaOpen && (
           <textarea
@@ -230,29 +243,33 @@ export function NewTaskForm({
         )}
       </div>
       {!!project.uncommittedFiles.length && (
-        <div className="rounded-lg border border-amber/40 bg-amber/10 p-4">
-          <div className="text-[13px] font-medium">
-            Uncommitted work detected — it will be protected, not blocked
+        <div className="rounded-lg border border-line bg-surface-muted p-4">
+          <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
+            <TriangleAlert
+              className="size-4 shrink-0 text-amber-deep"
+              strokeWidth={1.5}
+              aria-hidden
+            />
+            Uncommitted changes in this project
           </div>
-          <p className="mt-1 text-[12px] leading-relaxed">
-            You can start the task anyway. ADE records these files as your pre-existing changes,
-            tells the agent to work around them (never revert, stash, commit, or overwrite them),
-            and marks them "yours" in the diff so you can tell your edits from the agent's. ADE
-            never auto-stashes, resets, or restores files.
+          <p className="mt-1 text-[13px] leading-5 text-[color:var(--text-secondary)]">
+            The agent is told to work around these files and never revert, stash, commit or
+            overwrite them. They're marked as yours in the diff, and ADE never stashes, resets or
+            restores files on its own.
           </p>
-          <ul className="mt-2 max-h-40 overflow-y-auto font-mono text-[11px] text-dim">
+          <ul className="mt-3 max-h-40 overflow-y-auto font-mono text-xs text-dim">
             {project.uncommittedFiles.map((f) => (
               <li key={f} className="truncate" title={f}>
                 {f}
               </li>
             ))}
           </ul>
-          <label className="mt-3 flex items-start gap-2 text-[12px] leading-snug">
+          <label className="mt-3 flex items-start gap-2 text-[13px] leading-5 text-ink">
             <input
               type="checkbox"
               checked={ackDirty}
               onChange={(e) => setAckDirty(e.target.checked)}
-              className="mt-0.5 accent-amber"
+              className="mt-1 accent-amber"
             />
             <span>
               I understand the agent will run alongside my uncommitted changes and I'll review the
@@ -262,23 +279,23 @@ export function NewTaskForm({
         </div>
       )}
       {overlapping && (
-        <div className="rounded-lg border border-line bg-panel p-4 text-[12px]">
+        <div className={noteClass}>
           One task is still running in this project. Wait for it to stop before starting another to
           avoid overlapping edits.
         </div>
       )}
       {agent && !agent.installed && (
-        <p className="rounded-md bg-amber/10 px-3 py-2 text-[12px]">
+        <p className={noteClass}>
           {agent.name} is not installed. {agent.installHint}
         </p>
       )}
       {agent?.installed && !agent.signedIn && (
-        <div className="flex items-center gap-3 rounded-md bg-amber/10 px-3 py-2 text-[12px]">
+        <div className={`flex items-center gap-3 ${noteClass}`}>
           <span>{agent.name} is installed but not authenticated.</span>
           <button
             type="button"
             onClick={() => setSigning(agent)}
-            className="btn-amber ml-auto px-3 py-1"
+            className="btn-amber ml-auto px-3 py-1.5 text-xs"
           >
             Set up
           </button>
@@ -293,10 +310,10 @@ export function NewTaskForm({
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto @container">
       <div className="flex w-full max-w-3xl flex-col px-4 py-6 @lg:px-7 @lg:py-10">
         <h1 className="heading-display text-2xl @lg:text-3xl">What are you working on?</h1>
-        <p className="mt-3 text-[13px] text-dim">Describe a change and an agent gets started.</p>
+        <p className="mt-3 text-[13px] text-dim">Describe a change and an agent gets started</p>
         {preview.length > 0 && (
           <div className="mt-8">
-            <div className="label-mono">Start with a workflow</div>
+            <div className="label-section">Start with a workflow</div>
             <div className="mt-3">
               <WorkflowCards workflows={preview} onSelect={applyWorkflow} />
             </div>
@@ -304,17 +321,19 @@ export function NewTaskForm({
               <Link
                 to="/p/$projectId/workflows"
                 params={{ projectId }}
-                className="text-dim underline-offset-2 hover:text-ink hover:underline"
+                className="inline-flex items-center gap-1.5 text-dim underline-offset-2 transition-colors hover:text-ink hover:underline"
               >
-                Browse all workflows →
+                Browse all workflows
+                <ArrowRight className="size-4" strokeWidth={1.5} aria-hidden />
               </Link>
               <Link
                 to="/p/$projectId/workflows"
                 params={{ projectId }}
                 search={{ new: true }}
-                className="text-dim underline-offset-2 hover:text-ink hover:underline"
+                className="inline-flex items-center gap-1.5 text-dim underline-offset-2 transition-colors hover:text-ink hover:underline"
               >
-                + New workflow
+                <Plus className="size-4" strokeWidth={1.5} aria-hidden />
+                New workflow
               </Link>
             </div>
           </div>
@@ -325,7 +344,7 @@ export function NewTaskForm({
             selection={selection}
             onSelectionChange={setSelection}
             branch={project.branch}
-            placeholder="Describe a change…"
+            placeholder="Describe a change"
             sending={busy}
             error={error}
             onSend={onSend}

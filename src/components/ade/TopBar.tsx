@@ -8,6 +8,14 @@ import { ThemeSwitch } from "@/components/arc/theme-switch/theme-switch";
 import { useAdeState } from "@/lib/ade/store";
 import { useTheme } from "@/lib/theme";
 
+const ICON_BUTTON =
+  "grid size-7 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber";
+
+// Arc's ThemeSwitch is a bordered 38px secondary button whose styles live in an unlayered CSS
+// module, so these overrides need `!` to win. They make it the same ghost icon button as Settings.
+const THEME_SWITCH =
+  "contents [&>button]:size-7! [&>button]:min-h-7! [&>button]:min-w-7! [&>button]:rounded-md! [&>button]:border-transparent! [&>button]:bg-transparent! [&>button]:text-dim! [&>button]:shadow-none! [&>button]:hover:bg-ink/[0.04]! [&>button]:hover:text-ink! [&>button]:focus-visible:outline-2! [&>button]:focus-visible:outline-offset-0! [&>button]:focus-visible:outline-amber! [&_svg]:size-4 [&_svg]:stroke-[1.5]";
+
 export function TopBar({ isDesktop }: { isDesktop: boolean }) {
   const { activeProjectId, hydrated, projects, serviceAvailable, sessions } = useAdeState(
     (state) => ({
@@ -61,7 +69,7 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
                   />
                 )}
                 <span
-                  className={`grid size-5 shrink-0 place-items-center rounded-xs font-mono text-[10px] font-medium ${colors.bg} ${colors.fg}`}
+                  className={`grid size-5 shrink-0 place-items-center rounded-xs font-mono text-xs font-medium ${colors.bg} ${colors.fg}`}
                   aria-hidden
                 >
                   {initial}
@@ -82,9 +90,9 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
             type="button"
             onClick={() => openDialog("add-project")}
             aria-label="Add project"
-            className="grid size-7 shrink-0 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+            className={ICON_BUTTON}
           >
-            <Plus className="size-4" aria-hidden strokeWidth={2} />
+            <Plus className="size-4" aria-hidden strokeWidth={1.5} />
           </button>
         </div>
       ) : (
@@ -94,9 +102,9 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
             type="button"
             onClick={() => openDialog("add-project")}
             aria-label="Add project"
-            className="grid size-7 shrink-0 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+            className={ICON_BUTTON}
           >
-            <Plus className="size-4" aria-hidden strokeWidth={2} />
+            <Plus className="size-4" aria-hidden strokeWidth={1.5} />
           </button>
         </div>
       )}
@@ -107,18 +115,21 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
           type="button"
           onClick={() => openDialog("agents")}
           aria-label="Agents settings"
-          className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+          className={ICON_BUTTON}
         >
-          <Settings className="size-3.5" aria-hidden />
+          <Settings className="size-4" aria-hidden strokeWidth={1.5} />
         </button>
-        <ThemeSwitch
-          theme={theme}
-          variant="rise"
-          iconOnly
-          onThemeChange={(next) => setTheme(next)}
-        />
+        <span className={THEME_SWITCH}>
+          <ThemeSwitch
+            theme={theme}
+            variant="reveal"
+            iconOnly
+            onThemeChange={(next) => setTheme(next)}
+          />
+        </span>
         {hydrated && !serviceAvailable && (
-          <span className="hidden font-mono text-[10px] text-amber sm:inline">
+          <span className="hidden items-center gap-2 text-xs text-[var(--text-secondary)] sm:inline-flex">
+            <span className="size-1.5 shrink-0 rounded-full bg-amber" aria-hidden />
             Local service disconnected
           </span>
         )}

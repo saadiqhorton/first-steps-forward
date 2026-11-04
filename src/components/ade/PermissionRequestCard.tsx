@@ -37,10 +37,10 @@ export function PermissionRequestCard({
       role="group"
       aria-label="Permission request"
     >
-      <div className="label-mono text-amber-deep">{agentName} is asking for permission</div>
+      <div className="label-section text-amber-deep">{agentName} is asking for permission</div>
       <p className="mt-1 text-[13px] font-medium break-words">{request.title}</p>
       {request.detail && request.detail !== request.title && (
-        <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-deck p-2 font-mono text-[11px] whitespace-pre-wrap break-all text-deck-foreground">
+        <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-deck p-2 font-mono text-xs whitespace-pre-wrap break-all text-deck-foreground">
           {request.detail}
         </pre>
       )}
@@ -51,13 +51,13 @@ export function PermissionRequestCard({
             type="button"
             disabled={busy !== null}
             onClick={() => void answer(option.optionId)}
-            className={`${option.kind === "allow_once" ? "btn-amber" : "btn-quiet"} px-3 py-1.5 text-[12px] disabled:opacity-60`}
+            className={`${option.kind === "allow_once" ? "btn-amber" : "btn-quiet"} px-3 py-1.5 text-xs disabled:opacity-60`}
           >
             {busy === option.optionId ? "Sending…" : option.name}
           </button>
         ))}
       </div>
-      <p className="mt-2 font-mono text-[10px] text-dim">
+      <p className="mt-2 text-xs text-dim">
         The agent is paused until you answer.
         {remembers && ` "Always" choices are saved by ${agentName} itself, not by ADE.`}
       </p>

@@ -35,10 +35,10 @@ export function ActivityPanel({ session }: { session: Session }) {
     >
       <div className="space-y-6 px-4 py-4">
         <section>
-          <h2 className="label-mono">Agent context</h2>
+          <h2 className="label-section">Agent context</h2>
           {session.manifest ? (
-            <details className="card-panel mt-2 px-4 py-3 text-[12px]">
-              <summary className="label-mono cursor-pointer select-none">
+            <details className="card-panel mt-2 px-4 py-3 text-xs">
+              <summary className="cursor-pointer text-[13px] text-[var(--text-secondary)] tabular-nums select-none">
                 Agent context · {session.manifest.relevantFiles.length} candidate files
               </summary>
               <dl className="mt-3 grid min-w-0 grid-cols-[minmax(90px,120px)_minmax(0,1fr)] gap-x-3 gap-y-2 [overflow-wrap:anywhere]">
@@ -69,25 +69,30 @@ export function ActivityPanel({ session }: { session: Session }) {
                   ))}
                 </ul>
                 <div className="mt-3 text-dim">Candidate files</div>
-                <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-relaxed [overflow-wrap:anywhere]">
+                <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed [overflow-wrap:anywhere]">
                   {session.manifest.relevantFiles.join("\n") || "(none listed)"}
                 </pre>
               </details>
             </details>
           ) : (
-            <p className="mt-2 text-[12px] text-dim">No agent context yet.</p>
+            <p className="mt-2 text-xs text-dim">No agent context yet.</p>
           )}
         </section>
 
         <section>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="label-mono">Checks ({session.checks.length})</h2>
+            <h2 className="label-section">
+              Checks{" "}
+              <span className="font-mono font-normal tabular-nums text-dim">
+                {session.checks.length}
+              </span>
+            </h2>
             {session.status === "ready" ? (
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void checksClick()}
-                className="btn-amber px-3 py-1.5 text-[12px]"
+                className="btn-amber px-3 py-1.5 text-xs"
               >
                 {busy ? "Running…" : "Run project checks"}
               </button>
@@ -96,18 +101,18 @@ export function ActivityPanel({ session }: { session: Session }) {
           <div className="mt-2">
             <ChecksList checks={session.checks} />
             {session.status === "blocked" ? (
-              <p className="mt-3 text-[12px] text-dim">
+              <p className="mt-3 text-xs text-dim">
                 Checks run once the session is ready to review. Clear the blocker above —
                 re-authenticate, switch agents, or send a follow-up — then run them here.
               </p>
             ) : null}
             {session.status === "working" || session.status === "verifying" ? (
-              <p className="mt-3 text-[12px] text-dim">
+              <p className="mt-3 text-xs text-dim">
                 Checks are available after this turn finishes and the session is ready to review.
               </p>
             ) : null}
             {session.status === "complete" || session.status === "stopped" ? (
-              <p className="mt-3 text-[12px] text-dim">
+              <p className="mt-3 text-xs text-dim">
                 Reopen or keep the session in “ready to review” to run project checks again.
               </p>
             ) : null}
@@ -115,7 +120,7 @@ export function ActivityPanel({ session }: { session: Session }) {
         </section>
 
         <section>
-          <h2 className="label-mono">Logs</h2>
+          <h2 className="label-section">Logs</h2>
           <div className="mt-2">
             <ActivityLogs
               lines={session.logs}

@@ -112,6 +112,12 @@
   --font-geist: "Geist";
   --font-inter: "Inter";
 
+  /* Arc's pill-sized radii and negative body tracking, sized down for a dense workbench. */
+  --radius-control: 0.625rem;
+  --radius-panel: 1rem;
+  --radius-surface: 1.25rem;
+  --tracking-body: 0;
+
   --ink: oklch(0.18 0.006 70);
   --paper: oklch(0.945 0.02 90);
   --panel: oklch(0.977 0.01 90);
@@ -232,6 +238,15 @@
   font-size: var(--text-xs);
   line-height: var(--leading-body);
   color: var(--text-muted);
+}
+
+/* Section headings inside panes. Mono stays for paths, model ids, and figures. */
+@utility label-section {
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  line-height: 1rem;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 @utility heading-display {
@@ -397,7 +412,7 @@
     transition: background-color var(--duration-fast) var(--ease-standard);
   }
   .panel-seam[data-orientation="vertical"] {
-    width: 4px;
+    width: 1px;
     cursor: col-resize;
   }
   /* Expand the pointer hit area beyond the visible line. */
@@ -411,7 +426,7 @@
     transform: translateX(-50%);
   }
   .panel-seam[data-orientation="horizontal"] {
-    height: 4px;
+    height: 1px;
     cursor: row-resize;
   }
   .panel-seam[data-orientation="horizontal"]::after {
