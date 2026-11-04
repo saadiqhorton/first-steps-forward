@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -114,6 +114,19 @@ test("an oversized body is refused with 413 over a real socket", async () => {
 test("agents get the address the server actually listens on", () => {
   const context = computerContext({ id: "p", name: "p", path: home });
   assert.equal(context.env.ADE_API, origin);
+});
+
+// The published `ade` runs from wherever the user typed `npx`, not from the package.
+test("agent tool scripts resolve from ADE's own files, whatever the working directory", () => {
+  const before = process.cwd();
+  process.chdir(home);
+  try {
+    const context = computerContext({ id: "p", name: "p", path: home });
+    assert.ok(existsSync(context.mcpScript), context.mcpScript);
+    assert.ok(existsSync(context.piExtension), context.piExtension);
+  } finally {
+    process.chdir(before);
+  }
 });
 
 test("/preview-stream upgrades reach the stream; other upgrades are refused", async () => {

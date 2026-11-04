@@ -5,7 +5,6 @@
 // ADE_PROJECT_ID in the environment. Tool definitions and call logic live
 // in computer-tools-defs.mjs (shebang-free so Vite SSR can import them).
 import { createInterface } from "node:readline";
-import { pathToFileURL } from "node:url";
 import { createToolCaller, handleMessage } from "./computer-tools-defs.mjs";
 
 async function main() {
@@ -32,4 +31,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
+// Always an entry point, never imported. No argv[1]-vs-import.meta.url check: a launch path
+// through a symlink, junction or Windows short name fails it, and Codex silently drops a
+// server that exits without answering.
+await main();

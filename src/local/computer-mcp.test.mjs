@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createToolCaller, handleMessage, TOOLS } from "./computer-tools-defs.mjs";
 
@@ -139,8 +142,10 @@ test("dev server tools report the URL to open, and failures are tool errors", as
   assert.equal(unconnected.isError, true);
 });
 
-test("the stdio server answers newline-delimited JSON-RPC", async () => {
-  const script = fileURLToPath(new URL("./computer-mcp.mjs", import.meta.url));
+const SCRIPT = fileURLToPath(new URL("./computer-mcp.mjs", import.meta.url));
+
+/** Runs the stdio server at `script` through initialize and tools/list. Stops early if it exits. */
+async function handshake(script) {
   const child = spawn(process.execPath, [script], {
     env: { ...process.env, ADE_API: "http://127.0.0.1:1", ADE_PROJECT_ID: "p1" },
     stdio: ["pipe", "pipe", "inherit"],
@@ -148,6 +153,7 @@ test("the stdio server answers newline-delimited JSON-RPC", async () => {
   const responses = [];
   let buffer = "";
   const done = new Promise((resolve) => {
+    child.once("exit", resolve);
     child.stdout.on("data", (chunk) => {
       buffer += chunk;
       const lines = buffer.split("\n");
@@ -163,6 +169,28 @@ test("the stdio server answers newline-delimited JSON-RPC", async () => {
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
   await done;
   child.kill();
+  return responses;
+}
+
+test("the stdio server answers newline-delimited JSON-RPC", async () => {
+  const responses = await handshake(SCRIPT);
   assert.equal(responses[0].result.serverInfo.name, "ade-computer");
   assert.equal(responses[1].result.tools.length, TOOLS.length);
+});
+
+// A launch path that only reaches the file through a link (a symlinked install, a Windows
+// junction or short name) must still start the server: Codex drops a server that exits silently.
+test("the stdio server starts when launched through a symlinked path", async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "ade-mcp-link-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const link = path.join(dir, "local");
+  try {
+    symlinkSync(path.dirname(SCRIPT), link, "dir");
+  } catch (error) {
+    t.skip(`cannot create a symlink here: ${error.message}`);
+    return;
+  }
+  const responses = await handshake(path.join(link, "computer-mcp.mjs"));
+  assert.equal(responses[0]?.result.serverInfo.name, "ade-computer");
+  assert.equal(responses[1]?.result.tools.length, TOOLS.length);
 });

@@ -2,11 +2,12 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { processRunsIn as processMatches } from "./spawn.mjs";
 import { adapters } from "./adapters/index.mjs";
 import { getDiff, projectInfo } from "./project-git.mjs";
 import { createSessionTurns, shrinkLogLine, TurnRefused } from "./session-turns.mjs";
-import { adeRoot, createComputerManager, SCREEN } from "./computer.mjs";
+import { createComputerManager, SCREEN } from "./computer.mjs";
 import { createBrowserHub } from "./browser-page.mjs";
 import { createBrowserInstaller } from "./browser-install.mjs";
 import { createBrowserContexts, INCOGNITO_PROFILE_ID } from "./browser-contexts.mjs";
@@ -334,7 +335,9 @@ export function setListenAddress(address) {
 export function computerContext(project) {
   const api = listenBaseUrl;
   if (!api) return null;
-  const local = path.join(adeRoot(), "src", "local");
+  // Beside this file, not the working directory: the published `ade` runs from wherever
+  // the user typed `npx`, where these scripts don't exist and the tools would silently vanish.
+  const local = path.dirname(fileURLToPath(import.meta.url));
   return {
     node: process.execPath,
     mcpScript: path.join(local, "computer-mcp.mjs"),
