@@ -4,6 +4,8 @@
 // WebSocket client for the agent browser's stream. Binary frames are JPEG bytes that are acked
 // immediately; JSON frames carry viewport, control, pointer, nav, clipboard and error messages.
 
+import { STREAM_CLOSE_CODES } from "@/shared/browser-contract.mjs";
+
 export type BrowserButton = "none" | "left" | "middle" | "right";
 
 export type BrowserStreamController = "agent" | "you" | "another-viewer";
@@ -57,9 +59,6 @@ export type ServerMessage =
 /** Messages the client sends. Coordinates are page CSS px; modifiers are a 0..15 bitmask. */
 export type ClientMessage =
   | { readonly type: "ack" }
-  | { readonly type: "takeControl" }
-  | { readonly type: "releaseControl" }
-  | { readonly type: "resize"; readonly width: number; readonly height: number }
   | {
       readonly type: "mouse";
       readonly action: "move" | "down" | "up";
@@ -149,9 +148,9 @@ export interface BrowserStream {
 const ACK_MESSAGE = JSON.stringify({ type: "ack" });
 const MAX_RECONNECT_DELAY_MS = 10_000;
 /** Close codes for refused upgrades: policy violation, bad token, host setup missing. */
-const POLICY_VIOLATION = 1008;
-const REFUSED_TOKEN = 4401;
-const HOST_UNAVAILABLE = 4503;
+const POLICY_VIOLATION = STREAM_CLOSE_CODES.policyViolation;
+const REFUSED_TOKEN = STREAM_CLOSE_CODES.unauthorized;
+const HOST_UNAVAILABLE = STREAM_CLOSE_CODES.hostUnavailable;
 
 const isNumber = (value: unknown): value is number => typeof value === "number";
 const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";
@@ -231,9 +230,6 @@ export function parseServerMessage(text: string): ServerMessage | null {
   }
   return null;
 }
-
-/** Messages the send gate lets through without the viewer holding control. */
-const ALWAYS_SENDABLE = new Set<ClientMessage["type"]>(["takeControl", "releaseControl", "resize"]);
 
 /** Human-readable reason for an upgrade the server refused, from its close code and reason. */
 function refusalMessage(code: number, reason: string): string | null {
@@ -385,7 +381,7 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
     send: (message) => {
       const ws = socket;
       if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-      if (!ALWAYS_SENDABLE.has(message.type) && control?.controller !== "you") return false;
+      if (control?.controller !== "you") return false;
       ws.send(JSON.stringify(message));
       return true;
     },

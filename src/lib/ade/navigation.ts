@@ -16,8 +16,21 @@ export function writeLastProject(projectId: string): void {
   }
 }
 
-export type RightTab = "activity" | "diff" | "computer" | "editor" | "terminal";
+export const RIGHT_TABS = ["activity", "diff", "computer", "terminal"] as const;
+export type RightTab = (typeof RIGHT_TABS)[number];
 
-export function projectConversationsPath(projectId: string): string {
-  return `/p/${projectId}/conversations`;
+export const PROJECT_SECTIONS = ["conversations", "files", "workflows"] as const;
+export type ProjectSection = (typeof PROJECT_SECTIONS)[number];
+
+export function projectIdFromPath(pathname: string): string | null {
+  return pathname.match(/^\/p\/([^/]+)/)?.[1] ?? null;
+}
+
+export function projectSectionFromPath(pathname: string): ProjectSection | null {
+  const projectId = projectIdFromPath(pathname);
+  if (!projectId) return null;
+  const rest = pathname.slice(`/p/${projectId}/`.length);
+  return (
+    PROJECT_SECTIONS.find((section) => rest === section || rest.startsWith(`${section}/`)) ?? null
+  );
 }

@@ -12,8 +12,9 @@ import { createBrowserHub } from "./browser-page.mjs";
 import { createBrowserInstaller } from "./browser-install.mjs";
 import { createBrowserContexts, INCOGNITO_PROFILE_ID } from "./browser-contexts.mjs";
 import { diagnoseLaunchFailure } from "./browser-host.mjs";
-import { TOOLS as COMPUTER_TOOLS } from "./computer-tools-defs.mjs";
+import { TOOLS as COMPUTER_TOOLS } from "./computer-tool-schemas.mjs";
 import { createBrowserStreamServer } from "./browser-stream-server.mjs";
+import { STREAM_PATH } from "../shared/browser-contract.mjs";
 import { createControlRegistry } from "./browser-control.mjs";
 import { saveWorkspace } from "./workspace-persistence.mjs";
 import { createEventHub } from "./events.mjs";
@@ -40,9 +41,8 @@ const DATA_FILE = path.join(DATA_DIR, "workspace.json");
 const sessionLogs = createSessionLogs(path.join(DATA_DIR, "session-logs"));
 const eventHub = createEventHub();
 const state = { projects: [], sessions: [], processes: [], agents: [], workflows: [] };
-const { children, devStartClaims, startDevServer, devServerStatus, refreshDevProcess } =
-  createDevServers({ state, save });
-export { refreshDevProcess };
+const devServers = createDevServers({ state, save });
+export const refreshDevProcess = devServers.refreshDevProcess;
 // "Run this dev command?" questions waiting on the user, one per project (docs/adr/0005).
 const devApprovals = createDevCommandApprovals({
   state,
@@ -92,11 +92,13 @@ const turns = createSessionTurns({
   turnEnded: () => refreshBootstrapInBackground(eventHub.activeProjects()),
   turnContext: async (project, session) => {
     // The manifest says which dev command applies now, not as of the last bootstrap poll.
-    const { changed } = await refreshDevProcess(project).catch(() => ({ changed: false }));
+    const { changed } = await devServers
+      .refreshDevProcess(project)
+      .catch(() => ({ changed: false }));
     if (changed) save().catch(() => {});
     return {
       computer: computerContext(project, session?.id),
-      devServer: devServerStatus(project),
+      devServer: devServers.devServerStatus(project),
       agentBrowser: agentComputerFor(project),
     };
   },
@@ -596,11 +598,7 @@ export async function handle(req, res) {
       computers,
       browserStream,
       computerView,
-      children,
-      devStartClaims,
-      startDevServer,
-      refreshDevProcess,
-      devServerStatus,
+      devServers,
       devApprovals,
       handled: false,
       json: (...args) => {
@@ -679,7 +677,7 @@ export async function stop() {
  */
 export function handleUpgrade(req, socket, head) {
   const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
-  if (pathname !== "/preview-stream") return false;
+  if (pathname !== STREAM_PATH) return false;
   if (!localRequest(req)) {
     socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     socket.destroy();

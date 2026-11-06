@@ -1,4 +1,4 @@
-import type { EditorDocument } from "../editorApi";
+import type { EditorDocument } from "@/lib/ade/editorApi";
 
 /**
  * In-memory drafts for open editor tabs. Survives leaving the Files route so
@@ -6,6 +6,7 @@ import type { EditorDocument } from "../editorApi";
  * reload-from-disk, or closing the tab.
  */
 const drafts = new Map<string, EditorDocument>();
+const listeners = new Map<string, Set<() => void>>();
 
 function key(projectId: string, path: string) {
   return `${projectId}\0${path}`;
@@ -15,16 +16,36 @@ export function getEditorDraft(projectId: string, path: string): EditorDocument 
   return drafts.get(key(projectId, path)) ?? null;
 }
 
+export function subscribeEditorDraft(
+  projectId: string,
+  path: string,
+  listener: () => void,
+): () => void {
+  const id = key(projectId, path);
+  const subscribers = listeners.get(id) ?? new Set();
+  subscribers.add(listener);
+  listeners.set(id, subscribers);
+  return () => {
+    subscribers.delete(listener);
+    if (subscribers.size === 0) listeners.delete(id);
+  };
+}
+
+function notify(id: string) {
+  listeners.get(id)?.forEach((listener) => listener());
+}
+
 export function setEditorDraft(projectId: string, path: string, doc: EditorDocument) {
-  if (doc.draft === doc.saved) {
-    drafts.delete(key(projectId, path));
-    return;
-  }
-  drafts.set(key(projectId, path), doc);
+  const id = key(projectId, path);
+  if (doc.draft === doc.saved) drafts.delete(id);
+  else drafts.set(id, doc);
+  notify(id);
 }
 
 export function clearEditorDraft(projectId: string, path: string) {
-  drafts.delete(key(projectId, path));
+  const id = key(projectId, path);
+  drafts.delete(id);
+  notify(id);
 }
 
 export function listDirtyDraftPaths(projectId: string, paths: string[]): string[] {

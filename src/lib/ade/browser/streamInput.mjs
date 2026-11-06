@@ -3,11 +3,13 @@
 // mapping, wheel units and key filtering).
 // Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
 
+import { MODIFIER_BITS } from "../../../shared/browser-contract.mjs";
+
 /** Modifier bits in the protocol: alt 1, ctrl 2, meta 4, shift 8. */
-export const MODIFIER_ALT = 1;
-export const MODIFIER_CTRL = 2;
-export const MODIFIER_META = 4;
-export const MODIFIER_SHIFT = 8;
+export const MODIFIER_ALT = MODIFIER_BITS.alt;
+export const MODIFIER_CTRL = MODIFIER_BITS.ctrl;
+export const MODIFIER_META = MODIFIER_BITS.meta;
+export const MODIFIER_SHIFT = MODIFIER_BITS.shift;
 
 /** DOM `WheelEvent.deltaMode` values. */
 const DOM_DELTA_LINE = 1;

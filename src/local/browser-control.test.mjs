@@ -2,9 +2,17 @@
 // Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createControlRegistry, HumanControlError } from "./browser-control.mjs";
+import {
+  BrowserClosedError,
+  createControlRegistry,
+  HumanControlError,
+} from "./browser-control.mjs";
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function deferred() {
+  let resolve;
+  const promise = new Promise((r) => (resolve = r));
+  return { promise, resolve };
+}
 
 test("agent work runs while nobody has control", async () => {
   const control = createControlRegistry().for("p1");
@@ -80,13 +88,16 @@ test("subscribe fires on take and release and stops after unsubscribe", () => {
 test("human work waits for in-flight agent work to drain before running", async () => {
   const control = createControlRegistry().for("p1");
   const log = [];
+  const started = deferred();
+  const finish = deferred();
   const agentWork = control.agent(async () => {
-    await sleep(30);
+    started.resolve();
+    await finish.promise;
     log.push("agent");
   });
-  // Let the agent start running before the take, so it is genuinely in flight.
-  await sleep(5);
+  await started.promise;
   control.take("A");
+  finish.resolve();
   await control.human("A", async () => log.push("human"));
   await agentWork;
   assert.deepEqual(log, ["agent", "human"]);
@@ -95,12 +106,14 @@ test("human work waits for in-flight agent work to drain before running", async 
 test("agent work queued behind a running action is rejected once a take changes the epoch", async () => {
   const control = createControlRegistry().for("p1");
   const log = [];
+  const started = deferred();
+  const finish = deferred();
   const first = control.agent(async () => {
-    await sleep(20);
+    started.resolve();
+    await finish.promise;
     log.push("first");
   });
-  // Let the first action start so it is genuinely in flight.
-  await sleep(5);
+  await started.promise;
   const second = control
     .agent(async () => log.push("second"))
     .then(
@@ -108,6 +121,7 @@ test("agent work queued behind a running action is rejected once a take changes 
       (error) => error,
     );
   control.take("A");
+  finish.resolve();
   await first;
   assert.ok((await second) instanceof HumanControlError);
   assert.deepEqual(log, ["first"]);
@@ -117,10 +131,7 @@ test("release runs afterDrain once work queued before the release has drained", 
   const control = createControlRegistry().for("p1");
   const log = [];
   control.take("A");
-  await control.human("A", async () => {
-    await sleep(10);
-    log.push("input");
-  });
+  await control.human("A", async () => log.push("input"));
   control.release("A", async () => log.push("afterDrain"));
   await control.agent(async () => log.push("agent"));
   assert.deepEqual(log, ["input", "afterDrain", "agent"]);
@@ -136,7 +147,12 @@ test("registry returns one control per project and delete releases the owner", a
   assert.equal(first.state().owner, null);
   await assert.rejects(
     first.agent(async () => "never"),
-    /closed/,
+    (error) => {
+      assert.ok(error instanceof BrowserClosedError);
+      assert.equal(error.code, "browser_closed");
+      assert.notEqual(error.code, "human_control");
+      return true;
+    },
   );
   assert.notEqual(registry.for("p1"), first, "a deleted project gets a fresh control");
 });

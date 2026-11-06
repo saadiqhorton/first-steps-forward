@@ -10,11 +10,19 @@
 // /preview-stream upgrades (see handleUpgrade in ade-local.mjs).
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
+import {
+  DEFAULT_VIEWPORT,
+  INPUT_BUTTONS,
+  MAX_INPUT_TEXT_CHARS,
+  MAX_MODIFIER_MASK,
+  STREAM_PATH,
+  STREAM_CLOSE_CODES,
+  WEBSOCKET_CLOSE_REASON_MAX_BYTES,
+} from "../shared/browser-contract.mjs";
 
-const PATH = "/preview-stream";
-const DEFAULT_MAX_WIDTH = 1280;
+const DEFAULT_MAX_WIDTH = DEFAULT_VIEWPORT.width;
 const MAX_WIDTH = 7680;
-const DEFAULT_MAX_HEIGHT = 800;
+const DEFAULT_MAX_HEIGHT = DEFAULT_VIEWPORT.height;
 const MAX_HEIGHT = 4320;
 const DEFAULT_QUALITY = 70;
 const MAX_QUALITY = 100;
@@ -22,21 +30,15 @@ const MAX_SOCKET_BUFFER_BYTES = 8 * 1024 * 1024;
 const MAX_UNACKNOWLEDGED_FRAMES = 64;
 // Per-frame overhead T3 adds to the buffer estimate (WebSocket frame header).
 const FRAME_OVERHEAD_BYTES = 14;
-const MAX_TEXT_CHARS = 10000;
-const MIN_RESIZE = 240;
-const MAX_RESIZE_WIDTH = 3840;
-const MAX_RESIZE_HEIGHT = 2160;
-// WebSocket close reasons are limited to 123 bytes.
-const MAX_CLOSE_REASON_BYTES = 123;
-
-const CLOSE_RECONNECT = 1012;
-const CLOSE_SLOW_VIEWER = 1013;
-const CLOSE_INTERNAL = 1011;
-const CLOSE_BAD_REQUEST = 4400;
-const CLOSE_UNAUTHORIZED = 4401;
-const CLOSE_HOST_UNAVAILABLE = 4503;
-
-const BUTTONS = ["none", "left", "middle", "right"];
+// Keep host error messages inside the WebSocket close-reason limit.
+const {
+  reconnect: CLOSE_RECONNECT,
+  slowViewer: CLOSE_SLOW_VIEWER,
+  internal: CLOSE_INTERNAL,
+  badRequest: CLOSE_BAD_REQUEST,
+  unauthorized: CLOSE_UNAUTHORIZED,
+  hostUnavailable: CLOSE_HOST_UNAVAILABLE,
+} = STREAM_CLOSE_CODES;
 
 const intParam = (params, name, fallback, max) => {
   const value = Number(params.get(name));
@@ -45,7 +47,7 @@ const intParam = (params, name, fallback, max) => {
 
 const finiteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
-const isModifiers = (value) => Number.isInteger(value) && value >= 0 && value <= 15;
+const isModifiers = (value) => Number.isInteger(value) && value >= 0 && value <= MAX_MODIFIER_MASK;
 
 function parseMessage(data) {
   try {
@@ -62,7 +64,7 @@ function parseMessage(data) {
 function inputFrom(msg) {
   switch (msg.type) {
     case "mouse": {
-      if (!["move", "down", "up"].includes(msg.action) || !BUTTONS.includes(msg.button))
+      if (!["move", "down", "up"].includes(msg.action) || !INPUT_BUTTONS.includes(msg.button))
         return null;
       const x = finiteNumber(msg.x);
       const y = finiteNumber(msg.y);
@@ -106,7 +108,7 @@ function inputFrom(msg) {
     }
     case "text": {
       if (typeof msg.text !== "string" || msg.text.length === 0) return null;
-      if (msg.text.length > MAX_TEXT_CHARS) return null;
+      if (msg.text.length > MAX_INPUT_TEXT_CHARS) return null;
       return { type: "text", text: msg.text };
     }
     default:
@@ -137,7 +139,7 @@ const safeCall = (fn) => {
 /** Keeps a WebSocket close reason within the 123-byte limit. */
 function hostReason(message) {
   let text = String(message);
-  while (Buffer.byteLength(JSON.stringify({ message: text })) > MAX_CLOSE_REASON_BYTES) {
+  while (Buffer.byteLength(JSON.stringify({ message: text })) > WEBSOCKET_CLOSE_REASON_MAX_BYTES) {
     text = text.slice(0, -1);
   }
   return JSON.stringify({ message: text });
@@ -145,7 +147,7 @@ function hostReason(message) {
 
 /**
  * @param {{
- *   hub: { get(projectId: string): Promise<any> },
+ *   hub: { existing(projectId: string): Promise<any> },
  *   controls: { for(projectId: string): any },
  *   originAllowed: (origin: string, req: import("node:http").IncomingMessage) => boolean,
  * }} options
@@ -184,44 +186,6 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
   };
   const guarded = (rec, promise) => promise.catch((error) => sendError(rec, error));
 
-  /** Releases keys and buttons a viewer left down, so the page never keeps them pressed. */
-  async function releaseHeld(room, viewerId) {
-    const held = room.held.get(viewerId);
-    if (!held) return;
-    room.held.delete(viewerId);
-    for (const { key, code } of held.keys.values()) {
-      await room.session.input({ type: "key", action: "up", key, code, modifiers: 0 });
-    }
-    for (const button of held.buttons.keys()) {
-      const { x, y } = held.buttons.get(button);
-      await room.session.input({
-        type: "mouse",
-        action: "up",
-        x,
-        y,
-        button,
-        buttons: 0,
-        clickCount: 1,
-        modifiers: 0,
-      });
-    }
-  }
-
-  function trackHeld(room, viewerId, input) {
-    if (input.type === "key") {
-      let held = room.held.get(viewerId);
-      if (!held) room.held.set(viewerId, (held = { keys: new Map(), buttons: new Map() }));
-      const id = input.code || input.key;
-      if (input.action === "down") held.keys.set(id, { key: input.key, code: input.code });
-      else held.keys.delete(id);
-    } else if (input.type === "mouse" && input.button !== "none") {
-      let held = room.held.get(viewerId);
-      if (!held) room.held.set(viewerId, (held = { keys: new Map(), buttons: new Map() }));
-      if (input.action === "down") held.buttons.set(input.button, { x: input.x, y: input.y });
-      else if (input.action === "up") held.buttons.delete(input.button);
-    }
-  }
-
   function teardown(room) {
     if (room.closed) return;
     room.closed = true;
@@ -244,16 +208,17 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
       viewers: new Set(),
       dialog: null,
       fileChooser: null,
-      held: new Map(),
       unsubs: [],
       closed: false,
       ready: null,
     };
     rooms.set(projectId, room);
-    room.ready = hub.get(projectId).then(
+    room.ready = hub.existing(projectId).then(
       (session) => {
+        if (!session) throw new Error("The agent computer's browser is not running.");
         if (room.closed) return;
         room.session = session;
+        room.dialog = session.pendingDialog();
         room.fileChooser = session.fileChooser();
         room.unsubs.push(
           session.on("nav", (nav) => broadcast(room, navMessage(nav))),
@@ -314,7 +279,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
     // owner's last socket closes, so a reconnecting tab keeps control.
     const ownerStillOpen = [...room.viewers].some((other) => other.viewerId === rec.viewerId);
     if (!ownerStillOpen && room.control.state().owner === rec.viewerId) {
-      room.control.release(rec.viewerId, () => releaseHeld(room, rec.viewerId));
+      room.control.release(rec.viewerId, async () => room.session.releaseInput());
     }
     teardownIfEmpty(room);
   }
@@ -405,30 +370,6 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
         if (ack) safeCall(ack);
         return;
       }
-      case "takeControl":
-        try {
-          control.take(rec.viewerId);
-        } catch (error) {
-          sendError(rec, error);
-        }
-        return;
-      case "releaseControl":
-        control.release(rec.viewerId, () => releaseHeld(room, rec.viewerId));
-        return;
-      case "resize": {
-        const width = finiteNumber(msg.width);
-        const height = finiteNumber(msg.height);
-        if (width === null || height === null) return;
-        const size = {
-          width: Math.min(Math.max(Math.round(width), MIN_RESIZE), MAX_RESIZE_WIDTH),
-          height: Math.min(Math.max(Math.round(height), MIN_RESIZE), MAX_RESIZE_HEIGHT),
-        };
-        await guarded(
-          rec,
-          Promise.resolve().then(() => session.resize(size)),
-        );
-        return;
-      }
       case "navigate":
         if (typeof msg.url !== "string" || msg.url.length === 0) return;
         await guarded(
@@ -472,7 +413,6 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
           rec,
           control.human(rec.viewerId, async () => {
             const result = await session.input(input);
-            trackHeld(room, rec.viewerId, input);
             // A copy or cut key's text goes to this viewer's own clipboard.
             if (result?.copied) send(rec, { type: "clipboard", text: result.copied });
           }),
@@ -496,7 +436,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
 
   const handleUpgrade = (req, socket, head) => {
     const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
-    if (pathname !== PATH) return false;
+    if (pathname !== STREAM_PATH) return false;
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
     return true;
   };
@@ -509,7 +449,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
      */
     url(projectId) {
       const params = new URLSearchParams({ project: projectId, token });
-      return `${PATH}?${params}`;
+      return `${STREAM_PATH}?${params}`;
     },
     /** Disconnects every viewer. */
     async close() {

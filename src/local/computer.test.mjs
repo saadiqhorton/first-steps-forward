@@ -147,6 +147,20 @@ test("action errors keep their code and map to an HTTP status", async () => {
   });
 });
 
+test("a closed browser control lock maps to a retryable service error", async () => {
+  const hub = fakeHub();
+  const computers = createComputerManager({ installer: fakeInstaller(), hub });
+  const session = await hub.get("p");
+  session.runComputerAction = async () => {
+    throw coded("browser_closed", "The agent browser is closed.");
+  };
+
+  assert.deepEqual(await computers.action("p", { action: "click" }), {
+    status: 503,
+    payload: { error: "The agent browser is closed.", code: "browser_closed" },
+  });
+});
+
 test("an install in progress answers the agent with its progress, not a stuck call", async () => {
   const hub = fakeHub({
     get: async () => {

@@ -12,15 +12,9 @@ import { z } from "zod";
 import { ConversationList } from "@/components/ade/ConversationList";
 import { usePersistedLayout } from "@/components/ade/persistLayout";
 import { useShell } from "@/components/ade/shellContext";
-import type { RightTab } from "@/lib/ade/navigation";
+import { RIGHT_TABS, type RightTab } from "@/lib/ade/navigation";
 
-const rightTabs = [
-  "activity",
-  "diff",
-  "computer",
-  "editor",
-  "terminal",
-] as const satisfies readonly RightTab[];
+const rightTabs = ["editor", ...RIGHT_TABS] as const satisfies readonly (RightTab | "editor")[];
 
 const conversationsSearchSchema = z.object({
   completed: z.boolean().optional(),
@@ -112,17 +106,12 @@ function ConversationsLayout() {
       const width = groupElement.offsetWidth;
       const isNarrow = width < AUTO_COLLAPSE_THRESHOLD;
 
-      // Detect crossing from wide to narrow
       if (isNarrow && !prevNarrowRef.current) {
-        // Crossing into narrow: collapse if not already collapsed
         if (!listPanelRef.current?.isCollapsed()) {
           listPanelRef.current?.collapse();
           autoCollapsedRef.current = true;
         }
-      }
-      // Detect crossing from narrow to wide
-      else if (!isNarrow && prevNarrowRef.current && autoCollapsedRef.current) {
-        // Re-expand only if we auto-collapsed it
+      } else if (!isNarrow && prevNarrowRef.current && autoCollapsedRef.current) {
         if (listPanelRef.current?.isCollapsed()) {
           listPanelRef.current?.expand();
           autoCollapsedRef.current = false;

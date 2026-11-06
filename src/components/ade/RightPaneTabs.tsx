@@ -1,37 +1,18 @@
 import { type ReactNode, type Ref } from "react";
-import { Activity, FileDiff, Globe, SquareTerminal, X, type LucideIcon } from "lucide-react";
+import { X } from "lucide-react";
 import { GlideIndicator } from "@/components/ade/motion";
+import { RIGHT_PANE_TABS } from "@/components/ade/rightPaneTabs";
 import { type RightTab } from "@/lib/ade/navigation";
-
-export const RIGHT_PANE_TABS: Array<{
-  id: "activity" | "diff" | "computer" | "terminal";
-  label: string;
-  Icon: LucideIcon;
-}> = [
-  { id: "activity", label: "Activity", Icon: Activity },
-  { id: "diff", label: "Diff", Icon: FileDiff },
-  { id: "computer", label: "Browser", Icon: Globe },
-  { id: "terminal", label: "Terminal", Icon: SquareTerminal },
-];
 
 export function RightPaneTabs(props: {
   tab: RightTab;
-  onSelect: (tab: "activity" | "diff" | "computer" | "terminal") => void;
+  onSelect: (tab: RightTab) => void;
   terminalOpened: boolean;
   terminalClosing: boolean;
   onCloseTerminal: () => void;
   activityTabRef?: Ref<HTMLButtonElement>;
-  actions?: ReactNode;
 }): ReactNode {
-  const {
-    tab,
-    onSelect,
-    terminalOpened,
-    terminalClosing,
-    onCloseTerminal,
-    activityTabRef,
-    actions,
-  } = props;
+  const { tab, onSelect, terminalOpened, terminalClosing, onCloseTerminal, activityTabRef } = props;
 
   return (
     <div
@@ -95,9 +76,6 @@ export function RightPaneTabs(props: {
           </div>
         );
       })}
-      {actions && (
-        <div className="ml-auto flex shrink-0 items-center gap-0.5 pr-1.5 pl-1">{actions}</div>
-      )}
     </div>
   );
 }

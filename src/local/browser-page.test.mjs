@@ -3,15 +3,18 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
   clampViewport,
-  createBrowserHub,
   editingCommand,
   keyEventParams,
-  maskValues,
   modifiersOf,
   mouseEventParams,
   normalizeBrowserUrl,
   wheelEventParams,
   xdotoolChords,
+} from "./browser-protocol.mjs";
+import {
+  createBrowserHub,
+  maskValues,
+  normalizeBrowserUrl as publicNormalizeBrowserUrl,
 } from "./browser-page.mjs";
 import { createComputerManager } from "./computer.mjs";
 
@@ -20,6 +23,10 @@ test("normalizeBrowserUrl adds https to bare hosts and http to loopback", () => 
   assert.equal(normalizeBrowserUrl("  localhost:5173  "), "http://localhost:5173/");
   assert.equal(normalizeBrowserUrl("127.0.0.1:8080/x"), "http://127.0.0.1:8080/x");
   assert.equal(normalizeBrowserUrl("http://example.com"), "http://example.com/");
+});
+
+test("browser-page keeps re-exporting protocol helpers for existing consumers", () => {
+  assert.equal(publicNormalizeBrowserUrl, normalizeBrowserUrl);
 });
 
 test("normalizeBrowserUrl refuses empty input and non-web schemes", () => {
@@ -163,6 +170,7 @@ test("xdotoolChords refuses empty input and unknown key names", () => {
 // A context that answers every CDP command with an empty result, enough for BrowserSession.open.
 class FakeContext extends EventEmitter {
   closed = false;
+  calls = [];
   #page = Object.assign(new EventEmitter(), {
     setDefaultTimeout() {},
     setDefaultNavigationTimeout() {},
@@ -180,12 +188,16 @@ class FakeContext extends EventEmitter {
   async grantPermissions() {}
   async newCDPSession() {
     return Object.assign(new EventEmitter(), {
-      send: async (method) =>
-        ({
-          "Browser.getVersion": { userAgent: "Mozilla/5.0 Chrome/1.0" },
-          "Page.getNavigationHistory": { entries: [{}], currentIndex: 0 },
-          "Page.captureScreenshot": { data: "" },
-        })[method] ?? {},
+      send: async (method, params) => {
+        this.calls.push({ method, params });
+        return (
+          {
+            "Browser.getVersion": { userAgent: "Mozilla/5.0 Chrome/1.0" },
+            "Page.getNavigationHistory": { entries: [{}], currentIndex: 0 },
+            "Page.captureScreenshot": { data: "" },
+          }[method] ?? {}
+        );
+      },
       detach: async () => {},
     });
   }
@@ -197,6 +209,14 @@ class FakeContext extends EventEmitter {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitFor(check, description, timeoutMs = 2000) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    if (check()) return;
+    await sleep(5);
+  }
+  throw new Error(`Timed out waiting for ${description}`);
+}
 
 /** A hub over fake contexts that records every context it opened, per project. */
 function fakeHub(options) {
@@ -219,8 +239,7 @@ test("a hub closes an idle project, keeps one with a viewer, and reopens on the 
   const stop = await watched.startScreencast({}, () => {});
   assert.equal(watched.viewerCount, 1);
 
-  await sleep(300);
-  assert.equal(hub.peek("idle"), null, "the unused project was closed");
+  await waitFor(() => hub.peek("idle") === null, "idle session to close");
   assert.equal(idle.closed, true);
   assert.equal(opened[0].context.closed, true);
   assert.equal(hub.peek("watched"), watched, "a project with a viewer stays open");
@@ -229,14 +248,36 @@ test("a hub closes an idle project, keeps one with a viewer, and reopens on the 
   // The viewer leaving starts the idle clock from then, not from when it attached.
   await stop();
   assert.equal(hub.peek("watched"), watched);
-  await sleep(300);
-  assert.equal(hub.peek("watched"), null);
+  await waitFor(() => hub.peek("watched") === null, "unwatched session to close");
 
   const again = await hub.get("idle");
   assert.notEqual(again, idle);
   assert.equal(again.closed, false);
   assert.equal(opened.length, 3, "reopening used a fresh context");
   assert.equal(hub.peek("idle"), again);
+  await hub.closeAll();
+});
+
+test("releaseInput waits until held keys and buttons are released", async () => {
+  const { hub, opened } = fakeHub();
+  const session = await hub.get("p");
+  await session.input({ type: "key", action: "down", key: "Shift", code: "ShiftLeft" });
+  await session.input({ type: "mouse", action: "down", button: "left", x: 5, y: 6 });
+
+  await session.releaseInput();
+
+  assert.deepEqual(
+    opened[0].context.calls
+      .filter(({ method }) => method.startsWith("Input.dispatch"))
+      .map(({ method, params }) => [method, params.type]),
+    [
+      ["Input.dispatchKeyEvent", "rawKeyDown"],
+      ["Input.dispatchMouseEvent", "mousePressed"],
+      ["Input.dispatchKeyEvent", "keyUp"],
+      ["Input.dispatchMouseEvent", "mouseReleased"],
+    ],
+  );
+
   await hub.closeAll();
 });
 
@@ -247,8 +288,7 @@ test("every get() restarts the idle clock", async () => {
     await sleep(80);
     assert.equal(await hub.get("busy"), session, "still the same session while it is used");
   }
-  await sleep(600);
-  assert.equal(hub.peek("busy"), null);
+  await waitFor(() => hub.peek("busy") === null, "unused session to close");
 });
 
 test("ADE_BROWSER_IDLE_MS sets the idle timeout", async () => {
@@ -257,8 +297,7 @@ test("ADE_BROWSER_IDLE_MS sets the idle timeout", async () => {
   try {
     const { hub } = fakeHub();
     await hub.get("p");
-    await sleep(300);
-    assert.equal(hub.peek("p"), null);
+    await waitFor(() => hub.peek("p") === null, "configured idle timeout");
   } finally {
     if (before === undefined) delete process.env.ADE_BROWSER_IDLE_MS;
     else process.env.ADE_BROWSER_IDLE_MS = before;
@@ -274,8 +313,7 @@ test("computer status goes running, then stopped when idle, then running on the 
   assert.equal(computers.status("p").status, "stopped");
   await computers.start("p");
   assert.equal(computers.status("p").status, "running");
-  await sleep(300);
-  assert.equal(computers.status("p").status, "stopped");
+  await waitFor(() => computers.status("p").status === "stopped", "computer session to stop");
   await computers.start("p");
   assert.equal(computers.status("p").status, "running");
   await hub.closeAll();

@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { PanelRightOpen, PanelBottomOpen } from "lucide-react";
-import { RIGHT_PANE_TABS } from "@/components/ade/RightPaneTabs";
+import { RIGHT_PANE_TABS } from "@/components/ade/rightPaneTabs";
 import { type RightTab } from "@/lib/ade/navigation";
 import { type RightDock, type ComputerTone } from "@/components/ade/rightPaneTypes";
 
@@ -8,7 +8,7 @@ export function RightRail(props: {
   orientation: "vertical" | "horizontal";
   tab: RightTab;
   computerTone: ComputerTone;
-  onSelect: (tab: "activity" | "diff" | "computer" | "terminal") => void;
+  onSelect: (tab: RightTab) => void;
   onExpand: () => void;
   dock: RightDock;
 }): ReactNode {
@@ -17,8 +17,7 @@ export function RightRail(props: {
   const isVertical = orientation === "vertical";
   const isSideDock = dock === "side";
 
-  const expandIcon = isSideDock ? PanelRightOpen : PanelBottomOpen;
-  const ExpandIcon = expandIcon;
+  const ExpandIcon = isSideDock ? PanelRightOpen : PanelBottomOpen;
 
   const computerDotColorMap: Record<ComputerTone, string> = {
     idle: "bg-dim/60",

@@ -1,5 +1,3 @@
-import { FileCode2, FileJson2, FileText } from "lucide-react";
-
 /** Entry from `/api/editor/:id/entries` or search. */
 export type EditorEntry = { name: string; path: string; kind: "folder" | "file" };
 
@@ -26,13 +24,6 @@ export async function editorApi<T>(url: string, data?: object): Promise<T> {
     throw error;
   }
   return value as T;
-}
-
-export function editorFileIcon(file: string) {
-  if (file.endsWith(".json")) return <FileJson2 size={13} aria-hidden />;
-  if (file.endsWith(".md") || file.endsWith(".txt") || file.endsWith(".mdx"))
-    return <FileText size={13} aria-hidden />;
-  return <FileCode2 size={13} aria-hidden />;
 }
 
 export function isMarkdownPath(file: string) {

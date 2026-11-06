@@ -7,11 +7,27 @@ import { promises as fs } from "node:fs";
 import { builtinModules } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const packDir = path.join(root, ".pack");
 const stage = path.join(packDir, "stage");
 const rel = (...parts) => path.join(root, ...parts);
+const PACKAGE_CONTENTS = [
+  { from: "bin" },
+  { from: "scripts/start-local.mjs" },
+  { from: "scripts/browser-setup.mjs" },
+  {
+    from: "src/local",
+    filter: (source) => !isDevOnly(path.basename(source)),
+  },
+  { from: "src/shared", filter: (source) => !isDevOnly(path.basename(source)) },
+  { from: ".output/public" },
+  { from: "public/licenses" },
+  { from: "README.md" },
+  { from: "LICENSE" },
+  { from: "THIRD_PARTY_NOTICES.md" },
+];
 
 // node-pty@1.1.0 has no Linux prebuild, so installing it compiles C++ (python3, make, g++).
 // @lydell/node-pty is the same API with prebuilds for linux, darwin and win32 on x64 and arm64.
@@ -22,7 +38,6 @@ const OPTIONAL = new Set(["node-pty"]);
 /** Source files that are not shipped: tests and their helpers, and the Vite-facing type stubs. */
 const isDevOnly = (name) => /\.test(-helper)?\.mjs$/.test(name) || name.endsWith(".d.mts");
 
-const BARE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"'./][^"']*)["']/g;
 const builtins = new Set([...builtinModules, ...builtinModules.map((m) => `node:${m}`)]);
 
 /** The npm package a bare specifier names: `a/b` -> `a`, `@s/a/b` -> `@s/a`. */
@@ -41,15 +56,33 @@ async function listFiles(dir) {
   return out;
 }
 
-/** Bare package names the staged .mjs files import (comments count: a false positive fails loudly). */
+/** Bare package names referenced by executable import, export, and require expressions. */
 async function importedPackages(dir) {
   const found = new Set();
   for (const file of await listFiles(dir)) {
     if (!file.endsWith(".mjs")) continue;
     const source = await fs.readFile(file, "utf8");
-    for (const match of source.matchAll(BARE_IMPORT)) {
-      if (!builtins.has(match[1])) found.add(packageName(match[1]));
-    }
+    const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const add = (specifier) => {
+      if (!specifier || !ts.isStringLiteralLike(specifier)) return;
+      if (!specifier.text.startsWith(".") && !path.isAbsolute(specifier.text)) {
+        const name = packageName(specifier.text);
+        if (!builtins.has(name)) found.add(name);
+      }
+    };
+    const visit = (node) => {
+      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        if (
+          callee.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(callee) && callee.text === "require")
+        )
+          add(node.arguments[0]);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
   }
   return [...found].sort();
 }
@@ -66,17 +99,9 @@ async function main() {
 
   await fs.rm(packDir, { recursive: true, force: true });
   await fs.mkdir(stage, { recursive: true });
-  const copy = (from, to = from, filter) =>
-    fs.cp(rel(from), path.join(stage, to), { recursive: true, filter });
-  await copy("bin");
-  await copy("scripts/start-local.mjs");
-  await copy("scripts/browser-setup.mjs");
-  await copy("src/local", "src/local", (source) => !isDevOnly(path.basename(source)));
-  await copy(".output/public");
-  await copy("public/licenses");
-  await copy("README.md");
-  await copy("LICENSE");
-  await copy("THIRD_PARTY_NOTICES.md");
+  for (const { from, to = from, filter } of PACKAGE_CONTENTS) {
+    await fs.cp(rel(from), path.join(stage, to), { recursive: true, filter });
+  }
 
   const dependencies = {};
   const optionalDependencies = {};
@@ -100,17 +125,8 @@ async function main() {
     license: "MIT",
     type: "module",
     bin: { ade: "bin/ade.mjs" },
-    engines: { node: ">=22" },
-    files: [
-      "bin",
-      "scripts",
-      "src/local",
-      ".output/public",
-      "public/licenses",
-      "README.md",
-      "LICENSE",
-      "THIRD_PARTY_NOTICES.md",
-    ],
+    engines: rootManifest.engines,
+    files: [...new Set(PACKAGE_CONTENTS.map(({ from, to = from }) => to))],
     dependencies,
     optionalDependencies,
     publishConfig: { access: "public" },

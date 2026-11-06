@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  createDevCommandApprovals,
   devCommandEnv,
   normalizeCwd,
   sameDevCommand,
@@ -118,4 +119,18 @@ test("the launch env sets PORT and HOST and puts virtualenv scripts first on PAT
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("approval wait cancels through AbortSignal without closing the shared request", async () => {
+  const project = { id: "p1" };
+  const state = { projects: [project], sessions: [] };
+  const approvals = createDevCommandApprovals({ state, save: async () => {} });
+  const request = approvals.ask(project, { command: "npm run dev", cwd: "." });
+  const controller = new AbortController();
+  const waiting = approvals.wait(project.id, request.id, controller.signal);
+  controller.abort();
+  assert.equal(await waiting, "gone");
+  assert.equal(approvals.pendingFor(project.id).id, request.id);
+  await approvals.answer(project, request.id, false);
+  assert.equal(approvals.pendingFor(project.id), undefined);
 });

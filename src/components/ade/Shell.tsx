@@ -25,8 +25,9 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import type { RightTab } from "@/lib/ade/navigation";
-import { useAdeState } from "@/lib/ade/store";
+import { projectIdFromPath, RIGHT_TABS, type RightTab } from "@/lib/ade/navigation";
+import { useActiveProjectSelection, useAdeState } from "@/lib/ade/store";
+import type { Project } from "@/lib/ade/types";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { AgentsDialog } from "./AgentsDialog";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
@@ -47,8 +48,6 @@ import { usePersistedLayout } from "./persistLayout";
 const SHELL_LAYOUT_ID = "ade-shell-layout-v2";
 const BOTTOM_LAYOUT_ID = "ade-shell-layout-bottom";
 const DOCK_PREF_KEY = "ade-right-dock";
-const SHELL_PANEL_IDS = ["shell-main", "shell-right"] as const;
-type ShellPanelId = (typeof SHELL_PANEL_IDS)[number];
 
 // Split desk: give the live computer a useful starting size beside the task.
 // Persisted user layouts still take precedence when the group hydrates.
@@ -61,8 +60,6 @@ const RIGHT_MAX_PCT = 60;
 const BOTTOM_MIN_PX = 180;
 const BOTTOM_MAX_PCT = 70;
 const COLLAPSED_SIZE = "40px";
-
-const RIGHT_TABS: RightTab[] = ["activity", "diff", "computer", "terminal"];
 
 /**
  * Tracks whether we're on the `lg` breakpoint or wider. Renders `true` on the
@@ -93,8 +90,8 @@ function PanelSash({
   showCollapseHandle = true,
 }: {
   orientation: "vertical" | "horizontal";
-  panelId: ShellPanelId | "session-bottom";
-  side: "left" | "right" | "bottom";
+  panelId: string;
+  side: "right" | "bottom";
   onToggleCollapsed?: () => void;
   collapsed?: boolean;
   collapseLabel?: string;
@@ -121,13 +118,11 @@ function PanelSash({
             ) : (
               <PanelRightClose className="size-3.5" aria-hidden strokeWidth={2.5} />
             )
-          ) : side === "bottom" ? (
-            collapsed ? (
-              <PanelBottomOpen className="size-3.5" aria-hidden strokeWidth={2.5} />
-            ) : (
-              <PanelBottomClose className="size-3.5" aria-hidden strokeWidth={2.5} />
-            )
-          ) : null}
+          ) : collapsed ? (
+            <PanelBottomOpen className="size-3.5" aria-hidden strokeWidth={2.5} />
+          ) : (
+            <PanelBottomClose className="size-3.5" aria-hidden strokeWidth={2.5} />
+          )}
         </button>
       )}
     </Separator>
@@ -160,15 +155,29 @@ function PaneSlot({ el }: { el: HTMLDivElement }) {
 
 export function Shell({ children }: { children: ReactNode }) {
   const [rightHost, setRightHost] = useState<HTMLDivElement | null>(null);
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const routeProjectId = projectIdFromPath(pathname);
   const { projects, activeProjectId } = useAdeState((state) => ({
     projects: state.projects,
     activeProjectId: state.activeProjectId,
   }));
-  const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
+  const [, setSelectedProjectId] = useActiveProjectSelection();
+  const activeProject =
+    projects.find((project) => project.id === routeProjectId) ??
+    projects.find((project) => project.id === activeProjectId) ??
+    projects[0];
+
+  useEffect(() => {
+    if (routeProjectId && projects.some((project) => project.id === routeProjectId))
+      setSelectedProjectId(routeProjectId);
+  }, [projects, routeProjectId, setSelectedProjectId]);
+
   return (
     <RightPaneHostContext.Provider value={rightHost}>
       <BrowserPreviewProvider projectId={activeProject?.id ?? null}>
-        <ShellInner onRightHostChange={setRightHost}>{children}</ShellInner>
+        <ShellInner activeProject={activeProject} onRightHostChange={setRightHost}>
+          {children}
+        </ShellInner>
       </BrowserPreviewProvider>
     </RightPaneHostContext.Provider>
   );
@@ -176,16 +185,14 @@ export function Shell({ children }: { children: ReactNode }) {
 
 function ShellInner({
   children,
+  activeProject,
   onRightHostChange,
 }: {
   children: ReactNode;
+  activeProject: Project | undefined;
   onRightHostChange: (host: HTMLDivElement | null) => void;
 }) {
-  const state = useAdeState((state) => ({
-    projects: state.projects,
-    activeProjectId: state.activeProjectId,
-    sessions: state.sessions,
-  }));
+  const sessions = useAdeState((state) => state.sessions);
   const navigate = useNavigate();
   const router = useRouter();
   const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
@@ -249,8 +256,7 @@ function ShellInner({
     }
   };
 
-  // Selecting a tab opens the terminal session on first use; otherwise just switches.
-  const selectTab = (tab: "activity" | "diff" | "computer" | "terminal") => {
+  const selectTab = (tab: RightTab) => {
     if (tab === "terminal" && !terminalOpened) {
       openTerminal();
       return;
@@ -266,9 +272,7 @@ function ShellInner({
     registerClose: (close: (() => Promise<void>) | null) => void;
   }> | null>(null);
 
-  const activeProject =
-    state.projects.find((project) => project.id === state.activeProjectId) ?? state.projects[0];
-  const activeSession = state.sessions.find(
+  const activeSession = sessions.find(
     (session) => session.id === activeSessionId && session.projectId === activeProject?.id,
   );
 
@@ -290,7 +294,7 @@ function ShellInner({
     const dialogRaw = search["dialog"];
     const obsoleteEditor = paneRaw === "editor";
     const pane =
-      typeof paneRaw === "string" && (RIGHT_TABS as string[]).includes(paneRaw)
+      typeof paneRaw === "string" && RIGHT_TABS.includes(paneRaw as RightTab)
         ? (paneRaw as RightTab)
         : undefined;
     const nextDialog =
@@ -378,6 +382,10 @@ function ShellInner({
   const expandRight = useCallback(() => {
     activePanelRef.current?.expand();
   }, [activePanelRef]);
+  const selectTabAndExpand = (tab: RightTab) => {
+    selectTab(tab);
+    expandRight();
+  };
   const collapseRight = useCallback(() => {
     activePanelRef.current?.collapse();
   }, [activePanelRef]);
@@ -385,10 +393,8 @@ function ShellInner({
     if (activePanelRef.current?.isCollapsed()) activePanelRef.current.expand();
     else activePanelRef.current?.collapse();
   }, [activePanelRef]);
-  // Rail tabs both select and expand.
-  const railSelect = (tab: "activity" | "diff" | "computer" | "terminal") => {
-    selectTab(tab);
-    expandRight();
+  const railSelect = (tab: RightTab) => {
+    selectTabAndExpand(tab);
   };
 
   useEffect(() => {
@@ -419,7 +425,7 @@ function ShellInner({
 
   const shellContextValue = {
     rightTab,
-    setRightTab,
+    selectTab: selectTabAndExpand,
     openDialog,
     toggleList,
     registerListToggle,

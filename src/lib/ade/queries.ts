@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
-import { listEditorEntries, loadEditorFile } from "@/components/ade/editorApi";
-import { listDocuments, listWorkflows } from "@/lib/ade/store";
+import { listEditorEntries, loadEditorFile } from "@/lib/ade/editorApi";
+import { listDocuments, listWorkflows } from "@/lib/ade/api";
 import type { ProjectDocument } from "@/lib/ade/types";
 
 /**

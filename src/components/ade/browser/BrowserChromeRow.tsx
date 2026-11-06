@@ -26,7 +26,8 @@ import {
   supportsPictureInPicture,
 } from "@/lib/ade/browser/pictureInPicture";
 import { openExternally, togglePictureInPicture } from "./browserActions";
-import { useBrowserPreview } from "./browserPreviewContext";
+import { useBrowserPreviewFrame, useBrowserPreviewState } from "./browserPreviewContext";
+import { useBrowserPlacement } from "./browserPresentationContext";
 
 const ICON_BUTTON =
   "grid size-7 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:pointer-events-none disabled:opacity-40";
@@ -36,8 +37,10 @@ const ICON_BUTTON =
  * you hold control), and the pop-out, picture-in-picture and full screen actions.
  */
 export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElement | null> }) {
-  const preview = useBrowserPreview();
-  const { nav, control, projectId, canvas, send } = preview;
+  const preview = useBrowserPreviewState();
+  const { canvas } = useBrowserPreviewFrame();
+  const { setPlace } = useBrowserPlacement();
+  const { nav, control, projectId, send } = preview;
   const canOperate = control?.controller === "you";
   const url = nav?.url ?? "";
   const [draft, setDraft] = useState<string | null>(null);
@@ -154,7 +157,7 @@ export function BrowserChromeRow({ frameRef }: { frameRef: RefObject<HTMLDivElem
           type="button"
           aria-label="Pop out to floating window"
           title="Pop out to floating window"
-          onClick={() => preview.setPlace("float")}
+          onClick={() => setPlace("float")}
           className={ICON_BUTTON}
         >
           <SquareArrowOutUpRight className="size-4" strokeWidth={1.5} aria-hidden />

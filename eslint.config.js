@@ -6,7 +6,20 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".pack", ".output", ".vinxi", "src/components/arc"] },
+  {
+    ignores: [
+      "dist",
+      ".pack",
+      ".output",
+      ".vinxi",
+      ".claude/**",
+      ".agents/**",
+      ".untangle/**",
+      "tmp/**",
+      "unslop/**",
+      "src/components/arc",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

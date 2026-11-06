@@ -279,30 +279,27 @@ export function createDevCommandApprovals({ state, save, emit = () => {}, waitMs
       return request;
     },
     /**
-     * Wait for the answer to `requestId`: "allow", "deny", "superseded" (a different proposal
-     * replaced it), "cancelled", "timeout" (the request stays open), or "gone" (the caller hung
-     * up first; the request stays open).
+     * Wait for the answer to `requestId`, or until the caller cancels.
      * @param {string} projectId @param {string} requestId
-     * @param {import("node:events").EventEmitter & { writableEnded?: boolean }} [res]
+     * @param {AbortSignal} [signal]
      * @returns {Promise<string>}
      */
-    wait(projectId, requestId, res) {
+    wait(projectId, requestId, signal) {
       const entry = pending.get(projectId);
-      if (!entry || entry.request.id !== requestId) return Promise.resolve("cancelled");
+      if (!entry || entry.request.id !== requestId || signal?.aborted)
+        return Promise.resolve(signal?.aborted ? "gone" : "cancelled");
       return new Promise((resolve) => {
         const finish = (outcome) => {
           clearTimeout(timer);
-          res?.off("close", hungUp);
+          signal?.removeEventListener("abort", cancelled);
           entry.waiters.delete(finish);
           resolve(outcome);
         };
-        const hungUp = () => {
-          if (!res?.writableEnded) finish("gone");
-        };
+        const cancelled = () => finish("gone");
         const timer = setTimeout(() => finish("timeout"), wait);
         timer.unref?.();
         entry.waiters.add(finish);
-        res?.on("close", hungUp);
+        signal?.addEventListener("abort", cancelled, { once: true });
       });
     },
     /**

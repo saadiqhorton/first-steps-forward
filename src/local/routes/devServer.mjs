@@ -1,6 +1,5 @@
-import { processRunsIn as processMatches, stopProcess as stopChild } from "../spawn.mjs";
 import { resolveDevCommand, sameDevCommand } from "../dev-command.mjs";
-import { body } from "../http.mjs";
+import { body, responseClosedSignal } from "../http.mjs";
 
 const NEVER_YOURSELF =
   "Never start a server yourself (no nohup, &, disown, or a foreground dev command) to work around this.";
@@ -10,21 +9,7 @@ const NEVER_YOURSELF =
  * answer or forget the project's agent-proposed dev command (docs/adr/0005).
  */
 export async function devServer(ctx) {
-  const {
-    req,
-    res,
-    parts,
-    state,
-    children,
-    devStartClaims,
-    now,
-    save,
-    startDevServer,
-    refreshDevProcess,
-    devServerStatus,
-    devApprovals,
-    json,
-  } = ctx;
+  const { req, res, parts, state, save, devServers, devApprovals, json } = ctx;
   if (req.method === "GET" && parts[0] === "projects" && parts[2] === "dev") {
     const project = state.projects.find((x) => x.id === parts[1]);
     if (!project) return json(res, 404, { error: "Project not found." });
@@ -33,7 +18,7 @@ export async function devServer(ctx) {
     const asked = devApprovals.pendingFor(project.id);
     const extra = {
       ...note,
-      summary: devServerStatus(project),
+      summary: devServers.devServerStatus(project),
       ...(asked ? { awaitingApproval: { command: asked.command, cwd: asked.cwd } } : {}),
     };
     if (!proc)
@@ -72,7 +57,7 @@ export async function devServer(ctx) {
     if (parts[4] === "forget") {
       if (project.devCommand) {
         delete project.devCommand;
-        await refreshDevProcess(project);
+        await devServers.refreshDevProcess(project);
         await save();
       }
       return json(res, 200, { devCommand: null });
@@ -86,7 +71,7 @@ export async function devServer(ctx) {
   ) {
     const project = state.projects.find((x) => x.id === parts[1]);
     if (!project) return json(res, 404, { error: "Project not found." });
-    if (devStartClaims.has(project.id)) {
+    if (!devServers.claimStart(project.id)) {
       const current = state.processes.find((x) => x.projectId === project.id);
       return json(res, 409, {
         error: "The dev server is already running for this project.",
@@ -99,7 +84,6 @@ export async function devServer(ctx) {
       });
     }
     // Claimed before the first await, as the legacy start route does.
-    devStartClaims.add(project.id);
     let claimed = true;
     try {
       let data;
@@ -113,7 +97,7 @@ export async function devServer(ctx) {
       const proposing = data.command !== undefined && data.command !== null && data.command !== "";
       // Inline re-scan FIRST: a scripts.dev scaffolded earlier this same
       // turn must be detected without waiting for the next bootstrap poll.
-      const { proc, changed } = await refreshDevProcess(project);
+      const { proc, changed } = await devServers.refreshDevProcess(project);
       if (changed) save().catch(() => {});
       const script = proc && proc.source !== "approved";
       const ignored =
@@ -134,12 +118,12 @@ export async function devServer(ctx) {
             : {}),
         });
       if (script) {
-        await startDevServer(proc, project);
+        await devServers.startDevServer(proc, project);
         return json(res, 200, { ...startView(proc), ...ignored });
       }
       if (!proposing) {
         if (proc && project.devCommand) {
-          await startDevServer(proc, project);
+          await devServers.startDevServer(proc, project);
           return json(res, 200, startView(proc));
         }
         const asked = devApprovals.pendingFor(project.id);
@@ -161,15 +145,15 @@ export async function devServer(ctx) {
         });
       const proposal = await resolveDevCommand(data, project.path);
       if (proc && sameDevCommand(project.devCommand, proposal)) {
-        await startDevServer(proc, project);
+        await devServers.startDevServer(proc, project);
         return json(res, 200, startView(proc));
       }
       // A new command: ask the user. The claim is released while waiting, so an identical call
       // can join the question and a status call still answers.
-      devStartClaims.delete(project.id);
+      devServers.releaseStart(project.id);
       claimed = false;
       const request = devApprovals.ask(project, proposal, data.sessionId);
-      const outcome = await devApprovals.wait(project.id, request.id, res);
+      const outcome = await devApprovals.wait(project.id, request.id, responseClosedSignal(res));
       const pending = {
         command: request.command,
         cwd: request.cwd,
@@ -196,7 +180,7 @@ export async function devServer(ctx) {
           ...pending,
         });
       // Approved: project.devCommand now holds it. Start it like any approved command.
-      if (devStartClaims.has(project.id)) {
+      if (!devServers.claimStart(project.id)) {
         const current = state.processes.find((x) => x.projectId === project.id);
         return json(res, 409, {
           error: "The dev server is already starting for this project.",
@@ -204,9 +188,8 @@ export async function devServer(ctx) {
           status: "starting",
         });
       }
-      devStartClaims.add(project.id);
       claimed = true;
-      const approved = (await refreshDevProcess(project)).proc;
+      const approved = (await devServers.refreshDevProcess(project)).proc;
       if (!approved || approved.source !== "approved")
         return json(res, 409, {
           error:
@@ -217,10 +200,10 @@ export async function devServer(ctx) {
           error: "The dev server is already running for this project.",
           ...devView(approved),
         });
-      await startDevServer(approved, project);
+      await devServers.startDevServer(approved, project);
       return json(res, 200, { ...startView(approved), approved: true });
     } finally {
-      if (claimed) devStartClaims.delete(project.id);
+      if (claimed) devServers.releaseStart(project.id);
     }
   }
   if (
@@ -234,68 +217,42 @@ export async function devServer(ctx) {
     const proc = state.processes.find((x) => x.projectId === project.id);
     if (!proc)
       return json(res, 404, { error: "No dev-server record for this project; nothing to stop." });
-    // PID-reuse guard: with no live child, only signal a persisted pid that
-    // still matches the project's path — a recycled pid belongs to an
-    // unrelated process, and killing it would be worse than a stale record.
-    const child = children.get(proc.id);
-    if (!child && proc.pid && !(await processMatches(proc.pid, proc.dir ?? project.path)))
+    const stopped = await devServers.stopDevServer(proc, project);
+    if (stopped.stalePid)
       return json(res, 200, {
         ...devView(proc),
         note: "The stored pid no longer matches this project's dev process; nothing was signalled.",
       });
-    // Works during "starting": the live child is in `children` and gets
-    // killed; its close handler resets the port if it never listened.
-    stopChild(child ?? proc.pid);
-    if (proc.status !== "stopped") {
-      proc.status = "stopped";
-      delete proc.pid;
-      proc.updatedAt = now();
-      await save();
-    }
-    // Idempotent: stopping an already-stopped record is a 200 no-op.
     return json(res, 200, devView(proc));
   }
   if (req.method === "POST" && parts[0] === "processes" && parts[2] === "start") {
     const proc = state.processes.find((x) => x.id === parts[1]);
     const project = state.projects.find((x) => x.id === proc?.projectId);
     if (!proc || !project) return json(res, 404, { error: "Process not found." });
-    // Both start routes claim per-project synchronously before the first await.
-    if (devStartClaims.has(project.id))
+    if (proc.status === "running" || proc.status === "starting") return json(res, 200, proc);
+    if (!devServers.claimStart(project.id))
       return json(res, 200, {
         ...proc,
         status: proc.status === "running" ? "running" : "starting",
       });
-    if (proc.status === "running" || proc.status === "starting") return json(res, 200, proc);
-    devStartClaims.add(project.id);
     try {
-      await startDevServer(proc, project);
+      await devServers.startDevServer(proc, project);
       return json(res, 200, proc);
     } finally {
-      devStartClaims.delete(project.id);
+      devServers.releaseStart(project.id);
     }
   }
   if (req.method === "POST" && parts[0] === "processes" && parts[2] === "stop") {
     const proc = state.processes.find((x) => x.id === parts[1]);
     if (!proc) return json(res, 404, { error: "Process not found." });
-    // Same PID-reuse guard as dev/stop: never signal a persisted pid whose
-    // cwd no longer matches the project.
-    const child = children.get(proc.id);
     const project = state.projects.find((x) => x.id === proc.projectId);
-    if (!child && proc.pid && !(await processMatches(proc.pid, proc.dir ?? project?.path))) {
-      delete proc.pid;
-      proc.status = "stopped";
-      proc.updatedAt = now();
-      await save();
+    const stopped = await devServers.stopDevServer(proc, project);
+    if (stopped.stalePid) {
       return json(res, 200, {
         ...proc,
         note: "The stored pid no longer matches this project's dev process; nothing was signalled.",
       });
     }
-    stopChild(child ?? proc.pid);
-    proc.status = "stopped";
-    delete proc.pid;
-    proc.updatedAt = now();
-    await save();
     return json(res, 200, proc);
   }
   return ctx.handled || res.writableEnded;

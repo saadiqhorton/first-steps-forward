@@ -9,16 +9,7 @@ import type {
   ClientMessage,
 } from "@/lib/ade/browser/browserStream";
 
-/** Where the browser preview is shown: docked in the right pane, floating, or hidden. */
-export type BrowserPlace = "dock" | "float" | "hidden";
-
-/** Free position of the floating player, relative to the main content area. */
-export interface BrowserMiniPlayerState {
-  readonly width: number | null;
-  readonly position: { readonly x: number; readonly y: number } | null;
-}
-
-export interface BrowserPreviewValue {
+export interface BrowserPreviewStateValue {
   readonly projectId: string | null;
   /** Latest availability answer for the active project, or null until the first one. */
   readonly status: BrowserStatus | null;
@@ -26,21 +17,8 @@ export interface BrowserPreviewValue {
   readonly streamStatus: BrowserStreamStatus | "idle";
   readonly streamError: string | null;
   readonly nav: BrowserStreamNav | null;
-  readonly viewport: BrowserStreamViewport | null;
-  readonly pointer: BrowserStreamPointer | null;
   /** Who drives the page. Null until the first control answer. */
   readonly control: BrowserStreamControl | null;
-  readonly hasFrame: boolean;
-  /** The one registered canvas that frames are painted into. */
-  readonly canvas: HTMLCanvasElement | null;
-  readonly place: BrowserPlace;
-  readonly setPlace: (place: BrowserPlace) => void;
-  readonly mini: BrowserMiniPlayerState;
-  readonly setMini: (next: BrowserMiniPlayerState) => void;
-  readonly attachCanvas: (canvas: HTMLCanvasElement) => void;
-  readonly releaseCanvas: (canvas: HTMLCanvasElement) => void;
-  /** Size of the docked surface in CSS px. Sent to the server now and on every open. */
-  readonly requestViewportSize: (size: BrowserStreamViewport) => void;
   /** Sends a client message over the stream. False when it was not sent. */
   readonly send: (message: ClientMessage) => boolean;
   /** Take or hand back control of the shared agent browser. Errors are kept in actionError. */
@@ -54,10 +32,27 @@ export interface BrowserPreviewValue {
   readonly reconnect: () => void;
 }
 
-export const BrowserPreviewContext = createContext<BrowserPreviewValue | null>(null);
+export interface BrowserPreviewFrameValue {
+  readonly viewport: BrowserStreamViewport | null;
+  readonly pointer: BrowserStreamPointer | null;
+  readonly hasFrame: boolean;
+  /** The one registered canvas that frames are painted into. */
+  readonly canvas: HTMLCanvasElement | null;
+  readonly attachCanvas: (canvas: HTMLCanvasElement) => void;
+  readonly releaseCanvas: (canvas: HTMLCanvasElement) => void;
+}
 
-export function useBrowserPreview(): BrowserPreviewValue {
-  const value = useContext(BrowserPreviewContext);
-  if (!value) throw new Error("useBrowserPreview must be used within BrowserPreviewProvider");
+export const BrowserPreviewStateContext = createContext<BrowserPreviewStateValue | null>(null);
+export const BrowserPreviewFrameContext = createContext<BrowserPreviewFrameValue | null>(null);
+
+export function useBrowserPreviewState(): BrowserPreviewStateValue {
+  const value = useContext(BrowserPreviewStateContext);
+  if (!value) throw new Error("useBrowserPreviewState must be used within BrowserPreviewProvider");
+  return value;
+}
+
+export function useBrowserPreviewFrame(): BrowserPreviewFrameValue {
+  const value = useContext(BrowserPreviewFrameContext);
+  if (!value) throw new Error("useBrowserPreviewFrame must be used within BrowserPreviewProvider");
   return value;
 }

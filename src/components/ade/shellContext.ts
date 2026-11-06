@@ -5,7 +5,7 @@ export type ShellDialog = "agents" | "add-project";
 
 export type ShellContextValue = {
   rightTab: RightTab;
-  setRightTab: (t: RightTab) => void;
+  selectTab: (t: RightTab) => void;
   openDialog: (d: ShellDialog) => void;
   /** Calls the handler registered below; no-op when none. */
   toggleList: () => void;

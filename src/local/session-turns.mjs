@@ -15,7 +15,7 @@ import path from "node:path";
 import { formatAttachmentPrompt } from "./attachments.mjs";
 import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
 import { getDiff, projectFiles, projectInfo } from "./project-git.mjs";
-import { checksFor, otherServicesNote, packageManager } from "./project-scripts.mjs";
+import { checksFor, otherServicesNote } from "./project-scripts.mjs";
 import { processRunsIn, runCommand, spawnCommand, stopProcess } from "./spawn.mjs";
 
 /** @typedef {import("./adapters/kit.mjs").SessionEvent} SessionEvent */
@@ -780,16 +780,13 @@ export function createSessionTurns({
         const stillVerifying = () => session.status === "verifying";
         if (!signal.aborted && stillVerifying()) {
           session.checks = checks.filter((check) => !check.script);
-          let pkg = {};
-          try {
-            pkg = JSON.parse(await fs.readFile(path.join(project.path, "package.json"), "utf8"));
-          } catch {}
-          const manager = await packageManager(project, pkg);
           for (const check of checks.filter((item) => item.script)) {
             // A checks run has no process to stop: an interrupt takes effect
             // between steps.
             if (signal.aborted || SETTLED.includes(session.status)) break;
-            const command = `${manager} run ${check.script}`;
+            if (!check.command) throw new Error(`Runnable check ${check.script} has no command.`);
+            const command = check.command;
+            const [manager = "npm"] = command.split(" ");
             const r = await runCommand(manager, ["run", check.script], {
               cwd: project.path,
               timeout: 120000,

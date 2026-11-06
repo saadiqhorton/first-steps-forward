@@ -11,10 +11,11 @@ import path from "node:path";
 import { chromium } from "playwright-core";
 
 import { sandboxDisabled } from "./browser-host.mjs";
+import { BROWSER_RENDER_SCALE, DEFAULT_VIEWPORT } from "../shared/browser-contract.mjs";
 
 export const INCOGNITO_PROFILE_ID = "incognito";
-export const CONTEXT_VIEWPORT = { width: 1280, height: 800 };
-const CONTEXT_OPTIONS = { viewport: CONTEXT_VIEWPORT, deviceScaleFactor: 2 };
+export const CONTEXT_VIEWPORT = DEFAULT_VIEWPORT;
+const CONTEXT_OPTIONS = { viewport: CONTEXT_VIEWPORT, deviceScaleFactor: BROWSER_RENDER_SCALE };
 const noop = () => {};
 
 const UA_PLATFORMS = { darwin: "macOS", linux: "Linux", win32: "Windows" };

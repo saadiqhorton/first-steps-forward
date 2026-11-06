@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 // The `ade` command: `ade [--port N] [--host H | --remote] [--open]` serves the UI and API from one
 // process, `ade doctor` reports what this machine is missing, and `ade browser-setup` prepares a
-// Linux host for the agent browser. Everything is imported after the Node check so an old Node
-// gets a message instead of a syntax error.
+// Linux host for the agent browser. The small runtime contract is loaded before checking Node;
+// the application modules stay dynamic so unsupported Node versions get a useful error first.
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { DEFAULT_PORT, MIN_NODE_MAJOR } from "../src/shared/runtime-contract.mjs";
 
-const MIN_NODE_MAJOR = 22;
 const USAGE = `Usage: ade [--port N] [--host H | --remote] [--open]
        ade doctor
        ade browser-setup
 
-  --port N   listen on port N (default 3100, like npm run dev; PORT also works)
+  --port N   listen on port N (default ${DEFAULT_PORT}, like npm run dev; PORT also works)
   --host H   listen on H (default 127.0.0.1; non-loopback needs ADE_TOKEN)
   --remote   use ADE from your phone or other computers on the same Wi-Fi:
              prints a link to open on them (plus one for Tailscale, if connected)
@@ -85,7 +85,7 @@ async function main() {
     });
   }
 
-  const raw = values.port ?? process.env.PORT ?? "3100";
+  const raw = values.port ?? process.env.PORT ?? String(DEFAULT_PORT);
   const port = Number(raw);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     console.error(`Invalid port: ${raw}`);

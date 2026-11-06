@@ -1,13 +1,3 @@
-/* Live project editor in the ADE right panel. */
-.ed-surface {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
 .ed-tree {
   flex: 1;
   min-height: 0;
@@ -137,109 +127,6 @@
   min-width: 0;
   overflow: hidden;
 }
-.ed-save-controls {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 4px;
-}
-.ed-save-controls button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border: 0;
-  border-radius: var(--radius-control);
-  white-space: nowrap;
-  font:
-    11px "IBM Plex Mono",
-    monospace !important;
-}
-.ed-save-controls .ed-save:disabled {
-  opacity: 0.52;
-}
-.ed-save-controls.is-compact .ed-revert {
-  width: 24px;
-}
-
-.ed-workbench {
-  background: var(--surface);
-  color: var(--foreground);
-}
-.ed-workbench-project {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  padding: 12px 12px 8px;
-}
-.ed-workbench-project strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-body);
-  font-size: var(--text-base);
-  font-weight: 500;
-  line-height: var(--leading-body);
-}
-.ed-workbench-project span {
-  color: var(--text-muted);
-  white-space: nowrap;
-  font:
-    11px "IBM Plex Mono",
-    monospace;
-}
-.ed-workbench-explorer {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  height: 190px;
-  flex: none;
-  padding: 0 8px 4px;
-  border-bottom: 1px solid var(--border);
-}
-.ed-workbench-explorer .ed-search {
-  color: var(--text-secondary);
-  border-color: var(--border);
-  background: var(--surface-muted);
-}
-.ed-workbench .ed-tree-row {
-  color: var(--text-secondary);
-}
-@media (hover: hover) and (pointer: fine) {
-  .ed-workbench .ed-tree-row:hover {
-    background: var(--surface-muted);
-  }
-}
-.ed-workbench .ed-tree-row.is-active {
-  color: var(--foreground);
-  background: var(--accent-subtle);
-}
-.ed-workbench .ed-folder {
-  color: var(--text-secondary);
-}
-.ed-workbench-filebar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 6px;
-  height: 38px;
-  flex: none;
-  padding: 0 8px 0 4px;
-  background: var(--surface-muted);
-  border-bottom: 1px solid var(--border);
-}
-.ed-workbench .ed-save {
-  height: 26px;
-  padding: 0 10px;
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-.ed-workbench .ed-revert {
-  height: 26px;
-  background: none;
-  color: var(--text-secondary);
-}
 .ed-workbench-path {
   flex: none;
   padding: 8px 12px 4px;
@@ -274,33 +161,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Live Workbench editor in ADE's right panel. */
-.host-editor .ed-workbench-explorer {
-  height: min(34%, 245px);
-  min-height: 150px;
-}
-.host-editor .ed-workbench-project strong {
-  min-width: 0;
-}
-.host-editor .ed-workbench-project span {
-  flex: none;
-}
-.host-editor .ed-code-area {
-  min-height: 90px;
-}
-.host-editor-empty {
-  display: grid;
-  place-items: center;
-  flex: 1;
-  min-height: 0;
-  padding: 20px;
-  background: var(--code-background);
-  color: var(--text-muted);
-  text-align: center;
-  font:
-    11px/1.5 "IBM Plex Mono",
-    monospace;
-}
 .host-editor-error {
   display: flex;
   align-items: center;
@@ -328,90 +188,6 @@
   font: inherit;
 }
 
-/* Open document tabs and syntax editor in the live Workbench pane. */
-.host-editor-tabs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-  height: 100%;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-.host-editor-tab {
-  display: flex;
-  align-items: center;
-  flex: none;
-  max-width: 175px;
-  height: 28px;
-  border-radius: 10px;
-  color: var(--text-secondary);
-  transition: background-color var(--duration-fast) var(--ease-standard);
-}
-@media (hover: hover) and (pointer: fine) {
-  .host-editor-tab:hover {
-    color: var(--foreground);
-  }
-}
-.host-editor-tab.is-active {
-  background: var(--surface-raised);
-  color: var(--foreground);
-  box-shadow: inset 0 0 0 1px var(--border);
-}
-.host-editor-tab-select,
-.host-editor-tab-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-}
-.host-editor-tab-select {
-  gap: 5px;
-  min-width: 0;
-  padding: 0 4px 0 10px;
-  font:
-    11px "IBM Plex Mono",
-    monospace;
-}
-.host-editor-tab-select span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.host-editor-tab-close {
-  flex: none;
-  width: 22px;
-  margin-right: 3px;
-  border-radius: 7px;
-  opacity: 0.65;
-}
-.host-editor-tab-close:hover,
-.host-editor-tab-close:focus-visible {
-  background: var(--surface-muted);
-  opacity: 1;
-}
-.host-editor-dirty {
-  flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.host-editor-no-tabs {
-  align-self: center;
-  padding-left: 8px;
-  color: var(--text-muted);
-  font:
-    11px "IBM Plex Mono",
-    monospace;
-}
 .host-editor-code .host-code-editor {
   flex: 1;
   min-width: 0;
@@ -426,20 +202,8 @@
   scrollbar-color: var(--border-strong) var(--code-background);
 }
 
-.host-editor .ed-tree::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
-}
-.host-editor .ed-tree::-webkit-scrollbar-thumb {
-  background: color-mix(in oklab, var(--text-muted) 50%, transparent);
-  border: 2px solid transparent;
-  border-radius: 8px;
-  background-clip: padding-box;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .ed-tree-row,
-  .host-editor-tab {
+  .ed-tree-row {
     transition: none;
   }
 }

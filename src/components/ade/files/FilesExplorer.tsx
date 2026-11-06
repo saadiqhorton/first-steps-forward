@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { entriesQuery } from "@/lib/ade/queries";
-import { editorFileIcon, searchEditorFiles, type EditorEntry } from "../editorApi";
+import { searchEditorFiles, type EditorEntry } from "@/lib/ade/editorApi";
+import { editorFileIcon } from "./editorIcons";
 import "../host-editor.css";
 
 type Props = {
@@ -77,7 +78,7 @@ export function FilesExplorer({
         });
       }
     },
-    [projectId],
+    [projectId, queryClient],
   );
 
   useEffect(() => {
@@ -87,7 +88,7 @@ export function FilesExplorer({
     setQuery("");
     setResults([]);
     void loadDirectory("");
-  }, [loadDirectory]);
+  }, [loadDirectory, projectId, queryClient]);
 
   useEffect(() => {
     if (!entriesRevision) return;
@@ -101,7 +102,7 @@ export function FilesExplorer({
     return () => {
       cancelled = true;
     };
-  }, [entriesRevision, loadDirectory]);
+  }, [entriesRevision, loadDirectory, projectId, queryClient]);
 
   // Expand ancestor folders when Home (or elsewhere) asks to reveal a path.
   useEffect(() => {

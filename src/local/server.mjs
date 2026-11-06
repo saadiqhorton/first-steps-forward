@@ -5,6 +5,7 @@ import { createReadStream, promises as fs } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { handle, handleUpgrade, setListenAddress, signInFromLink, start } from "./ade-local.mjs";
+import { DEFAULT_PORT } from "../shared/runtime-contract.mjs";
 
 // TanStack Start's SPA build writes the app shell here (spa.prerender.outputPath).
 const SHELL = "_shell.html";
@@ -34,7 +35,7 @@ const TYPES = {
  *   `staticDir` is the SPA build's client directory (assets plus the shell HTML).
  * @returns {Promise<http.Server>}
  */
-export async function startAdeServer({ host = "127.0.0.1", port = 3100, staticDir }) {
+export async function startAdeServer({ host = "127.0.0.1", port = DEFAULT_PORT, staticDir }) {
   await start();
   const root = path.resolve(staticDir);
   const server = http.createServer((req, res) => {

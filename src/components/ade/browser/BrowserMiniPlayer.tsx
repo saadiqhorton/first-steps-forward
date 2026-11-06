@@ -13,16 +13,18 @@ import {
   type MiniPlayerResizeDirection,
 } from "@/lib/ade/browser/miniPlayerLayout.mjs";
 import { supportsPictureInPicture } from "@/lib/ade/browser/pictureInPicture";
+import { DEFAULT_VIEWPORT } from "@/shared/browser-contract.mjs";
 import type { RightDock } from "../rightPaneTypes";
 import { useShell } from "../shellContext";
 import { togglePictureInPicture } from "./browserActions";
 import { BrowserSurface } from "./BrowserSurface";
-import { useBrowserPreview } from "./browserPreviewContext";
+import { useBrowserPreviewFrame, useBrowserPreviewState } from "./browserPreviewContext";
+import { useBrowserMiniPlayer, useBrowserPlacement } from "./browserPresentationContext";
 
 /** Pointer travel that still counts as a tap rather than a drag. */
 const TAP_SLOP_PX = 6;
 /** Source aspect ratio until the page has reported its viewport. */
-const FALLBACK_SOURCE = { width: 1280, height: 800 };
+const FALLBACK_SOURCE = DEFAULT_VIEWPORT;
 
 interface Box {
   readonly left: number;
@@ -87,15 +89,19 @@ function useShellBox(layoutKey: RightDock): Box | null {
  * drag, the dot reveals the controls on hover or tap, and the edges and corners resize it.
  */
 export function BrowserMiniPlayer({ dock }: { dock: RightDock }) {
-  const preview = useBrowserPreview();
-  if (!preview.projectId || preview.place !== "float") return null;
-  return <FloatingBrowser key={preview.projectId} dock={dock} />;
+  const { projectId, place } = useBrowserPlacement();
+  if (!projectId || place !== "float") return null;
+  return <FloatingBrowser key={projectId} dock={dock} />;
 }
 
 function FloatingBrowser({ dock }: { dock: RightDock }) {
-  const preview = useBrowserPreview();
+  const preview = useBrowserPreviewState();
+  const frameState = useBrowserPreviewFrame();
+  const { mini, setMini } = useBrowserMiniPlayer();
+  const { setPlace, projectId } = useBrowserPlacement();
   const shell = useShell();
-  const { mini, setMini, control, viewport, canvas, projectId } = preview;
+  const { control } = preview;
+  const { viewport, canvas } = frameState;
   const box = useShellBox(dock);
   const gestureRef = useRef<Gesture | null>(null);
   const [pillOpen, setPillOpen] = useState(false);
@@ -183,8 +189,8 @@ function FloatingBrowser({ dock }: { dock: RightDock }) {
   };
 
   const dockToPane = () => {
-    preview.setPlace("dock");
-    shell.setRightTab("computer");
+    setPlace("dock");
+    shell.selectTab("computer");
   };
 
   return (
@@ -238,7 +244,7 @@ function FloatingBrowser({ dock }: { dock: RightDock }) {
             type="button"
             aria-label="Close floating browser"
             title="Close"
-            onClick={() => preview.setPlace("hidden")}
+            onClick={() => setPlace("hidden")}
             className={ICON_BUTTON}
           >
             <X className="size-3.5" aria-hidden />

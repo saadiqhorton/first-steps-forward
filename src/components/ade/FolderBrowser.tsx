@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * ADE's own folder picker, used when no native dialog tool is installed on
@@ -22,6 +22,7 @@ export function FolderBrowser({
   onPick: (path: string) => void;
 }) {
   const [current, setCurrent] = useState("");
+  const currentRef = useRef("");
   const [parent, setParent] = useState<string | null>(null);
   const [dirs, setDirs] = useState<{ name: string; path: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +45,7 @@ export function FolderBrowser({
         const value = await response.json();
         if (!response.ok) throw new Error(value.error ?? `Browse failed (${response.status})`);
         setCurrent(value.path);
+        currentRef.current = value.path;
         setParent(value.parent);
         setDirs(value.dirs ?? []);
       } catch (e) {
@@ -56,7 +58,7 @@ export function FolderBrowser({
   );
 
   useEffect(() => {
-    void load();
+    void load(currentRef.current || undefined);
   }, [load]);
 
   const stopNaming = useCallback(() => {

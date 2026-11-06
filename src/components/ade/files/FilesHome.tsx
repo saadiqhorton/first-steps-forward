@@ -5,7 +5,8 @@ import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { documentPreviewsQuery, documentsQuery, entriesQuery } from "@/lib/ade/queries";
 import { timeAgo, useNow } from "@/lib/ade/store";
 import type { ProjectDocument } from "@/lib/ade/types";
-import { editorFileIcon, type EditorEntry } from "../editorApi";
+import type { EditorEntry } from "@/lib/ade/editorApi";
+import { editorFileIcon } from "./editorIcons";
 import { MarkdownDocument } from "./MarkdownDocument";
 
 type Props = {

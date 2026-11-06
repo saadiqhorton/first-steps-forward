@@ -18,7 +18,8 @@ import { summarizeChecks } from "./ChecksList";
 import { DevCommandRequestCard } from "./DevCommandRequestCard";
 import { BrowserChromeRow } from "./browser/BrowserChromeRow";
 import { BrowserSurface } from "./browser/BrowserSurface";
-import { useBrowserPreview } from "./browser/browserPreviewContext";
+import { useBrowserPreviewState } from "./browser/browserPreviewContext";
+import { useBrowserPlacement } from "./browser/browserPresentationContext";
 import type { RightDock, ComputerTone } from "./rightPaneTypes";
 
 const PROFILE_OPTIONS: Array<{ value: AgentComputer["profile"]; label: string; title: string }> = [
@@ -66,7 +67,8 @@ export function AgentComputerPane({
   const sessionDetail = useSession(session?.id ?? "").data;
   const sessionLogs = useSessionLogs(session?.id ?? "");
   const [error, setError] = useState("");
-  const browser = useBrowserPreview();
+  const browser = useBrowserPreviewState();
+  const placement = useBrowserPlacement();
   // Control is shared with the browser preview and the agent's tools, so it lives in the provider.
   const control = browser.control?.controller === "you";
   const [busy, setBusy] = useState(false);
@@ -310,14 +312,14 @@ export function AgentComputerPane({
   );
 
   const browserScreen =
-    browser.place !== "dock" ? (
+    placement.place !== "dock" ? (
       <div className="mx-3 flex flex-col items-start gap-3 rounded-xl border border-line bg-surface-muted p-4">
         <p className="text-[13px] text-[var(--text-secondary)]">
-          {browser.place === "float" ? "Showing in floating window" : "Browser is hidden"}
+          {placement.place === "float" ? "Showing in floating window" : "Browser is hidden"}
         </p>
         <button
           type="button"
-          onClick={() => browser.setPlace("dock")}
+          onClick={() => placement.setPlace("dock")}
           className="btn-quiet px-3 py-1.5 text-xs"
         >
           Dock here

@@ -2,7 +2,7 @@ import { connect, createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { spawnCommand as spawn, stopProcess as stopChild } from "./spawn.mjs";
+import { processRunsIn, spawnCommand as spawn, stopProcess as stopChild } from "./spawn.mjs";
 import { packageManager } from "./project-scripts.mjs";
 import {
   DevCommandError,
@@ -403,13 +403,44 @@ export function createDevServers({ state, save }) {
     }
     return { proc: existing, changed };
   }
+  function claimStart(projectId) {
+    if (devStartClaims.has(projectId)) return false;
+    devStartClaims.add(projectId);
+    return true;
+  }
+  function releaseStart(projectId) {
+    devStartClaims.delete(projectId);
+  }
+  function hasRunning(projectId) {
+    return state.processes.some((proc) => proc.projectId === projectId && children.has(proc.id));
+  }
+  async function stopDevServer(proc, project) {
+    const child = children.get(proc.id);
+    if (!child && proc.pid && !(await processRunsIn(proc.pid, proc.dir ?? project?.path))) {
+      delete proc.pid;
+      proc.status = "stopped";
+      proc.updatedAt = now();
+      await save();
+      return { stalePid: true };
+    }
+    stopChild(child ?? proc.pid);
+    if (proc.status !== "stopped" || proc.pid) {
+      proc.status = "stopped";
+      delete proc.pid;
+      proc.updatedAt = now();
+      await save();
+    }
+    return { stalePid: false };
+  }
   return {
-    children,
-    devStartClaims,
+    claimStart,
+    releaseStart,
     startDevServer,
+    stopDevServer,
     devServerStatus,
     devCommandSource,
     refreshDevProcess,
+    hasRunning,
   };
 }
 /**

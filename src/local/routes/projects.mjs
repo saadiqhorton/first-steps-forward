@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runCommand as run, stopProcess as stopChild } from "../spawn.mjs";
+import { runCommand as run } from "../spawn.mjs";
 import { adapters } from "../adapters/index.mjs";
 import { getDiff, projectInfo } from "../project-git.mjs";
 import { checksFor } from "../project-scripts.mjs";
@@ -22,8 +22,8 @@ export async function projects(ctx) {
     parts,
     sessionLogs,
     state,
-    children,
     browserContexts,
+    devServers,
     controls,
     computers,
     turns,
@@ -147,13 +147,11 @@ export async function projects(ctx) {
     if (idx === -1) return json(res, 404, { error: "Project not found." });
     const busy =
       state.sessions.some((s) => s.projectId === parts[1] && turns.isBusy(s)) ||
-      state.processes.some((x) => x.projectId === parts[1] && children.has(x.id));
+      devServers.hasRunning(parts[1]);
     if (busy)
       return json(res, 409, {
         error: "Stop the running agent or dev process before removing this project.",
       });
-    for (const p of state.processes.filter((x) => x.projectId === parts[1]))
-      stopChild(children.get(p.id));
     const removedSessions = state.sessions.filter((s) => s.projectId === parts[1]);
     // The project's browser and its stored profile are ADE metadata too.
     await computers.stop(parts[1]).catch(() => {});
@@ -185,7 +183,7 @@ export async function projects(ctx) {
 // Registers an existing directory as a project and answers the request. Shared
 // by "add a folder", "clone a repository" and "create a folder".
 async function registerProject(ctx, real, name) {
-  const { res, state, save, id, now, refreshDevProcess, json } = ctx;
+  const { res, state, save, id, now, devServers, json } = ctx;
   if (state.projects.some((p) => p.path === real))
     return json(res, 409, { error: "This project is already added." });
   const project = {
@@ -203,7 +201,7 @@ async function registerProject(ctx, real, name) {
   // Same detection path as the bootstrap re-scan: an unreadable or
   // malformed package.json records a distinct note instead of silently
   // reporting no dev script.
-  const { proc } = await refreshDevProcess(project);
+  const { proc } = await devServers.refreshDevProcess(project);
   await save();
   return json(res, 201, { project, process: proc });
 }

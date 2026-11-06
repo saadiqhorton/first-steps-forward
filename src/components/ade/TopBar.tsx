@@ -6,6 +6,7 @@ import { ProjectsMenu } from "@/components/ade/ProjectsMenu";
 import { useShell } from "@/components/ade/shellContext";
 import { ThemeSwitch } from "@/components/arc/theme-switch/theme-switch";
 import { useAdeState } from "@/lib/ade/store";
+import { projectIdFromPath } from "@/lib/ade/navigation";
 import { useTheme } from "@/lib/theme";
 
 const ICON_BUTTON =
@@ -30,7 +31,7 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
   const { theme, setTheme } = useTheme();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  const activeFromRoute = pathname.match(/^\/p\/([^/]+)/)?.[1] ?? null;
+  const activeFromRoute = projectIdFromPath(pathname);
   const activeId = activeFromRoute ?? activeProjectId;
 
   return (

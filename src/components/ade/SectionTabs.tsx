@@ -3,17 +3,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { GlideIndicator } from "@/components/ade/motion";
 import { documentsQuery, entriesQuery, workflowsQuery } from "@/lib/ade/queries";
+import {
+  projectIdFromPath,
+  projectSectionFromPath,
+  type ProjectSection,
+} from "@/lib/ade/navigation";
 import { useAdeState } from "@/lib/ade/store";
 import { needsAttention } from "@/lib/ade/viewed";
-
-type Section = "conversations" | "files" | "workflows";
-
-function sectionFromPath(pathname: string, projectId: string): Section | null {
-  if (pathname.includes(`/p/${projectId}/conversations`)) return "conversations";
-  if (pathname.includes(`/p/${projectId}/files`)) return "files";
-  if (pathname.includes(`/p/${projectId}/workflows`)) return "workflows";
-  return null;
-}
 
 export function SectionTabs() {
   const { activeProjectId, projects, sessions } = useAdeState((state) => ({
@@ -24,11 +20,10 @@ export function SectionTabs() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const match = pathname.match(/^\/p\/([^/]+)/);
-  const projectId = match?.[1] ?? activeProjectId;
-  const routeSection = projectId ? sectionFromPath(pathname, projectId) : null;
+  const projectId = projectIdFromPath(pathname) ?? activeProjectId;
+  const routeSection = projectSectionFromPath(pathname);
   // Optimistic selection so the highlight moves on click, not after the route settles.
-  const [pendingSection, setPendingSection] = useState<Section | null>(null);
+  const [pendingSection, setPendingSection] = useState<ProjectSection | null>(null);
   const activeSection = pendingSection ?? routeSection;
 
   useEffect(() => {

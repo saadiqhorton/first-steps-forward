@@ -19,18 +19,19 @@ import {
   type ClientMessage,
 } from "@/lib/ade/browser/browserStream";
 import { browserViewerId } from "@/lib/ade/browser/viewer";
+import { BROWSER_RENDER_SCALE, DEFAULT_VIEWPORT } from "@/shared/browser-contract.mjs";
+import { useBrowserPlacement } from "./browserPresentationContext";
+import { BrowserPresentationProvider } from "./BrowserPresentationProvider";
 import {
-  BrowserPreviewContext,
-  type BrowserMiniPlayerState,
-  type BrowserPlace,
-  type BrowserPreviewValue,
+  BrowserPreviewFrameContext,
+  BrowserPreviewStateContext,
+  type BrowserPreviewFrameValue,
+  type BrowserPreviewStateValue,
 } from "./browserPreviewContext";
 
 // Frames are decoded at up to this size. The page is sized to the docked surface.
-const FRAME_MAX_WIDTH = 2560;
-const FRAME_MAX_HEIGHT = 1600;
-const EMPTY_MINI: BrowserMiniPlayerState = { width: null, position: null };
-
+const FRAME_MAX_WIDTH = DEFAULT_VIEWPORT.width * BROWSER_RENDER_SCALE;
+const FRAME_MAX_HEIGHT = DEFAULT_VIEWPORT.height * BROWSER_RENDER_SCALE;
 /** Control as the server reports it for this viewer. */
 function controlFromState(state: BrowserControlState, viewer: string): BrowserStreamControl {
   const controller =
@@ -62,8 +63,21 @@ export function BrowserPreviewProvider({
   projectId: string | null;
   children: ReactNode;
 }) {
-  const [place, setPlace] = useState<BrowserPlace>("dock");
-  const [minis, setMinis] = useState<Record<string, BrowserMiniPlayerState>>({});
+  return (
+    <BrowserPresentationProvider projectId={projectId}>
+      <BrowserPreviewStateProvider projectId={projectId}>{children}</BrowserPreviewStateProvider>
+    </BrowserPresentationProvider>
+  );
+}
+
+function BrowserPreviewStateProvider({
+  projectId,
+  children,
+}: {
+  projectId: string | null;
+  children: ReactNode;
+}) {
+  const { place } = useBrowserPlacement();
   // Project-tagged so a previous project's answer is never shown or connected to.
   const statusQuery = useQuery({
     queryKey: ["browser", projectId],
@@ -92,13 +106,11 @@ export function BrowserPreviewProvider({
   const hasFrameRef = useRef(false);
   const streamRef = useRef<BrowserStream | null>(null);
   const streamOpenRef = useRef(false);
-  const sizeRef = useRef<BrowserStreamViewport | null>(null);
   // The page address when the last stream error arrived. A later navigation clears the error.
   const navUrlRef = useRef<string | null>(null);
   const errorUrlRef = useRef<string | null>(null);
 
   const control = controlState?.projectId === projectId ? controlState.value : null;
-  const mini = (projectId !== null && minis[projectId]) || EMPTY_MINI;
 
   // The stream runs while a surface is painting (docked or floating), so a hidden preview does not
   // keep a page-screencast open.
@@ -173,9 +185,6 @@ export function BrowserPreviewProvider({
       onStatus: (next) => {
         streamOpenRef.current = next === "open";
         setStreamStatus(next);
-        if (next === "open" && sizeRef.current) {
-          streamRef.current?.send({ type: "resize", ...sizeRef.current });
-        }
       },
     });
     streamRef.current = stream;
@@ -198,11 +207,6 @@ export function BrowserPreviewProvider({
       visible?.getContext("2d")?.clearRect(0, 0, visible.width, visible.height);
     };
   }, [projectId, streamUrl, paint, attempt]);
-
-  const requestViewportSize = useCallback((size: BrowserStreamViewport) => {
-    sizeRef.current = size;
-    streamRef.current?.send({ type: "resize", width: size.width, height: size.height });
-  }, []);
 
   const send = useCallback((message: ClientMessage) => {
     return streamRef.current?.send(message) ?? false;
@@ -252,17 +256,9 @@ export function BrowserPreviewProvider({
     [projectId, control?.controller],
   );
 
-  const setMini = useCallback(
-    (next: BrowserMiniPlayerState) => {
-      if (!projectId) return;
-      setMinis((current) => ({ ...current, [projectId]: next }));
-    },
-    [projectId],
-  );
-
   const reconnect = useCallback(() => setAttempt((count) => count + 1), []);
 
-  const value = useMemo<BrowserPreviewValue>(
+  const stateValue = useMemo<BrowserPreviewStateValue>(
     () => ({
       projectId,
       status,
@@ -270,18 +266,7 @@ export function BrowserPreviewProvider({
       streamStatus,
       streamError,
       nav,
-      viewport,
-      pointer,
       control,
-      hasFrame,
-      canvas,
-      place,
-      setPlace,
-      mini,
-      setMini,
-      attachCanvas,
-      releaseCanvas,
-      requestViewportSize,
       send,
       changeControl,
       answerFileChooser,
@@ -295,17 +280,7 @@ export function BrowserPreviewProvider({
       streamStatus,
       streamError,
       nav,
-      viewport,
-      pointer,
       control,
-      hasFrame,
-      canvas,
-      place,
-      mini,
-      setMini,
-      attachCanvas,
-      releaseCanvas,
-      requestViewportSize,
       send,
       changeControl,
       answerFileChooser,
@@ -314,5 +289,16 @@ export function BrowserPreviewProvider({
     ],
   );
 
-  return <BrowserPreviewContext.Provider value={value}>{children}</BrowserPreviewContext.Provider>;
+  const frameValue = useMemo<BrowserPreviewFrameValue>(
+    () => ({ viewport, pointer, hasFrame, canvas, attachCanvas, releaseCanvas }),
+    [viewport, pointer, hasFrame, canvas, attachCanvas, releaseCanvas],
+  );
+
+  return (
+    <BrowserPreviewStateContext.Provider value={stateValue}>
+      <BrowserPreviewFrameContext.Provider value={frameValue}>
+        {children}
+      </BrowserPreviewFrameContext.Provider>
+    </BrowserPreviewStateContext.Provider>
+  );
 }

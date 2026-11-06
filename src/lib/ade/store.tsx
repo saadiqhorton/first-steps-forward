@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
+import { request, type RequestError } from "./api";
 import type {
   AdeState,
   AgentComputer,
@@ -21,7 +22,6 @@ import type {
   OptionCapabilities,
   Permission,
   Project,
-  ProjectDocument,
   Session,
   SessionSummary,
   Workflow,
@@ -94,24 +94,6 @@ const Ctx = createContext<Api | null>(null);
 const ActiveProjectCtx = createContext<readonly [string, Dispatch<SetStateAction<string>>] | null>(
   null,
 );
-type RequestError = Error & { status?: number; authRequired?: boolean };
-async function request<T>(url: string, method = "GET", data?: unknown): Promise<T> {
-  const init: RequestInit = { method };
-  if (data) {
-    init.headers = { "content-type": "application/json" };
-    init.body = JSON.stringify(data);
-  }
-  const response = await fetch(url, init);
-  const value = (await response.json()) as { error?: string; authRequired?: boolean };
-  if (!response.ok) {
-    const error: RequestError = new Error(value.error ?? `Local API returned ${response.status}`);
-    error.status = response.status;
-    error.authRequired = value.authRequired === true;
-    throw error;
-  }
-  return value as T;
-}
-
 type BootstrapData = {
   projects: Project[];
   processes: AdeState["processes"];
@@ -197,10 +179,6 @@ export const optionCapabilities = (agentId: AgentId, model?: string) => {
   const query = model ? `?model=${encodeURIComponent(model)}` : "";
   return request<OptionCapabilities>(`/api/agents/${agentId}/capabilities${query}`);
 };
-export const listWorkflows = async () => {
-  const data = await request<{ workflows: Workflow[] }>("/api/workflows");
-  return data.workflows;
-};
 export const saveWorkflow = async (
   w: Omit<Workflow, "id" | "builtIn"> & { id?: string },
 ): Promise<Workflow> => {
@@ -238,12 +216,6 @@ export async function uploadAttachment(file: File): Promise<MessageAttachment> {
     contentBase64,
   });
 }
-export const listDocuments = async (projectId: string) => {
-  const data = await request<{ documents: ProjectDocument[] }>(
-    `/api/editor/${projectId}/documents`,
-  );
-  return data.documents;
-};
 export const searchSessions = (projectId: string, query: string) =>
   request<{ ids: string[] }>(
     `/api/sessions?project=${encodeURIComponent(projectId)}&q=${encodeURIComponent(query)}`,
@@ -508,6 +480,12 @@ export function AdeProvider({ children }: { children: ReactNode }) {
 export function useAde() {
   const value = useContext(Ctx);
   if (!value) throw new Error("useAde must be used inside AdeProvider");
+  return value;
+}
+/** Read or update the project selected by the shell and project switcher. */
+export function useActiveProjectSelection() {
+  const value = useContext(ActiveProjectCtx);
+  if (!value) throw new Error("useActiveProjectSelection must be used inside AdeProvider");
   return value;
 }
 /** Subscribe to one bootstrap slice; React Query structural sharing avoids unrelated renders. */

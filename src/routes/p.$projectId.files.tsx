@@ -12,7 +12,8 @@ import { X } from "lucide-react";
 import { FilesExplorer } from "@/components/ade/files/FilesExplorer";
 import { FilesHome } from "@/components/ade/files/FilesHome";
 import { clearEditorDraft, listDirtyDraftPaths } from "@/components/ade/files/editorDrafts";
-import { createEditorFile, deleteEditorFile, editorFileIcon } from "@/components/ade/editorApi";
+import { createEditorFile, deleteEditorFile } from "@/lib/ade/editorApi";
+import { editorFileIcon } from "@/components/ade/files/editorIcons";
 import { askConfirm } from "@/components/ade/NoticeDialog";
 import { usePersistedLayout } from "@/components/ade/persistLayout";
 

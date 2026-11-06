@@ -37,6 +37,38 @@ test("initialize negotiates a supported protocol and advertises tools", async ()
   assert.equal(missing.error.code, -32601);
 });
 
+test("every advertised tool reaches its route through the caller", async () => {
+  const requests = [];
+  const callTool = createToolCaller({
+    api: "http://127.0.0.1:3000",
+    projectId: "p1",
+    fetchImpl: async (url, init) => {
+      requests.push({
+        url: new URL(url),
+        method: init.method,
+        body: init.body && JSON.parse(init.body),
+      });
+      return { status: 200, json: async () => ({ status: "running", port: 5173, text: "ok" }) };
+    },
+  });
+
+  for (const [index, { name }] of TOOLS.entries()) {
+    const result = await callTool(name);
+    assert.notEqual(result.content[0].text, `Unknown tool: ${name}`, `${name} is dispatchable`);
+    const request = requests[index];
+    const route = name.startsWith("computer_")
+      ? "/computer/action"
+      : name.startsWith("browser_")
+        ? "/browser/action"
+        : `/dev${name === "dev_server_status" ? "" : name === "dev_server_start" ? "/start" : "/stop"}`;
+    assert.ok(request.url.pathname.endsWith(route), `${name} has the expected route`);
+    assert.equal(request.method, name === "dev_server_status" ? "GET" : "POST");
+    if (!name.startsWith("dev_server_")) assert.ok(request.body?.action, `${name} has an action`);
+  }
+
+  assert.equal(requests.length, TOOLS.length);
+});
+
 test("computer tools post the action to ADE and return the screenshot as an image", async () => {
   const callTool = createToolCaller({
     api: "http://127.0.0.1:3000",
@@ -121,6 +153,34 @@ test("a human-controlled computer or browser returns a readable tool error", asy
     );
     assert.equal(result.isError, true);
     assert.equal(result.content[0].text, message);
+  }
+});
+
+test("closed-browser responses explain that the agent should restart and retry", async () => {
+  const callTool = createToolCaller({
+    api: "http://127.0.0.1:3000",
+    projectId: "p1",
+    fetchImpl: fakeFetch({
+      "POST /api/projects/p1/browser/action": [
+        503,
+        { error: "The agent browser is closed.", code: "browser_closed" },
+      ],
+      "POST /api/projects/p1/computer/action": [
+        503,
+        { error: "The agent browser is closed.", code: "browser_closed" },
+      ],
+    }),
+  });
+  for (const name of ["browser_navigate", "computer_click"]) {
+    const result = await callTool(
+      name,
+      name === "browser_navigate" ? { url: "https://example.com" } : { x: 1, y: 1 },
+    );
+    assert.equal(result.isError, true);
+    assert.equal(
+      result.content[0].text,
+      "The agent browser closed while this action was running. Start it again, then retry.",
+    );
   }
 });
 

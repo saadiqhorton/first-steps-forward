@@ -13,8 +13,9 @@ import {
 import { browserRelease, createBrowserInstaller } from "./browser-install.mjs";
 import { runCommand } from "./spawn.mjs";
 import { loadTerminal } from "./terminal-loader.mjs";
+import { MIN_NODE_MAJOR } from "../shared/runtime-contract.mjs";
 
-export const MIN_NODE_MAJOR = 22;
+export { MIN_NODE_MAJOR };
 
 /** @typedef {{ level: "ok" | "warn" | "fail", label: string, detail: string }} Check */
 

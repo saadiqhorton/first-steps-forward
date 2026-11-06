@@ -1,5 +1,6 @@
 import { isLoopbackHost, resolveBindHost } from "./bind-host.mjs";
 import { startAdeServer } from "./server.mjs";
+import { DEFAULT_PORT } from "../shared/runtime-contract.mjs";
 
 /**
  * Starts the production server for `scripts/start-local.mjs` and `bin/ade.mjs`:
@@ -12,7 +13,7 @@ import { startAdeServer } from "./server.mjs";
  */
 export async function launchAde({
   staticDir,
-  port = 3100,
+  port = DEFAULT_PORT,
   host: requested,
   env = process.env,
   log = console.log,

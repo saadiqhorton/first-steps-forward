@@ -1,11 +1,16 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, RotateCcw } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
 import { fileQuery } from "@/lib/ade/queries";
-import { isMarkdownPath, saveEditorFile, type EditorDocument } from "../editorApi";
+import { isMarkdownPath, saveEditorFile } from "@/lib/ade/editorApi";
 import "../host-editor.css";
-import { clearEditorDraft, getEditorDraft, setEditorDraft } from "./editorDrafts";
+import {
+  clearEditorDraft,
+  getEditorDraft,
+  setEditorDraft,
+  subscribeEditorDraft,
+} from "./editorDrafts";
 import { MarkdownDocument } from "./MarkdownDocument";
 
 const HighlightedCodeEditor = lazy(() =>
@@ -26,28 +31,28 @@ const VIEW_MODES = [
   { value: "source", label: "Source" },
 ];
 
-function initialDoc(
-  projectId: string,
-  path: string,
-  queryClient: ReturnType<typeof useQueryClient>,
-): EditorDocument | null {
-  const draft = getEditorDraft(projectId, path);
-  if (draft) return draft;
-  const file = queryClient.getQueryData(fileQuery(projectId, path).queryKey);
-  return file ? { saved: file.content, draft: file.content, version: file.version } : null;
-}
-
 export function FileTab({ projectId, path, visible, onDirtyChange }: Props) {
   const markdown = isMarkdownPath(path);
   const queryClient = useQueryClient();
+  const file = useQuery(fileQuery(projectId, path));
   const [mode, setMode] = useState<ViewMode>("document");
-  const [doc, setDoc] = useState<EditorDocument | null>(() =>
-    initialDoc(projectId, path, queryClient),
+  const savedDoc = useMemo(
+    () =>
+      file.data
+        ? { saved: file.data.content, draft: file.data.content, version: file.data.version }
+        : null,
+    [file.data],
   );
-  const [opening, setOpening] = useState(() => doc === null);
+  const doc = useSyncExternalStore(
+    (listener) => subscribeEditorDraft(projectId, path, listener),
+    () => getEditorDraft(projectId, path) ?? savedDoc,
+    () => null,
+  );
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const opening = file.isLoading && !doc;
+  const error = actionError || (file.isError ? file.error.message : "");
 
   const dirty = !!doc && doc.draft !== doc.saved;
 
@@ -55,77 +60,44 @@ export function FileTab({ projectId, path, visible, onDirtyChange }: Props) {
     onDirtyChange(path, dirty);
   }, [dirty, onDirtyChange, path]);
 
-  useEffect(() => {
-    if (!doc) {
-      clearEditorDraft(projectId, path);
-      return;
-    }
-    setEditorDraft(projectId, path, doc);
-  }, [doc, projectId, path]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const hasDraft = !!getEditorDraft(projectId, path);
-    const cached = queryClient.getQueryData(fileQuery(projectId, path).queryKey);
-    setOpening(!(hasDraft || cached));
-    setError("");
-    setNotice("");
-    void queryClient
-      .fetchQuery(fileQuery(projectId, path))
-      .then((value) => {
-        if (cancelled) return;
-        // Keep a restored or in-progress draft instead of overwriting it.
-        setDoc((previous) =>
-          previous && previous.draft !== previous.saved
-            ? previous
-            : { saved: value.content, draft: value.content, version: value.version },
-        );
-      })
-      .catch((reason) => {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
-      })
-      .finally(() => {
-        if (!cancelled) setOpening(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, path, queryClient]);
-
   const saveFile = async () => {
     if (!doc || !dirty || saving) return;
     const draft = doc.draft;
     setSaving(true);
-    setError("");
+    setActionError("");
     try {
       const value = await saveEditorFile(projectId, path, draft, doc.version);
-      const next = { saved: draft, draft, version: value.version };
-      setDoc(next);
-      clearEditorDraft(projectId, path);
       queryClient.setQueryData(fileQuery(projectId, path).queryKey, {
         content: draft,
         version: value.version,
       });
+      const current = getEditorDraft(projectId, path);
+      if (current && current.draft !== draft) {
+        setEditorDraft(projectId, path, {
+          saved: draft,
+          draft: current.draft,
+          version: value.version,
+        });
+      } else {
+        clearEditorDraft(projectId, path);
+      }
       setNotice(`${path.split("/").at(-1)} saved to disk`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setActionError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setSaving(false);
     }
   };
 
   const reloadFile = async () => {
-    setOpening(true);
-    setError("");
+    setActionError("");
     try {
       const value = await queryClient.fetchQuery({ ...fileQuery(projectId, path), staleTime: 0 });
-      setDoc({ saved: value.content, draft: value.content, version: value.version });
+      queryClient.setQueryData(fileQuery(projectId, path).queryKey, value);
       clearEditorDraft(projectId, path);
       setNotice("Reloaded from disk");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setOpening(false);
+      setActionError(reason instanceof Error ? reason.message : String(reason));
     }
   };
 
@@ -154,9 +126,9 @@ export function FileTab({ projectId, path, visible, onDirtyChange }: Props) {
                   aria-label="Revert draft"
                   onClick={() => {
                     if (!doc) return;
-                    setDoc({ ...doc, draft: doc.saved });
+                    setEditorDraft(projectId, path, { ...doc, draft: doc.saved });
                     setNotice("Draft reverted");
-                    setError("");
+                    setActionError("");
                   }}
                 >
                   <RotateCcw size={13} aria-hidden />
@@ -186,9 +158,9 @@ export function FileTab({ projectId, path, visible, onDirtyChange }: Props) {
               aria-label="Revert draft"
               onClick={() => {
                 if (!doc) return;
-                setDoc({ ...doc, draft: doc.saved });
+                setEditorDraft(projectId, path, { ...doc, draft: doc.saved });
                 setNotice("Draft reverted");
-                setError("");
+                setActionError("");
               }}
             >
               <RotateCcw size={13} aria-hidden />
@@ -235,7 +207,7 @@ export function FileTab({ projectId, path, visible, onDirtyChange }: Props) {
               path={path}
               value={doc.draft}
               onChange={(value) => {
-                setDoc((previous) => (previous ? { ...previous, draft: value } : previous));
+                if (doc) setEditorDraft(projectId, path, { ...doc, draft: value });
                 setNotice("");
               }}
               onSave={() => void saveFile()}

@@ -8,12 +8,21 @@
 // change.
 
 export const HUMAN_CONTROL_CODE = "human_control";
+export const BROWSER_CLOSED_CODE = "browser_closed";
 
 export class HumanControlError extends Error {
   constructor(message = "The user has taken control of the agent computer.") {
     super(message);
     this.name = "HumanControlError";
     this.code = HUMAN_CONTROL_CODE;
+  }
+}
+
+export class BrowserClosedError extends Error {
+  constructor(message = "The agent browser is closed.") {
+    super(message);
+    this.name = "BrowserClosedError";
+    this.code = BROWSER_CLOSED_CODE;
   }
 }
 
@@ -43,7 +52,7 @@ class Control {
   }
 
   #assertOpen() {
-    if (this.#closed) throw new HumanControlError("This browser is closed.");
+    if (this.#closed) throw new BrowserClosedError();
   }
 
   #enqueue(run) {

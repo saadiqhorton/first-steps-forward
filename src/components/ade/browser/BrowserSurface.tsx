@@ -20,7 +20,7 @@ import type {
   ClientMessage,
 } from "@/lib/ade/browser/browserStream";
 import { AgentCursor } from "./AgentCursor";
-import { useBrowserPreview } from "./browserPreviewContext";
+import { useBrowserPreviewFrame, useBrowserPreviewState } from "./browserPreviewContext";
 
 const RESIZE_DEBOUNCE_MS = 150;
 const MULTI_CLICK_MS = 500;
@@ -81,24 +81,20 @@ export function BrowserSurface({
   mode: "dock" | "float";
   className?: string;
 }) {
-  const preview = useBrowserPreview();
+  const preview = useBrowserPreviewState();
+  const frameState = useBrowserPreviewFrame();
   const {
-    attachCanvas,
-    releaseCanvas,
     send,
     nav,
-    viewport,
-    hasFrame,
     control,
-    pointer,
     status,
     streamStatus,
     streamError,
-    requestViewportSize,
     changeControl,
     answerFileChooser,
     reconnect,
   } = preview;
+  const { attachCanvas, releaseCanvas, viewport, hasFrame, pointer } = frameState;
   const [stage, setStage] = useState<HTMLDivElement | null>(null);
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   const [clicks, setClicks] = useState<ClickState | null>(null);

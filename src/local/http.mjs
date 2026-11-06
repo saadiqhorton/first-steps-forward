@@ -1,3 +1,14 @@
+// Converts the HTTP response lifecycle into a transport-neutral cancellation signal.
+export function responseClosedSignal(res) {
+  const controller = new AbortController();
+  const abortIfDisconnected = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  if (res.destroyed) abortIfDisconnected();
+  else res.once("close", abortIfDisconnected);
+  return controller.signal;
+}
+
 // JSON responses and request bodies, shared by the API router and its route modules.
 export function json(res, status, body) {
   res.statusCode = status;

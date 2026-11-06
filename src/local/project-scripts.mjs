@@ -88,7 +88,7 @@ export async function checksFor(project) {
           name: "Project checks",
           status: "skipped",
           detail:
-            "No package.json here. ADE’s check runner only detects npm scripts (typecheck, lint, test, e2e, build)." +
+            "No package.json here. ADE’s check runner currently detects npm, pnpm, yarn, and bun scripts (typecheck, lint, test, e2e, build)." +
             hint +
             " Run language-specific checks yourself for now, or add a package.json with those scripts.",
         },

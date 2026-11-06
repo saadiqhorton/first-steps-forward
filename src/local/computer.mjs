@@ -3,13 +3,14 @@
 // Chrome is T3's pinned headless shell (browser-install.mjs), launched over a pipe by
 // browser-contexts.mjs, so no port is opened and it exits with ADE. Status, start and stop are
 // per project; the first agent tool call starts the computer itself.
-import { CONTEXT_VIEWPORT } from "./browser-contexts.mjs";
+import { DEFAULT_VIEWPORT } from "../shared/browser-contract.mjs";
 
-export const SCREEN = { ...CONTEXT_VIEWPORT };
+export const SCREEN = DEFAULT_VIEWPORT;
 
 /** HTTP status for a coded browser or computer error. Uncoded errors are bad input (400). */
 export const COMPUTER_ERROR_STATUS = {
   human_control: 409,
+  browser_closed: 503,
   dialog_pending: 409,
   stale_ref: 409,
   no_file_chooser: 409,

@@ -16,6 +16,7 @@ function fakeSession() {
   const listeners = new Map();
   const calls = [];
   const screencasts = [];
+  const heldKeys = new Map();
   const nav = {
     url: "http://127.0.0.1:3000/",
     title: "Demo",
@@ -24,18 +25,22 @@ function fakeSession() {
     canGoForward: false,
   };
   let viewport = { width: 1280, height: 800 };
+  let pendingDialog = null;
   return {
+    closed: false,
     calls,
     screencasts,
     nav: () => ({ ...nav }),
     viewport: () => ({ ...viewport }),
     fileChooser: () => null,
+    pendingDialog: () => pendingDialog,
     on(event, cb) {
       if (!listeners.has(event)) listeners.set(event, new Set());
       listeners.get(event).add(cb);
       return () => listeners.get(event).delete(cb);
     },
     emit(event, payload) {
+      if (event === "dialog") pendingDialog = payload ?? null;
       for (const cb of listeners.get(event) ?? []) cb(payload);
     },
     async startScreencast(opts, onFrame) {
@@ -48,13 +53,20 @@ function fakeSession() {
     },
     async input(msg) {
       calls.push({ name: "input", msg });
+      if (msg.type === "key") {
+        const id = msg.code || msg.key;
+        if (msg.action === "down") heldKeys.set(id, { key: msg.key, code: msg.code });
+        else heldKeys.delete(id);
+      }
       // A ctrl+c reports what the page copied, like BrowserSession.input.
       if (msg.type === "key" && msg.action === "down" && msg.key === "c" && msg.modifiers === 2)
         return { copied: "copied text" };
     },
-    async resize(size) {
-      viewport = { ...size };
-      calls.push({ name: "resize", size });
+    releaseInput() {
+      for (const { key, code } of heldKeys.values()) {
+        calls.push({ name: "input", msg: { type: "key", action: "up", key, code, modifiers: 0 } });
+      }
+      heldKeys.clear();
     },
     async navigate(url) {
       calls.push({ name: "navigate", url });
@@ -81,17 +93,17 @@ function fakeSession() {
 
 function fakeHub(sessions) {
   return {
-    async get(projectId) {
+    async existing(projectId) {
       if (projectId === "down") {
         throw new Error("The agent computer's browser is not reachable.");
       }
-      if (!sessions.has(projectId)) sessions.set(projectId, fakeSession());
-      return sessions.get(projectId);
+      return sessions.get(projectId) ?? null;
     },
   };
 }
 
 function setup(t, { sessions = new Map() } = {}) {
+  if (!sessions.has("p1")) sessions.set("p1", fakeSession());
   const controls = createControlRegistry();
   const server = createBrowserStreamServer({
     hub: fakeHub(sessions),
@@ -219,6 +231,42 @@ test("closes with 4503 and a JSON reason when the browser is unavailable", async
   });
 });
 
+test("does not create a browser when a viewer attaches without an existing session", async (t) => {
+  const { server, sessions } = setup(t, { sessions: new Map() });
+  sessions.delete("p1");
+  await listen(t, server);
+  const client = await open(streamUrl(server, "p1", "A"));
+  assert.equal((await closedWith(client)).code, 4503);
+  assert.equal(sessions.has("p1"), false);
+});
+
+test("sends a dialog already open when the viewer attaches", async (t) => {
+  const session = fakeSession();
+  session.emit("dialog", { type: "confirm", message: "Continue?", defaultValue: "" });
+  const sessions = new Map([["p1", session]]);
+  const { server } = setup(t, { sessions });
+  await listen(t, server);
+  const client = await open(streamUrl(server, "p1", "A"));
+  await until(() => client.lastControl()?.dialog?.message === "Continue?", "initial dialog");
+  client.ws.close();
+});
+
+test("sends a file chooser already open when the viewer attaches", async (t) => {
+  const session = fakeSession();
+  session.fileChooser = () => ({ id: "picker-1", multiple: true, accept: ".png" });
+  const sessions = new Map([["p1", session]]);
+  const { server } = setup(t, { sessions });
+  await listen(t, server);
+  const client = await open(streamUrl(server, "p1", "A"));
+  await until(() => client.lastControl()?.fileChooser?.id === "picker-1", "initial file chooser");
+  assert.deepEqual(client.lastControl().fileChooser, {
+    id: "picker-1",
+    multiple: true,
+    accept: ".png",
+  });
+  client.ws.close();
+});
+
 test("on connect sends viewport, control and nav, and starts a clamped screencast", async (t) => {
   const sessions = new Map();
   const { server } = setup(t, { sessions });
@@ -260,7 +308,6 @@ test("forwards JPEG frames and acks Chromium only after the viewer acks", async 
 
   await until(() => client.frames.length === 1, "binary frame");
   assert.deepEqual(client.frames[0], jpeg);
-  await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(acks.count, 0, "Chromium is not acked before the viewer acks");
 
   client.send({ type: "ack" });
@@ -270,15 +317,17 @@ test("forwards JPEG frames and acks Chromium only after the viewer acks", async 
 
 test("gates input to the owner and broadcasts control to the second viewer", async (t) => {
   const sessions = new Map();
-  const { server } = setup(t, { sessions });
+  const { server, controls } = setup(t, { sessions });
   await listen(t, server);
   const a = await open(streamUrl(server, "p1", "A"));
   const b = await open(streamUrl(server, "p1", "B"));
   await until(() => sessions.get("p1")?.screencasts.length === 2, "two screencasts");
   const session = sessions.get("p1");
 
-  // Not the owner: input and navigation are ignored. The resize that follows
-  // is always allowed, so waiting for it proves the earlier messages were handled.
+  // A's input and navigation are refused while B owns control. B's navigation
+  // is the observable barrier proving the earlier messages have been handled.
+  const control = controls.for("p1");
+  control.take("B");
   a.send({
     type: "mouse",
     action: "down",
@@ -289,18 +338,23 @@ test("gates input to the owner and broadcasts control to the second viewer", asy
     clickCount: 1,
     modifiers: 0,
   });
-  a.send({ type: "navigate", url: "https://example.com" });
-  a.send({ type: "resize", width: 1000, height: 700 });
-  await until(() => session.calls.some((call) => call.name === "resize"), "resize");
+  a.send({ type: "navigate", url: "https://example.com/unauthorized" });
+  b.send({ type: "navigate", url: "https://example.com/authorized" });
+  await until(() => session.calls.some((call) => call.name === "navigate"), "owner navigation");
   assert.equal(
     session.calls.filter((call) => call.name === "input" || call.name === "navigate").length,
-    0,
+    1,
+  );
+  assert.equal(
+    session.calls.find((call) => call.name === "navigate").url,
+    "https://example.com/authorized",
   );
 
-  a.send({ type: "takeControl" });
+  control.release("B");
+  control.take("A");
   await until(() => a.lastControl()?.controller === "you", "you controller");
   await until(() => b.lastControl()?.controller === "another-viewer", "another-viewer");
-  assert.equal(b.lastControl().generation, 1);
+  assert.equal(b.lastControl().generation, 3);
 
   // Owner: input is forwarded.
   a.send({ type: "mouse", action: "move", x: 5, y: 6, button: "none", buttons: 0, modifiers: 0 });
@@ -318,25 +372,21 @@ test("gates input to the owner and broadcasts control to the second viewer", asy
 
   // Non-owner input from the second viewer is still refused.
   b.send({ type: "text", text: "hello" });
-  b.send({ type: "resize", width: 800, height: 600 });
-  await until(
-    () => session.calls.filter((call) => call.name === "resize").length === 2,
-    "second resize",
-  );
+  b.ws.close();
+  await closedWith(b);
   assert.equal(session.calls.filter((call) => call.name === "input").length, 1);
   a.ws.close();
-  b.ws.close();
 });
 
 test("a copy key sends the copied text to that viewer only, and file pickers ride on control", async (t) => {
   const sessions = new Map();
-  const { server } = setup(t, { sessions });
+  const { server, controls } = setup(t, { sessions });
   await listen(t, server);
   const a = await open(streamUrl(server, "p1", "A"));
   const b = await open(streamUrl(server, "p1", "B"));
   await until(() => sessions.get("p1")?.screencasts.length === 2, "two screencasts");
   const session = sessions.get("p1");
-  a.send({ type: "takeControl" });
+  controls.for("p1").take("A");
   await until(() => a.lastControl()?.controller === "you", "you controller");
   a.send({ type: "key", action: "down", key: "c", code: "KeyC", modifiers: 2 });
   await until(() => a.ofType("clipboard").length === 1, "clipboard");
@@ -354,19 +404,20 @@ test("a copy key sends the copied text to that viewer only, and file pickers rid
 
 test("ignores malformed and oversized messages", async (t) => {
   const sessions = new Map();
-  const { server } = setup(t, { sessions });
+  const { server, controls } = setup(t, { sessions });
   await listen(t, server);
   const a = await open(streamUrl(server, "p1", "A"));
   await until(() => sessions.get("p1")?.screencasts.length === 1, "screencast");
-  a.send({ type: "takeControl" });
+  controls.for("p1").take("A");
   await until(() => a.lastControl()?.controller === "you", "you controller");
   a.send("not json");
   a.send({ type: "mouse", action: "down", x: 1, y: 1, button: "left", modifiers: 99 });
   a.send({ type: "text", text: "x".repeat(10001) });
   a.send({ type: "history", delta: 5 });
-  a.send({ type: "resize", width: 1000, height: 700 });
-  await until(() => sessions.get("p1").calls.some((call) => call.name === "resize"), "resize");
-  assert.equal(sessions.get("p1").calls.filter((call) => call.name !== "resize").length, 0);
+  a.send({ type: "mouse", action: "move", x: 5, y: 6, button: "none", buttons: 0, modifiers: 0 });
+  await until(() => sessions.get("p1").calls.some((call) => call.name === "input"), "valid input");
+  assert.equal(sessions.get("p1").calls.length, 1);
+  assert.equal(sessions.get("p1").calls[0].msg.x, 5);
   a.ws.close();
 });
 
@@ -379,7 +430,7 @@ test("releases control when the owner's last socket closes, and releases held ke
   await until(() => sessions.get("p1")?.screencasts.length === 2, "two screencasts");
   const session = sessions.get("p1");
 
-  a.send({ type: "takeControl" });
+  controls.for("p1").take("A");
   await until(() => b.lastControl()?.controller === "another-viewer", "another-viewer");
   a.send({ type: "key", action: "down", key: "Shift", code: "ShiftLeft", modifiers: 8 });
   await until(() => session.calls.some((call) => call.name === "input"), "key down");

@@ -7,10 +7,11 @@
 // from the token either way.
 import { fileURLToPath } from "node:url";
 import { launchAde } from "../src/local/launch.mjs";
+import { DEFAULT_PORT } from "../src/shared/runtime-contract.mjs";
 
 try {
   await launchAde({
-    port: Number(process.env.PORT ?? 3100),
+    port: Number(process.env.PORT ?? DEFAULT_PORT),
     staticDir: fileURLToPath(new URL("../.output/public", import.meta.url)),
   });
 } catch (error) {

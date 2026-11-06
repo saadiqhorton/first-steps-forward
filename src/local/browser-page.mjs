@@ -13,12 +13,38 @@
 import path from "node:path";
 
 import { presentAsChrome } from "./browser-contexts.mjs";
+import {
+  BROWSER_RENDER_SCALE,
+  DEFAULT_VIEWPORT,
+  MAX_INPUT_TEXT_CHARS,
+} from "../shared/browser-contract.mjs";
+import {
+  clampViewport,
+  coded,
+  editingCommand,
+  keyEventParams,
+  modifiersOf,
+  mouseEventParams,
+  normalizeBrowserUrl,
+  numberOr,
+  wheelEventParams,
+  xdotoolChords,
+} from "./browser-protocol.mjs";
+
+export {
+  clampViewport,
+  editingCommand,
+  keyEventParams,
+  modifiersOf,
+  mouseEventParams,
+  normalizeBrowserUrl,
+  wheelEventParams,
+  xdotoolChords,
+} from "./browser-protocol.mjs";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
-const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
-const VIEWPORT_LIMITS = { minWidth: 240, maxWidth: 3840, minHeight: 240, maxHeight: 2160 };
 // Frames and input render at 2x like T3's RENDER_SCALE, so text stays sharp in the viewer.
-const RENDER_SCALE = 2;
+const RENDER_SCALE = BROWSER_RENDER_SCALE;
 // Chromium allows three unacked frames, so 100 ms pacing caps viewers near 30 fps.
 const SCREENCAST_ACK_PACE_MS = 100;
 const SCREENCAST_SETTLE_MS = 200;
@@ -28,11 +54,9 @@ const SCREENCAST_MOTION_QUALITY = 50;
 const AGENT_CURSOR_MOVE_MS = 160;
 const AGENT_CURSOR_CLICK_LEAD_MS = 40;
 const NAV_POLL_MS = 1_000;
-const TEXT_LIMIT = 10_000;
 const SNAPSHOT_TEXT_LIMIT = 20_000;
 const DIALOG_TEXT_LIMIT = 4_000;
 const MASK = "••••••••";
-const LOOPBACK_PREFIX = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::|\/|$)/i;
 const REF_PATTERN = /^(\d+)-((?:f\d+)?e\d+)$/;
 // computer_* actions let the page react before the screenshot, as the old desktop did.
 const COMPUTER_SETTLE_MS = 350;
@@ -99,9 +123,6 @@ const withTimeout = (promise, ms, fallback) => {
 };
 
 const asRecord = (value) => (typeof value === "object" && value !== null ? value : null);
-const numberOr = (value, fallback = 0) =>
-  typeof value === "number" && Number.isFinite(value) ? value : fallback;
-const coded = (code, message) => Object.assign(new Error(message), { code });
 // Install and launch failures keep their own code and words (browser_installing,
 // browser_libraries_missing, ...); anything else reads as the browser being unavailable.
 const cdpUnavailable = (cause) =>
@@ -111,223 +132,6 @@ const cdpUnavailable = (cause) =>
         "cdp_unavailable",
         `The agent browser is not available: ${cause instanceof Error ? cause.message : String(cause)}`,
       );
-
-/**
- * Normalizes what the user or agent typed into an http(s) URL. Bare hosts get https, loopback
- * hosts get http, and other schemes are refused.
- * @param {string} rawUrl
- * @returns {string}
- */
-export function normalizeBrowserUrl(rawUrl) {
-  const trimmed = String(rawUrl ?? "").trim();
-  if (trimmed.length === 0) throw coded("invalid_url", "Enter a URL to open.");
-  const useHttp = LOOPBACK_PREFIX.test(trimmed);
-  const candidate = trimmed.includes("://")
-    ? trimmed
-    : `${useHttp ? "http" : "https"}://${trimmed}`;
-  let parsed;
-  try {
-    parsed = new URL(candidate);
-  } catch {
-    throw coded("invalid_url", `"${trimmed}" is not a valid URL.`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw coded("invalid_url", `Only http and https URLs can be opened, not ${parsed.protocol}`);
-  }
-  return parsed.href;
-}
-
-/**
- * Clamps a requested CSS viewport to the limits ADE accepts.
- * @param {{ width: number, height: number }} size
- * @returns {{ width: number, height: number }}
- */
-export function clampViewport({ width, height }) {
-  if (!Number.isFinite(width) || !Number.isFinite(height)) {
-    throw new TypeError("Viewport width and height must be numbers.");
-  }
-  const clamp = (value, min, max) => Math.min(max, Math.max(min, Math.round(value)));
-  return {
-    width: clamp(width, VIEWPORT_LIMITS.minWidth, VIEWPORT_LIMITS.maxWidth),
-    height: clamp(height, VIEWPORT_LIMITS.minHeight, VIEWPORT_LIMITS.maxHeight),
-  };
-}
-
-/** Protocol modifier bits: alt 1, ctrl 2, meta 4, shift 8. Anything out of 0..15 is 0. */
-export function modifiersOf(message) {
-  const value = numberOr(message.modifiers);
-  return Number.isInteger(value) && value >= 0 && value < 16 ? value : 0;
-}
-
-// Cmd (meta) shortcuts and Ctrl copy/cut/undo/redo become editing commands, because headless
-// Chromium does not run them as key bindings on Linux.
-export function editingCommand(key, modifiers) {
-  const modifier = modifiers & 0b0111;
-  if (modifier !== 2 && modifier !== 4) return null;
-  const lower = key.toLowerCase();
-  const command =
-    lower === "c"
-      ? "copy"
-      : lower === "x"
-        ? "cut"
-        : modifier !== 4
-          ? null
-          : lower === "a"
-            ? "selectAll"
-            : lower === "z"
-              ? modifiers & 8
-                ? "redo"
-                : "undo"
-              : null;
-  return command ? { commands: [command] } : null;
-}
-
-/** CDP `Input.dispatchMouseEvent` params for a protocol `mouse` message. */
-export function mouseEventParams(message) {
-  const action = message.action;
-  const type =
-    action === "down" ? "mousePressed" : action === "up" ? "mouseReleased" : "mouseMoved";
-  const button = ["none", "left", "middle", "right"].includes(String(message.button))
-    ? message.button
-    : "none";
-  return {
-    type,
-    x: numberOr(message.x),
-    y: numberOr(message.y),
-    button,
-    buttons: numberOr(message.buttons),
-    clickCount: numberOr(message.clickCount, type === "mouseMoved" ? 0 : 1),
-    modifiers: modifiersOf(message),
-  };
-}
-
-/** CDP `Input.dispatchMouseEvent` params for a protocol `wheel` message. */
-export function wheelEventParams(message) {
-  return {
-    type: "mouseWheel",
-    x: numberOr(message.x),
-    y: numberOr(message.y),
-    deltaX: numberOr(message.deltaX),
-    deltaY: numberOr(message.deltaY),
-    modifiers: modifiersOf(message),
-  };
-}
-
-/**
- * CDP `Input.dispatchKeyEvent` params for a protocol `key` message. Text makes a keyDown with
- * text, and no text makes a rawKeyDown, as T3 does.
- */
-export function keyEventParams(message) {
-  const key = typeof message.key === "string" ? message.key : "";
-  const code = typeof message.code === "string" ? message.code : "";
-  const modifiers = modifiersOf(message);
-  if (message.action === "up") return { type: "keyUp", key, code, modifiers };
-  const text = typeof message.text === "string" && message.text.length > 0 ? message.text : null;
-  return {
-    type: text ? "keyDown" : "rawKeyDown",
-    key,
-    code,
-    modifiers,
-    ...(text ? { text, unmodifiedText: text } : {}),
-    ...(editingCommand(key, modifiers) ?? {}),
-    windowsVirtualKeyCode: numberOr(
-      message.keyCode,
-      key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-    ),
-  };
-}
-
-// xdotool key names (what computer_key documents) to Playwright's. Single characters pass through.
-const XDOTOOL_KEYS = {
-  ctrl: "Control",
-  control: "Control",
-  control_l: "Control",
-  control_r: "Control",
-  shift: "Shift",
-  shift_l: "Shift",
-  shift_r: "Shift",
-  alt: "Alt",
-  alt_l: "Alt",
-  alt_r: "Alt",
-  meta: "Meta",
-  super: "Meta",
-  super_l: "Meta",
-  super_r: "Meta",
-  cmd: "Meta",
-  win: "Meta",
-  enter: "Enter",
-  return: "Enter",
-  kp_enter: "Enter",
-  esc: "Escape",
-  escape: "Escape",
-  backspace: "Backspace",
-  delete: "Delete",
-  del: "Delete",
-  insert: "Insert",
-  tab: "Tab",
-  iso_left_tab: "Tab",
-  space: "Space",
-  up: "ArrowUp",
-  down: "ArrowDown",
-  left: "ArrowLeft",
-  right: "ArrowRight",
-  pageup: "PageUp",
-  page_up: "PageUp",
-  prior: "PageUp",
-  pagedown: "PageDown",
-  page_down: "PageDown",
-  next: "PageDown",
-  home: "Home",
-  end: "End",
-  minus: "-",
-  plus: "+",
-  equal: "=",
-  period: ".",
-  comma: ",",
-  slash: "/",
-  backslash: "\\",
-  semicolon: ";",
-  apostrophe: "'",
-  grave: "`",
-  bracketleft: "[",
-  bracketright: "]",
-};
-const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta"]);
-
-/**
- * Turns computer_key's xdotool-style keys ("ctrl+l", "Tab Tab Return", ["Return"]) into
- * Playwright chords for keyboard.press, in order.
- * @param {string | string[]} keys
- * @returns {string[]}
- */
-export function xdotoolChords(keys) {
-  const combos = typeof keys === "string" ? keys.split(/\s+/).filter(Boolean) : keys;
-  if (
-    !Array.isArray(combos) ||
-    combos.length === 0 ||
-    !combos.every((k) => typeof k === "string" && k)
-  ) {
-    throw new Error('keys is required, e.g. "ctrl+l" or ["Return"]');
-  }
-  return combos.map((combo) => {
-    // A lone "+" is the plus key, not an empty chord.
-    const parts = combo === "+" ? ["+"] : combo.split("+").filter(Boolean);
-    if (parts.length === 0) throw new Error(`Empty key combo: "${combo}"`);
-    const names = parts.map((part) => {
-      const mapped = XDOTOOL_KEYS[part.toLowerCase()];
-      if (mapped) return mapped;
-      if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(part)) return part.toUpperCase();
-      if ([...part].length === 1) return part;
-      throw new Error(`Unknown key: ${part}`);
-    });
-    // With a modifier held, letters and digits press by code, so Shift+R really reads as "R".
-    const modified = names.slice(0, -1).some((name) => MODIFIER_KEYS.has(name));
-    const last = names.at(-1);
-    if (modified && /^[a-z]$/i.test(last)) names[names.length - 1] = `Key${last.toUpperCase()}`;
-    else if (modified && /^[0-9]$/.test(last)) names[names.length - 1] = `Digit${last}`;
-    return names.join("+");
-  });
-}
 
 /**
  * Masks password values wherever the snapshot prints them. Values under four characters only
@@ -663,8 +467,8 @@ class BrowserSession {
   async startScreencast(options = {}, onFrame) {
     if (this.#closed || !this.#active) throw cdpUnavailable(new Error("The browser closed."));
     const params = {
-      maxWidth: Math.max(1, Math.round(numberOr(options.maxWidth, 1280))),
-      maxHeight: Math.max(1, Math.round(numberOr(options.maxHeight, 800))),
+      maxWidth: Math.max(1, Math.round(numberOr(options.maxWidth, DEFAULT_VIEWPORT.width))),
+      maxHeight: Math.max(1, Math.round(numberOr(options.maxHeight, DEFAULT_VIEWPORT.height))),
       quality: Math.min(100, Math.max(1, Math.round(numberOr(options.quality, 70)))),
     };
     // A viewer attaching re-reads the real viewport, so its first frame matches the mapping.
@@ -739,7 +543,9 @@ class BrowserSession {
       }
       case "text":
         if (typeof message.text === "string" && message.text.length > 0) {
-          await cdp.send("Input.insertText", { text: message.text.slice(0, TEXT_LIMIT) });
+          await cdp.send("Input.insertText", {
+            text: message.text.slice(0, MAX_INPUT_TEXT_CHARS),
+          });
         }
         return;
     }
@@ -748,45 +554,32 @@ class BrowserSession {
   /**
    * Releases keys and buttons the viewer left held on the active page, as T3 does on hand-back.
    */
-  releaseInput() {
-    if (this.#active) this.#releaseHeldInput(this.#active);
+  async releaseInput() {
+    if (this.#active) await this.#releaseHeldInput(this.#active);
   }
 
-  #releaseHeldInput(page) {
+  async #releaseHeldInput(page) {
     const keys = [...this.#pressedKeys.values()];
     const buttons = [...this.#pressedButtons];
     this.#pressedKeys.clear();
     this.#pressedButtons.clear();
     if (keys.length === 0 && buttons.length === 0) return;
-    void (async () => {
-      const cdp = await this.#control(page).catch(() => null);
-      if (!cdp) return;
-      for (const { key, code } of keys) {
-        await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key, code }).catch(noop);
-      }
-      for (const [button, point] of buttons) {
-        await cdp
-          .send("Input.dispatchMouseEvent", {
-            type: "mouseReleased",
-            button,
-            ...point,
-            buttons: 0,
-            clickCount: 1,
-          })
-          .catch(noop);
-      }
-    })();
-  }
-
-  /**
-   * Re-reads the CSS viewport. The context keeps a fixed 1280x800 page, the size computer_*
-   * coordinates refer to, and viewers scale it to fit.
-   * @returns {Promise<{ width: number, height: number }>}
-   */
-  async resize(_size) {
-    if (this.#active) await this.#syncViewport(this.#active);
-    this.#emit("viewport", this.viewport());
-    return this.viewport();
+    const cdp = await this.#control(page).catch(() => null);
+    if (!cdp) return;
+    for (const { key, code } of keys) {
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key, code }).catch(noop);
+    }
+    for (const [button, point] of buttons) {
+      await cdp
+        .send("Input.dispatchMouseEvent", {
+          type: "mouseReleased",
+          button,
+          ...point,
+          buttons: 0,
+          clickCount: 1,
+        })
+        .catch(noop);
+    }
   }
 
   /** Navigates the active page (http and https only). */
@@ -1107,6 +900,11 @@ class BrowserSession {
   #dialogNote() {
     const { type, message } = dialogState(this.#dialog.dialog);
     return `A JavaScript ${type} dialog is open: "${message}". Call browser_dialog to accept or dismiss it.`;
+  }
+
+  /** The JavaScript dialog currently blocking the page, if any. */
+  pendingDialog() {
+    return this.#dialog ? dialogState(this.#dialog.dialog) : null;
   }
 
   /** The file picker the page has open, as viewers see it, or null. */
@@ -1478,7 +1276,7 @@ class BrowserSession {
     this.#refs = null;
     this.#title = "";
     this.#loading = false;
-    if (previous) this.#releaseHeldInput(previous);
+    if (previous) void this.#releaseHeldInput(previous);
     for (const stream of this.#screencasts) void stream.retarget(page);
     void this.#syncViewport(page);
     void this.#refreshNav();
@@ -1542,8 +1340,8 @@ function pointOf(input, keyX = "x", keyY = "y") {
 
 function requireString(value, name) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`Missing ${name}.`);
-  if (name === "text" && value.length > TEXT_LIMIT) {
-    throw new Error(`Text is longer than ${TEXT_LIMIT} characters.`);
+  if (name === "text" && value.length > MAX_INPUT_TEXT_CHARS) {
+    throw new Error(`Text is longer than ${MAX_INPUT_TEXT_CHARS} characters.`);
   }
   return value;
 }
@@ -1660,6 +1458,18 @@ export function createBrowserHub({ contextFor, idleMs = browserIdleMs() }) {
     peek(projectId) {
       const session = open.get(String(projectId));
       return session && !session.closed ? session : null;
+    },
+
+    /** Returns an existing session, including one that is still connecting, without opening one. */
+    async existing(projectId) {
+      const current = sessions.get(String(projectId));
+      if (!current) return null;
+      try {
+        const session = await current;
+        return session.closed ? null : session;
+      } catch {
+        return null;
+      }
     },
 
     close,

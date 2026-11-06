@@ -73,9 +73,11 @@ export async function browser(ctx) {
         return json(res, status, payload);
       } catch (error) {
         if (error instanceof PayloadTooLarge) throw error;
-        if (error instanceof HumanControlError)
-          return json(res, 409, { error: error.message, code: error.code });
-        return json(res, 503, { error: error.message });
+        const code = error?.code;
+        return json(res, COMPUTER_ERROR_STATUS[code] ?? 503, {
+          error: error?.message ?? String(error),
+          ...(code ? { code } : {}),
+        });
       }
     }
     if (req.method === "POST" && parts[3] === "control") {
@@ -91,13 +93,16 @@ export async function browser(ctx) {
             res,
             200,
             control.release(viewer, async () => {
-              // Best effort: release keys and buttons the viewer left held in the page.
-              browserHub.peek(project.id)?.releaseInput();
+              // BrowserSession owns the pressed-key and button records shared by every transport.
+              await browserHub.peek(project.id)?.releaseInput();
             }),
           );
       } catch (error) {
-        if (error instanceof HumanControlError)
-          return json(res, 409, { error: error.message, code: error.code });
+        if (error instanceof HumanControlError || error?.code === "browser_closed")
+          return json(res, COMPUTER_ERROR_STATUS[error.code] ?? 503, {
+            error: error.message,
+            code: error.code,
+          });
         throw error;
       }
       return json(res, 400, { error: 'action must be "take" or "release".' });

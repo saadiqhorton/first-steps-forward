@@ -10,8 +10,6 @@ import { promises as fs } from "node:fs";
 
 export const SETUP_COMMAND = "npm run browser:setup";
 
-export const NO_SANDBOX_SIGNATURE = "No usable sandbox";
-
 export const sandboxDisabled = (env) => env.ADE_BROWSER_SANDBOX === "0";
 
 /** Set on Ubuntu 23.10+: unprivileged user namespaces need an AppArmor profile. */
