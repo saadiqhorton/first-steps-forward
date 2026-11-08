@@ -26,7 +26,7 @@ import { processRunsIn, runCommand, spawnCommand, stopProcess } from "./spawn.mj
 /** @typedef {{ runTurn: (input: TurnInput, io: TurnIO) => Promise<TurnEnd> }} AgentAdapter */
 /** @typedef {{ id: string, name: string, path: string, branch?: string, uncommittedFiles?: string[], missing?: boolean }} Project */
 /** @typedef {{ id: string, name: string, short?: string, installed?: boolean, signedIn?: boolean, version?: string, providers?: string[], account?: string, tools?: string }} AgentRow */
-/** @typedef {{ id: string, name: string, mime: string, size: number, kind: string, absPath: string }} ResolvedFile */
+/** @typedef {{ id: string, name: string, mime: string, size: number, kind: string, absPath: string, recording?: boolean }} ResolvedFile */
 /** @typedef {{ text: string, files?: ResolvedFile[] }} Message */
 /** @typedef {Record<string, any> & { id: string, projectId: string, agentId: string, status: string, messages: any[], logs: string[] }} Session */
 /**
@@ -114,7 +114,12 @@ function attachmentMeta(files) {
 }
 /** @param {ResolvedFile[]} files */
 const nativeAttachments = (files) =>
-  files.map(({ absPath, mime, kind, name }) => ({ path: absPath, mime, kind, name }));
+  // CLIs generally treat native file arguments as prompt text or image data. A WebM can be
+  // gigabytes long and is already available by path in formatAttachmentPrompt; its keyframe
+  // images remain native attachments so an agent can inspect the visual feedback directly.
+  files
+    .filter((file) => !file.recording)
+    .map(({ absPath, mime, kind, name }) => ({ path: absPath, mime, kind, name }));
 
 const SAFETY_PREAMBLE =
   "Safety instructions: Work only in this project. Do not deploy, publish, send external communications, modify shared or production systems, or delete data. If such an action is necessary, stop and ask the user instead. Preserve existing files unless the requested code change requires editing them. ";
@@ -218,8 +223,9 @@ export function createSessionTurns({
       throw new TurnRefused(409, `Reopen this session before ${what}.`);
   };
   /** "Send now": interrupt the current run; the message runs as soon as it has stopped. */
-  const steer = (session, prompt) => {
+  const steer = (session, prompt, attachmentBatches = []) => {
     session.steerNow = prompt;
+    session.steerNowAttachments = attachmentBatches;
     setStatus(session, "working");
     interrupt(session);
     recordLog(session, "Switching to your message.");
@@ -243,21 +249,27 @@ export function createSessionTurns({
     if (session.steerNow && !SETTLED.includes(session.status)) {
       const prompt = session.steerNow;
       delete session.steerNow;
-      return begin(session, renew(session), { prompt, continuing: true, attachments: [] });
+      const batches = session.steerNowAttachments ?? [];
+      delete session.steerNowAttachments;
+      return begin(session, renew(session), {
+        prompt,
+        continuing: true,
+        attachments: batches.flat(),
+      });
     }
     if (!SETTLED.includes(session.status)) {
       const queue = session.queuedMessages ?? [];
       if (queue.length) {
         session.queuedMessages = [];
-        // Queued turns only carry the path appendix in text; native CLI flags
-        // apply to the immediately spawned turn, not to drained queue entries.
+        const batches = session.queuedAttachments ?? [];
+        delete session.queuedAttachments;
         const prompt = queue.join("\n\n");
         const fresh = session.agentStartFresh === true;
         delete session.agentStartFresh;
         return begin(session, renew(session), {
           prompt: fresh ? agentHandoffPrompt(session, prompt) : prompt,
           continuing: !fresh,
-          attachments: [],
+          attachments: batches.flat(),
         });
       }
       settle();
@@ -587,16 +599,21 @@ export function createSessionTurns({
       const prompt = fresh ? agentHandoffPrompt(session, rawPrompt) : rawPrompt;
       addMessage(session, "user", text, attachmentMeta(files));
       if (busy(session)) {
-        if (when === "now") steer(session, prompt);
+        const attachments = nativeAttachments(files);
+        if (when === "now") steer(session, prompt, [attachments]);
         else {
           (session.queuedMessages ??= []).push(prompt);
+          (session.queuedAttachments ??= []).push(attachments);
           recordLog(session, "Follow-up queued until the current CLI turn exits.");
         }
         await persist(session);
         return session;
       }
       const slot = /** @type {NonNullable<ReturnType<typeof claim>>} */ (claim(session));
-      if (!fresh) session.queuedMessages = [];
+      if (!fresh) {
+        session.queuedMessages = [];
+        delete session.queuedAttachments;
+      }
       delete session.agentStartFresh;
       setStatus(session, "working");
       await persist(session);
@@ -612,10 +629,12 @@ export function createSessionTurns({
     async release(session) {
       refuseIfComplete(session, "sending a message");
       const waiting = [...(session.queuedMessages ?? [])];
+      const attachmentBatches = session.queuedAttachments ?? [];
       if (!waiting.length) throw new TurnRefused(400, "There is no waiting message to send.");
       session.queuedMessages = [];
+      delete session.queuedAttachments;
       const prompt = waiting.join("\n\n");
-      if (busy(session)) steer(session, prompt);
+      if (busy(session)) steer(session, prompt, attachmentBatches);
       else {
         recordLog(session, "Sending the waiting message.");
         const slot = /** @type {NonNullable<ReturnType<typeof claim>>} */ (claim(session));
@@ -627,7 +646,7 @@ export function createSessionTurns({
         void runTurn(session, slot, {
           prompt: freshPrompt,
           continuing: !fresh,
-          attachments: [],
+          attachments: attachmentBatches.flat(),
         });
         return session;
       }
@@ -640,6 +659,7 @@ export function createSessionTurns({
       refuseIfComplete(session, "sending a message");
       const waiting = (session.queuedMessages ?? []).length;
       session.queuedMessages = [];
+      delete session.queuedAttachments;
       if (waiting) addMessage(session, "system", "The waiting message will not be sent.");
       await persist(session);
       return session;
@@ -651,6 +671,7 @@ export function createSessionTurns({
       setStatus(session, "stopped");
       // A stop cancels an in-flight "send now" so the exit does not restart work.
       delete session.steerNow;
+      delete session.steerNowAttachments;
       dropPermissions(session);
       if (busy(session)) interrupt(session);
       else stopProcess(session.pid);
@@ -851,7 +872,13 @@ export function createSessionTurns({
           changed = true;
         }
         // A permission request dies with the agent process that asked it.
-        for (const key of ["pid", "steerNow", "pendingPermissions", "checksCancelled"])
+        for (const key of [
+          "pid",
+          "steerNow",
+          "steerNowAttachments",
+          "pendingPermissions",
+          "checksCancelled",
+        ])
           if (key in session) {
             delete session[key];
             changed = true;

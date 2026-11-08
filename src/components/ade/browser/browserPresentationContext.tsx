@@ -11,6 +11,9 @@ export interface BrowserPlacementValue {
   readonly projectId: string | null;
   readonly place: BrowserPlace;
   readonly setPlace: (place: BrowserPlace) => void;
+  /** The docked surface is on screen; a page the agent opens floats when it is not. */
+  readonly visible: boolean;
+  readonly setVisible: (visible: boolean) => void;
 }
 
 export interface BrowserMiniPlayerValue {

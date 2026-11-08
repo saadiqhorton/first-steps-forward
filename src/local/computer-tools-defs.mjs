@@ -60,6 +60,7 @@ const text = (value, isError = false) => ({
  */
 export function createToolCaller({ api, projectId, sessionId = "", fetchImpl = fetch }) {
   const base = `${api}/api/projects/${encodeURIComponent(projectId)}`;
+  const scope = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
   async function call(method, url, body) {
     const response = await fetchImpl(url, {
       method,
@@ -81,7 +82,7 @@ export function createToolCaller({ api, projectId, sessionId = "", fetchImpl = f
       if (ACTIONS[name]) {
         const { status, payload } = await call(
           "POST",
-          `${base}/computer/action`,
+          `${base}/computer/action${scope}`,
           ACTIONS[name](args),
         );
         if (status === 409 && payload.code === "human_control") return text(payload.error, true);
@@ -106,7 +107,7 @@ export function createToolCaller({ api, projectId, sessionId = "", fetchImpl = f
       if (BROWSER[name]) {
         const { status, payload } = await call(
           "POST",
-          `${base}/browser/action`,
+          `${base}/browser/action${scope}`,
           BROWSER[name](args),
         );
         if (status === 409 && payload.code === "human_control") return text(payload.error, true);

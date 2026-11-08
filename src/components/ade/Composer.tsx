@@ -20,6 +20,22 @@ import {
   type AttachmentDraft,
 } from "@/components/ade/ComposerAttachments";
 import { warnUser } from "@/components/ade/NoticeDialog";
+import {
+  isBrowserRecording,
+  ensureBrowserFeedbackLoaded,
+  finishBrowserFeedbackTransfer,
+  MAX_BROWSER_RECORDING_BYTES,
+  peekBrowserFeedback,
+  saveComposerDraft,
+  subscribeBrowserFeedback,
+  takeBrowserFeedback,
+} from "@/lib/ade/browser/composerFeedback";
+import { feedbackBatchSize } from "@/lib/ade/browser/feedbackBatch.mjs";
+import {
+  loadFeedbackDraft,
+  persistFeedbackFile,
+  restoreFeedbackFile,
+} from "@/lib/ade/browser/feedbackPersistence";
 const PICKER_MAX_WIDTH = 960;
 const PICKER_EDGE = 16;
 const PICKER_GAP = 8;
@@ -51,6 +67,8 @@ export function Composer({
   running = false,
   workflow,
   onWorkflowRemove,
+  sessionId,
+  draftStorageKey,
 }: {
   mode: "new" | "follow-up";
   selection: AgentSelection;
@@ -69,13 +87,22 @@ export function Composer({
   /** A selected workflow renders as a token; its prompt is sent with the draft. */
   workflow?: Workflow | null;
   onWorkflowRemove?: () => void;
+  sessionId?: string;
+  draftStorageKey?: string;
 }) {
   const agents = useAdeState((state) => state.agents);
   const [text, setText] = useState(initialText ?? "");
   const [drafts, setDrafts] = useState<AttachmentDraft[]>([]);
+  const [draftReady, setDraftReady] = useState(!draftStorageKey);
+  const draftStorageWarning = useRef(false);
+  const draftRestoreFailed = useRef(false);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const draftsRef = useRef(drafts);
+  const feedbackLimitWarned = useRef(false);
+  // A burst of feedback events can arrive before React has committed the last batch.
+  const feedbackBatchPending = useRef(false);
+  const feedbackTransfer = useRef<string | null>(null);
   draftsRef.current = drafts;
   const [pickerOpen, setPickerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -86,9 +113,81 @@ export function Composer({
   const chipRef = useRef<HTMLButtonElement>(null);
   const chip = agentChipLabel(selection, agents);
   const labelId = useId();
-  const disabled = !!disabledReason || sending;
+  const disabled = !!disabledReason || sending || !draftReady;
   const workflowPrompt = workflow?.prompt.trim() ?? "";
   const canSend = (!!text.trim() || !!workflowPrompt) && !disabled;
+
+  useEffect(() => {
+    if (!draftStorageKey) return;
+    let active = true;
+    const warnStorage = () => {
+      draftRestoreFailed.current = true;
+      if (draftStorageWarning.current) return;
+      draftStorageWarning.current = true;
+      void warnUser(
+        "Draft storage is unavailable. Your current message remains in the composer, but may not survive a reload.",
+      );
+    };
+    void loadFeedbackDraft<{ text: string; files: ReturnType<typeof persistFeedbackFile>[] }>(
+      `composer:${draftStorageKey}`,
+    )
+      .then((saved) => {
+        if (!active || !saved) return;
+        const restored = saved.files.map(restoreFeedbackFile);
+        setText(saved.text);
+        setDrafts(
+          restored.map((file, index) => ({
+            key: draftKey(file, index),
+            file,
+            ...(file.type.startsWith("image/") ? { previewUrl: URL.createObjectURL(file) } : {}),
+          })),
+        );
+      })
+      .catch(warnStorage)
+      .finally(() => {
+        if (active) setDraftReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [draftStorageKey]);
+
+  useEffect(() => {
+    if (!draftStorageKey || !draftReady || draftRestoreFailed.current) return;
+    const value =
+      text || drafts.length
+        ? { text, files: drafts.map(({ file }) => persistFeedbackFile(file)) }
+        : undefined;
+    const transfer = feedbackTransfer.current;
+    void saveComposerDraft(draftStorageKey, value)
+      .then(() => {
+        if (transfer && feedbackTransfer.current === transfer) {
+          feedbackTransfer.current = null;
+        }
+      })
+      .catch(() => {
+        if (transfer && feedbackTransfer.current === transfer) {
+          feedbackTransfer.current = null;
+          void finishBrowserFeedbackTransfer(transfer, false);
+        }
+        if (draftStorageWarning.current) return;
+        draftStorageWarning.current = true;
+        void warnUser(
+          "Draft storage is unavailable. Your current message remains in the composer, but may not survive a reload.",
+        );
+      });
+  }, [draftStorageKey, draftReady, text, drafts]);
+
+  useEffect(
+    () => () => {
+      const transfer = feedbackTransfer.current;
+      if (transfer) {
+        feedbackTransfer.current = null;
+        void finishBrowserFeedbackTransfer(transfer, false, true);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (initialText === undefined) return;
@@ -151,26 +250,93 @@ export function Composer({
     const oversized: string[] = [];
     setDrafts((prev) => {
       let next = [...prev];
-      let totalBytes = next.reduce((sum, d) => sum + d.file.size, 0);
+      let totalBytes = next.reduce(
+        (sum, d) => sum + (isBrowserRecording(d.file) ? 0 : d.file.size),
+        0,
+      );
       for (const [index, file] of incoming.entries()) {
         if (!file.size) continue;
         if (next.length >= MAX_FILES) break;
-        if (file.size > MAX_FILE_BYTES) {
+        const recording = isBrowserRecording(file);
+        if (file.size > (recording ? MAX_BROWSER_RECORDING_BYTES : MAX_FILE_BYTES)) {
           oversized.push(file.name);
           continue;
         }
-        if (totalBytes + file.size > MAX_TURN_BYTES) continue;
+        if (!recording && totalBytes + file.size > MAX_TURN_BYTES) continue;
         const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
         next = [
           ...next,
           { key: draftKey(file, index), file, ...(previewUrl ? { previewUrl } : {}) },
         ];
-        totalBytes += file.size;
+        if (!recording) totalBytes += file.size;
       }
       return next;
     });
     for (const name of oversized) void warnUser(`${name} is larger than 10 MB.`);
   };
+
+  useEffect(() => {
+    if (!sessionId || disabled) return;
+    const feedbackKey = draftStorageKey ?? sessionId;
+    feedbackBatchPending.current = false;
+    const consume = () => {
+      if (feedbackBatchPending.current) return;
+      const incoming = peekBrowserFeedback(feedbackKey);
+      if (!incoming.length) return;
+      const bytes = draftsRef.current.reduce(
+        (total, draft) => total + (isBrowserRecording(draft.file) ? 0 : draft.file.size),
+        0,
+      );
+      const count = feedbackBatchSize(
+        incoming,
+        draftsRef.current.length,
+        bytes,
+        {
+          files: MAX_FILES,
+          fileBytes: MAX_FILE_BYTES,
+          turnBytes: MAX_TURN_BYTES,
+          recordingBytes: MAX_BROWSER_RECORDING_BYTES,
+        },
+        isBrowserRecording,
+      );
+      if (!count) {
+        if (!feedbackLimitWarned.current)
+          void warnUser(
+            "Browser feedback is waiting: make room in the composer for its attachments.",
+          );
+        feedbackLimitWarned.current = true;
+        return;
+      }
+      feedbackBatchPending.current = true;
+      const taken = takeBrowserFeedback(
+        feedbackKey,
+        count,
+        !!draftStorageKey && !draftRestoreFailed.current,
+      );
+      if (draftStorageKey && !draftRestoreFailed.current && taken.length)
+        feedbackTransfer.current = feedbackKey;
+      feedbackLimitWarned.current = false;
+      addFiles(taken.flatMap((draft) => [...draft.files]));
+      setText((previous) =>
+        [previous.trimEnd(), ...taken.map((draft) => draft.text)].filter(Boolean).join("\n\n"),
+      );
+      textareaRef.current?.focus();
+    };
+    let active = true;
+    let queueReady = false;
+    const unsubscribe = subscribeBrowserFeedback(() => {
+      if (queueReady) consume();
+    });
+    void ensureBrowserFeedbackLoaded(feedbackKey).then(() => {
+      if (!active) return;
+      queueReady = true;
+      consume();
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [sessionId, draftStorageKey, disabled, drafts]);
 
   const removeDraft = (key: string) => {
     setDrafts((prev) => {
@@ -291,7 +457,7 @@ export function Composer({
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
-        disabled={!!disabledReason}
+        disabled={!!disabledReason || !draftReady}
         placeholder={
           disabledReason ??
           (workflow ? "Add instructions for this workflow (optional)" : placeholder)

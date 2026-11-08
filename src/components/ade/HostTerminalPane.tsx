@@ -1,6 +1,8 @@
 import { FitAddon } from "@xterm/addon-fit";
+import type { ILink, Terminal } from "@xterm/xterm";
 import { useXTerm } from "react-xtermjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { requestPreviewOpen } from "@/lib/ade/browser/openInPreview.mjs";
 
 type Props = {
   projectId: string;
@@ -23,6 +25,38 @@ function nextPollDelay(output: Output, elapsed: number) {
   // An empty body that comes back immediately means wait was ignored.
   // Keep the old idle pace so that cannot spin the event loop.
   return !output.data && !output.hasMore && elapsed < 30 ? 150 : 0;
+}
+
+const URL_IN_LINE = /\bhttps?:\/\/[^\s"'<>]+/g;
+
+/** Every http(s) URL on a printed line becomes a link, as T3's terminal has. */
+function terminalLinks(instance: Terminal) {
+  return {
+    provideLinks(lineNumber: number, callback: (links: ILink[] | undefined) => void) {
+      const line = instance.buffer.active.getLine(lineNumber - 1)?.translateToString(true);
+      if (!line) return callback(undefined);
+      const links: ILink[] = [];
+      for (const match of line.matchAll(URL_IN_LINE)) {
+        const text = match[0].replace(/[.,;:)\]'"]+$/, "");
+        const start = (match.index ?? 0) + 1;
+        links.push({
+          text,
+          range: {
+            start: { x: start, y: lineNumber },
+            end: { x: start + text.length - 1, y: lineNumber },
+          },
+          activate: (event, linkText) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || !requestPreviewOpen(linkText))
+              window.open(linkText, "_blank", "noopener,noreferrer");
+          },
+        });
+      }
+      callback(links.length ? links : undefined);
+    },
+    dispose() {
+      // Nothing to release: links are computed from the buffer on demand.
+    },
+  };
 }
 
 const options = {
@@ -117,6 +151,13 @@ export function HostTerminalPane({
   );
   const listeners = useMemo(() => ({ onData }), [onData]);
   const { ref, instance } = useXTerm({ options, addons, listeners });
+
+  // Links printed by the shell open in ADE's browser, or the system browser with a modifier.
+  useEffect(() => {
+    if (!instance) return;
+    const provider = instance.registerLinkProvider(terminalLinks(instance));
+    return () => provider.dispose();
+  }, [instance]);
 
   useEffect(() => {
     registerClose(async () => {

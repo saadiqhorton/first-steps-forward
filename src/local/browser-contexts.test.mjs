@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -121,7 +121,7 @@ test("persistent profiles launch headless and sandboxed in their own directory, 
   assert.equal(options.headless, true);
   assert.equal(options.chromiumSandbox, true);
   assert.equal(options.executablePath, "/opt/chrome-headless-shell");
-  assert.deepEqual(options.ignoreDefaultArgs, ["--enable-automation"]);
+  assert.deepEqual(options.ignoreDefaultArgs, ["--enable-automation", "--mute-audio"]);
   assert.ok(options.args.includes("--disable-blink-features=AutomationControlled"));
   assert.deepEqual(options.viewport, { width: 1280, height: 800 });
   assert.equal(options.deviceScaleFactor, 2);
@@ -129,6 +129,29 @@ test("persistent profiles launch headless and sandboxed in their own directory, 
   await first.close();
   assert.notEqual(await contexts.contextFor("project-1"), first);
   assert.equal(launcher.calls.persistent.length, 2);
+});
+
+test("visible mode keeps profiles isolated and allows native keychain integration", async () => {
+  const { profilesDir, launcher, contexts } = setup({ env: { ADE_BROWSER_HEADED: "1" } });
+  await contexts.contextFor("project-1");
+  await contexts.contextFor(INCOGNITO_PROFILE_ID, "project-1");
+  const [{ directory, options }] = launcher.calls.persistent;
+  assert.equal(directory, path.join(`${profilesDir}-headed`, "project-1"));
+  assert.equal(options.headless, false);
+  assert.equal(options.chromiumSandbox, true);
+  assert.ok(options.ignoreDefaultArgs.includes("--use-mock-keychain"));
+  assert.ok(options.ignoreDefaultArgs.includes("--password-store=basic"));
+  assert.ok(options.ignoreDefaultArgs.includes("--mute-audio"));
+  assert.ok(options.ignoreDefaultArgs.includes("--disable-extensions"));
+  assert.ok(options.args.some((arg) => arg.startsWith("--load-extension=")));
+  assert.equal(launcher.calls.launch[0].headless, false);
+  const headlessDirectory = path.join(profilesDir, "project-1");
+  mkdirSync(headlessDirectory, { recursive: true });
+  await contexts.clearProfile("project-1");
+  assert.equal(existsSync(directory), false);
+  assert.equal(existsSync(headlessDirectory), false);
+  await contexts.close();
+  rmSync(`${profilesDir}-headed`, { recursive: true, force: true });
 });
 
 test("incognito contexts share one launched browser, one context per isolation key", async () => {

@@ -163,8 +163,7 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
 }
 
 /**
- * beUI caps an open turn at a short, scrolling viewport that starts at the top. If a step in
- * it failed and sits below the fold, scroll the viewport so the failure is in view.
+ * If an activity list has its own scrolling viewport, bring the failed step into view.
  */
 function revealFailedStep(root: HTMLElement | null) {
   const row = root?.querySelector<HTMLElement>("[data-step-failed]");
@@ -209,8 +208,7 @@ function TurnBlock({
     const root = rootRef.current;
     if (!root || !open || working || !failedId) return;
     let frame = 0;
-    // beUI scrolls a disclosure to its top a frame after it opens, and sizes it once it is
-    // shown, so look after both.
+    // Wait until the disclosure has opened and its contents have been sized.
     const reveal = () => {
       frame = requestAnimationFrame(() => {
         frame = requestAnimationFrame(() => revealFailedStep(root));
@@ -243,6 +241,7 @@ function TurnBlock({
         open={open}
         onOpenChange={setOpen}
         collapseOnComplete={group.failed === 0}
+        maxHeight={null}
       />
     </div>
   );

@@ -87,7 +87,9 @@ export async function sessionReads(ctx) {
     const attachmentIds = Array.isArray(data.attachmentIds) ? data.attachmentIds : [];
     let files = [];
     try {
-      files = attachmentIds.length ? await resolveAttachments(DATA_DIR, attachmentIds) : [];
+      files = attachmentIds.length
+        ? await resolveAttachments(DATA_DIR, attachmentIds, { includeBytes: false })
+        : [];
     } catch (error) {
       if (error?.status) return json(res, error.status, { error: error.message });
       throw error;

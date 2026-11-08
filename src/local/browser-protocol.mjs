@@ -10,8 +10,14 @@ export const coded = (code, message) => Object.assign(new Error(message), { code
 export function normalizeBrowserUrl(rawUrl) {
   const trimmed = String(rawUrl ?? "").trim();
   if (trimmed.length === 0) throw coded("invalid_url", "Enter a URL to open.");
+  if (
+    /^(?:about|blob|chrome|data|file|ftp|javascript|mailto|sms|ssh|tel|view-source|ws|wss):/i.test(
+      trimmed,
+    )
+  )
+    throw coded("invalid_url", "Only http and https URLs can be opened.");
   const useHttp = LOOPBACK_PREFIX.test(trimmed);
-  const candidate = trimmed.includes("://")
+  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
     ? trimmed
     : `${useHttp ? "http" : "https"}://${trimmed}`;
   let parsed;

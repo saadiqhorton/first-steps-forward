@@ -46,6 +46,8 @@ const project = (name, packageJson = { name }) => {
 const projects = [
   project("p-turn"),
   project("p-queue"),
+  project("p-queue-image"),
+  project("p-recording-feedback"),
   project("p-now"),
   project("p-drop"),
   project("p-stop"),
@@ -289,6 +291,95 @@ test("a follow-up during a turn waits, then runs as the next turn", { skip }, as
   assert.equal(session(id).status, "ready");
   assert.deepEqual(session(id).queuedMessages, []);
 });
+
+test(
+  "queued browser feedback keeps image attachments as native agent input",
+  { skip },
+  async () => {
+    const { open } = gate();
+    const id = await start("p-queue-image", "gate");
+    await waitFor(() => session(id).messages.some((m) => m.text === "Working."), "the first reply");
+    const image = await call("/api/attachments", {
+      name: "frames.png",
+      mime: "image/png",
+      contentBase64: Buffer.from("image bytes").toString("base64"),
+    });
+    assert.equal(image.status, 201);
+    const queued = await call(`/api/sessions/${id}/messages`, {
+      text: "Review these frames",
+      attachmentIds: [image.json.id],
+    });
+    assert.equal(queued.status, 200);
+    open();
+    await waitFor(
+      () => turns("p-queue-image").length === 2 && settled(id),
+      "the queued image turn",
+    );
+    const second = turns("p-queue-image")[1];
+    const flag = second.args.indexOf("--image");
+    assert.ok(flag >= 0);
+    assert.equal(
+      second.args[flag + 1],
+      path.join(home, ".ade", "attachments", image.json.id, "file"),
+    );
+    assert.match(promptOf(second), /Review these frames/);
+  },
+);
+
+test(
+  "recording feedback gives the agent its video path and native timeline image",
+  { skip },
+  async () => {
+    const id = await start("p-recording-feedback", "initial task");
+    await waitFor(() => settled(id), "initial turn to finish");
+    const upload = await call("/api/attachments/recording/start", {});
+    assert.equal(upload.status, 201);
+    const videoBytes = Buffer.from("recorded-webm-bytes");
+    const chunks = async function* () {
+      yield videoBytes;
+    };
+    const chunk = await callApi(handle, {
+      url: `http://127.0.0.1:3000/api/attachments/recording/${upload.json.id}/chunk?sequence=0`,
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: chunks(),
+    });
+    assert.equal(chunk.status, 200);
+    const video = await call(`/api/attachments/recording/${upload.json.id}/finish`, {});
+    assert.equal(video.status, 201);
+    const image = await call("/api/attachments", {
+      name: "timeline.png",
+      mime: "image/png",
+      contentBase64: Buffer.from("image bytes").toString("base64"),
+    });
+    assert.equal(image.status, 201);
+    const sent = await call(`/api/sessions/${id}/messages`, {
+      text: "Review the recording and timeline",
+      attachmentIds: [video.json.id, image.json.id],
+    });
+    assert.equal(sent.status, 200);
+    await waitFor(
+      () => turns("p-recording-feedback").length === 2 && settled(id),
+      "recording feedback turn",
+    );
+    const second = turns("p-recording-feedback")[1];
+    const videoPath = path.join(home, ".ade", "attachments", video.json.id, "file");
+    const imagePath = path.join(home, ".ade", "attachments", image.json.id, "file");
+    assert.deepEqual(readFileSync(videoPath), videoBytes);
+    assert.match(promptOf(second), /Review the recording and timeline/);
+    assert.ok(promptOf(second).includes(videoPath));
+    assert.ok(promptOf(second).includes(imagePath));
+    assert.equal(second.args[second.args.indexOf("--image") + 1], imagePath);
+    assert.ok(!second.args.includes(videoPath));
+    const message = session(id).messages.find(
+      (entry) => entry.text === "Review the recording and timeline",
+    );
+    assert.deepEqual(
+      message.attachments.map((entry) => entry.id),
+      [video.json.id, image.json.id],
+    );
+  },
+);
 
 test("send now stops the running turn and runs the message next", { skip }, async () => {
   const { open } = gate();

@@ -9,11 +9,19 @@ import { getDiff, projectInfo } from "./project-git.mjs";
 import { createSessionTurns, shrinkLogLine, TurnRefused } from "./session-turns.mjs";
 import { createComputerManager, SCREEN } from "./computer.mjs";
 import { createBrowserHub } from "./browser-page.mjs";
+import { createBrowserSessionStore } from "./browser-session-store.mjs";
+import { browserScope, browserScopeParts } from "./browser-scope.mjs";
+import {
+  browserProfiles,
+  selectedBrowserProfile,
+  browserProfileStorageKey,
+} from "./browser-profiles.mjs";
 import { createBrowserInstaller } from "./browser-install.mjs";
 import { createBrowserContexts, INCOGNITO_PROFILE_ID } from "./browser-contexts.mjs";
 import { diagnoseLaunchFailure } from "./browser-host.mjs";
 import { TOOLS as COMPUTER_TOOLS } from "./computer-tool-schemas.mjs";
 import { createBrowserStreamServer } from "./browser-stream-server.mjs";
+import { createBrowserDevtools, DEVTOOLS_SOCKET_PATH } from "./browser-devtools.mjs";
 import { STREAM_PATH } from "../shared/browser-contract.mjs";
 import { createControlRegistry } from "./browser-control.mjs";
 import { saveWorkspace } from "./workspace-persistence.mjs";
@@ -71,13 +79,32 @@ const browserContexts = createBrowserContexts({
 // One control lock per project, shared by the browser stream, computer_* and browser_* tools.
 // The hub opens browser sessions lazily on first use.
 const controls = createControlRegistry();
+const browserSessionStore = createBrowserSessionStore(path.join(DATA_DIR, "browser", "sessions"));
 // Each project browses in its own persistent profile, or a throwaway context in incognito mode.
 const browserHub = createBrowserHub({
-  contextFor(projectId) {
+  sessionStore: browserSessionStore,
+  acquireContext(key, requestedProfile) {
+    const { projectId } = browserScopeParts(key);
     const project = state.projects.find((x) => x.id === projectId);
-    return project?.browserProfile === INCOGNITO_PROFILE_ID
-      ? browserContexts.contextFor(INCOGNITO_PROFILE_ID, projectId)
-      : browserContexts.contextFor(projectId);
+    const profile =
+      requestedProfile ?? (project ? selectedBrowserProfile(state, project, key) : "default");
+    if (project && !browserProfiles(project).some((item) => item.id === profile))
+      return Promise.reject(new Error("Browser profile not found."));
+    const context =
+      profile === INCOGNITO_PROFILE_ID
+        ? browserContexts.acquire(INCOGNITO_PROFILE_ID, projectId)
+        : browserContexts.acquire(browserProfileStorageKey(projectId, profile));
+    return context.then((lease) => ({ ...lease, profileId: profile }));
+  },
+  defaultProfile(key) {
+    const { projectId } = browserScopeParts(key);
+    const project = state.projects.find((item) => item.id === projectId);
+    return project ? selectedBrowserProfile(state, project, key) : "default";
+  },
+  validProfile(key, profileId) {
+    const { projectId } = browserScopeParts(key);
+    const project = state.projects.find((item) => item.id === projectId);
+    return !!project && browserProfiles(project).some((item) => item.id === profileId);
   },
 });
 const computers = createComputerManager({ installer: browserInstaller, hub: browserHub });
@@ -108,6 +135,10 @@ const turns = createSessionTurns({
 const browserStream = createBrowserStreamServer({
   hub: browserHub,
   controls,
+  originAllowed: (origin, req) => streamOriginAllowed(origin, req),
+});
+const browserDevtools = createBrowserDevtools({
+  hub: browserHub,
   originAllowed: (origin, req) => streamOriginAllowed(origin, req),
 });
 let refreshingBootstrap = false;
@@ -303,7 +334,15 @@ function syncClientRefreshTimer(count) {
     clientRefreshTimer.unref?.();
     computerWatchTimer = setInterval(() => {
       for (const project of state.projects) {
-        const fingerprint = JSON.stringify(computerView(project));
+        const fingerprint = JSON.stringify({
+          project: computerView(project),
+          sessions: state.sessions
+            .filter((session) => session.projectId === project.id)
+            .map((session) => [
+              session.id,
+              computerView(project, browserScope(project.id, session.id)),
+            ]),
+        });
         if (computerFingerprints.get(project.id) !== fingerprint) {
           computerFingerprints.set(project.id, fingerprint);
           eventHub.emit(`computer:${project.id}`);
@@ -372,8 +411,13 @@ export function computerContext(project, sessionId) {
   };
 }
 /** The project's agent computer status, with the browser profile it uses. */
-function computerView(project) {
-  return { ...computers.status(project.id), profile: project.browserProfile ?? "default" };
+function computerView(project, scope = project.id) {
+  return {
+    ...computers.status(scope),
+    projectId: project.id,
+    profile: selectedBrowserProfile(state, project, scope),
+    profiles: browserProfiles(project),
+  };
 }
 /** Manifest section telling the agent it has (or lacks) its own computer. */
 function agentComputerFor(project) {
@@ -558,9 +602,17 @@ export async function handle(req, res) {
     parts[0] === "agents" &&
     parts.length === 3 &&
     ["install", "update", "harness"].includes(parts[2]);
-  if ((["terminal", "editor"].includes(parts[0]) || harnessRoute) && !isLoopbackPeer(req))
+  const browserImportRoute =
+    parts[0] === "projects" &&
+    parts[2] === "computer" &&
+    ["import", "import-sources"].includes(parts[3]);
+  if (
+    (["terminal", "editor"].includes(parts[0]) || harnessRoute || browserImportRoute) &&
+    !isLoopbackPeer(req)
+  )
     return json(res, 403, { error: "Host tools are available only on this machine." });
   try {
+    if (parts[0] === "devtools" && (await browserDevtools.serve(req, res, parts))) return;
     if (isAuthExchange) {
       const data = await body(req);
       const token = String(data.token ?? "").trim();
@@ -595,8 +647,10 @@ export async function handle(req, res) {
       browserContexts,
       controls,
       browserHub,
+      browserSessionStore,
       computers,
       browserStream,
+      browserDevtools,
       computerView,
       devServers,
       devApprovals,
@@ -665,6 +719,7 @@ export async function stop() {
   if (computerWatchTimer) clearInterval(computerWatchTimer);
   computerWatchTimer = null;
   eventHub.close();
+  await browserDevtools.close();
   await browserStream.close();
   await browserHub.closeAll();
   await browserContexts.close();
@@ -677,13 +732,15 @@ export async function stop() {
  */
 export function handleUpgrade(req, socket, head) {
   const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
-  if (pathname !== STREAM_PATH) return false;
+  if (pathname !== STREAM_PATH && pathname !== DEVTOOLS_SOCKET_PATH) return false;
   if (!localRequest(req)) {
     socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     socket.destroy();
     return true;
   }
-  return browserStream.handleUpgrade(req, socket, head);
+  return pathname === DEVTOOLS_SOCKET_PATH
+    ? browserDevtools.handleUpgrade(req, socket, head)
+    : browserStream.handleUpgrade(req, socket, head);
 }
 /** Mounts the API and the stream on a Vite dev or preview server. */
 function mount(server) {

@@ -6,6 +6,11 @@ import {
   answerDevCommand,
   computerControl,
   computerProfile,
+  createComputerProfile,
+  renameComputerProfile,
+  deleteComputerProfile,
+  browserImportSources,
+  importBrowserCookies,
   computerStatus,
   forgetDevCommand,
   useAde,
@@ -13,7 +18,9 @@ import {
   useSessionLogs,
 } from "@/lib/ade/store";
 import { copyText } from "@/lib/ade/clipboard";
-import { warnUser } from "@/components/ade/NoticeDialog";
+import { getBrowserLocalServers } from "@/lib/ade/browser/api";
+import { BROWSER_OPEN_EVENT } from "@/lib/ade/browser/openInPreview.mjs";
+import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
 import { summarizeChecks } from "./ChecksList";
 import { DevCommandRequestCard } from "./DevCommandRequestCard";
 import { BrowserChromeRow } from "./browser/BrowserChromeRow";
@@ -22,20 +29,12 @@ import { useBrowserPreviewState } from "./browser/browserPreviewContext";
 import { useBrowserPlacement } from "./browser/browserPresentationContext";
 import type { RightDock, ComputerTone } from "./rightPaneTypes";
 
-const PROFILE_OPTIONS: Array<{ value: AgentComputer["profile"]; label: string; title: string }> = [
-  {
-    value: "default",
-    label: "keep logins",
-    title: "Keep this project's cookies and storage between runs",
-  },
-  { value: "incognito", label: "incognito", title: "Start clean every time the browser starts" },
-];
-
 const megabytes = (bytes: number) => Math.round(bytes / 1_000_000);
 
 const DETAIL_ROW = "flex h-9 items-center justify-between gap-3 px-4";
 const DETAIL_LABEL = "min-w-0 truncate text-[13px] text-[var(--text-secondary)]";
 const DETAIL_VALUE = "shrink-0 font-mono text-xs tabular-nums text-ink";
+type RecentBrowserUrl = { url: string; title?: string; favicon?: string; visitedAt?: number };
 
 /**
  * The project's agent browser: headless Chrome on this machine that the coding agent drives
@@ -57,10 +56,10 @@ export function AgentComputerPane({
   onToneChange?: (tone: ComputerTone) => void;
 }) {
   const queryClient = useQueryClient();
-  const { refresh: refreshWorkspace } = useAde();
+  const { refresh: refreshWorkspace, state } = useAde();
   const computerQuery = useQuery({
-    queryKey: ["computer", project.id],
-    queryFn: () => computerStatus(project.id),
+    queryKey: ["computer", project.id, session?.id],
+    queryFn: () => computerStatus(project.id, session?.id),
     staleTime: Infinity,
   });
   const computer = computerQuery.data ?? null;
@@ -69,12 +68,156 @@ export function AgentComputerPane({
   const [error, setError] = useState("");
   const browser = useBrowserPreviewState();
   const placement = useBrowserPlacement();
+  // A page the agent opens floats over the conversation when this docked tab is not on screen.
+  const setPlacementVisible = placement.setVisible;
+  useEffect(() => {
+    setPlacementVisible(active);
+    return () => setPlacementVisible(true);
+  }, [active, setPlacementVisible]);
   // Control is shared with the browser preview and the agent's tools, so it lives in the provider.
   const control = browser.control?.controller === "you";
+  const devServer = state.processes.find(
+    (process) =>
+      process.projectId === project.id && process.status === "running" && process.port > 0,
+  );
+  // Servers already running on this machine, as T3's preview empty state lists.
+  const localServersQuery = useQuery({
+    queryKey: ["browser-local-servers", project.id, session?.id],
+    queryFn: () => getBrowserLocalServers(project.id, session?.id),
+    enabled: active && !!browser.status?.available,
+    refetchInterval: active ? 3000 : false,
+    staleTime: 2000,
+  });
+  const localServers = (localServersQuery.data ?? []).filter(
+    (server) => server.port !== devServer?.port,
+  );
+  const [recentUrls, setRecentUrls] = useState<RecentBrowserUrl[]>([]);
+  const activeTab = browser.tabs?.tabs.find((tab) => tab.id === browser.tabs?.activeId);
+  const activeTabProfile = activeTab ? (activeTab.profileId ?? computer?.profile) : undefined;
+  const historyKey =
+    session?.id && activeTabProfile && activeTabProfile !== "incognito"
+      ? `ade.browser.history.${project.id}.${session.id}${activeTabProfile === "default" ? "" : `.${activeTabProfile}`}`
+      : null;
+  const previousHistoryKey = useRef<string | null>(null);
+  useEffect(() => {
+    const sameConversation = previousHistoryKey.current === historyKey;
+    previousHistoryKey.current = historyKey;
+    if (!historyKey) {
+      setRecentUrls([]);
+      return;
+    }
+    try {
+      const stored: unknown = JSON.parse(window.localStorage.getItem(historyKey) ?? "[]");
+      const previous: RecentBrowserUrl[] = Array.isArray(stored)
+        ? stored
+            .flatMap((entry: unknown): RecentBrowserUrl[] => {
+              const value = typeof entry === "string" ? { url: entry } : entry;
+              if (
+                !value ||
+                typeof value !== "object" ||
+                !("url" in value) ||
+                typeof value.url !== "string" ||
+                !/^https?:\/\//i.test(value.url)
+              )
+                return [];
+              const record = value as RecentBrowserUrl;
+              return [
+                {
+                  url: record.url,
+                  ...(typeof record.title === "string"
+                    ? { title: record.title.slice(0, 512) }
+                    : {}),
+                  ...(typeof record.favicon === "string" &&
+                  record.favicon.length <= 20_000 &&
+                  /^data:image\/png;base64,[a-z0-9+/]+=*$/i.test(record.favicon)
+                    ? { favicon: record.favicon }
+                    : {}),
+                  ...(Number.isFinite(record.visitedAt) ? { visitedAt: record.visitedAt } : {}),
+                },
+              ];
+            })
+            .slice(0, 10)
+        : [];
+      const url = browser.nav?.url;
+      const previousVisit = previous.find((entry) => entry.url === url);
+      const next =
+        sameConversation && url && activeTab?.url === url && /^https?:\/\//i.test(url)
+          ? [
+              {
+                url,
+                ...(browser.nav?.title ? { title: browser.nav.title } : {}),
+                ...(activeTab.favicon
+                  ? { favicon: activeTab.favicon }
+                  : previousVisit?.favicon
+                    ? { favicon: previousVisit.favicon }
+                    : {}),
+                visitedAt:
+                  previous[0]?.url === url ? (previousVisit?.visitedAt ?? Date.now()) : Date.now(),
+              },
+              ...previous.filter((entry) => entry.url !== url),
+            ].slice(0, 10)
+          : previous;
+      window.localStorage.setItem(historyKey, JSON.stringify(next));
+      setRecentUrls(next);
+    } catch {
+      setRecentUrls([]);
+    }
+  }, [historyKey, browser.nav?.url, browser.nav?.title, activeTab?.url, activeTab?.favicon]);
+  const openPreviewUrl = async (url: string) => {
+    if (control || (await browser.changeControl("take"))) browser.send({ type: "navigate", url });
+  };
+  // A chat or terminal link: navigate once the page stream can carry the message.
+  const [requestedUrl, setRequestedUrl] = useState<string | null>(null);
+  const openingUrl = useRef<string | null>(null);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const url = (event as CustomEvent<{ url?: string }>).detail?.url;
+      if (url) setRequestedUrl(url);
+    };
+    window.addEventListener(BROWSER_OPEN_EVENT, open);
+    return () => window.removeEventListener(BROWSER_OPEN_EVENT, open);
+  }, []);
+  const streamOpen = browser.streamStatus === "open";
+  const browserAvailable = !!browser.status?.available;
+  useEffect(() => {
+    const url = requestedUrl;
+    if (!url || !streamOpen || !browserAvailable || openingUrl.current === url) return;
+    openingUrl.current = url;
+    void (async () => {
+      if (!control && !(await browser.changeControl("take"))) {
+        openingUrl.current = null;
+        return;
+      }
+      if (browser.send({ type: "navigate", url }))
+        setRequestedUrl((current) => (current === url ? null : current));
+      openingUrl.current = null;
+    })();
+  }, [requestedUrl, streamOpen, browserAvailable, control, browser]);
+  const removeRecentUrl = (url: string) => {
+    const next = recentUrls.filter((entry) => entry.url !== url);
+    setRecentUrls(next);
+    if (historyKey) {
+      try {
+        window.localStorage.setItem(historyKey, JSON.stringify(next));
+      } catch {
+        /* Storage is optional. */
+      }
+    }
+  };
   const [busy, setBusy] = useState(false);
+  const [profileEditor, setProfileEditor] = useState<"create" | "rename" | "import" | null>(null);
+  const [profileName, setProfileName] = useState("");
+  const [importSources, setImportSources] = useState<{ id: string; name: string }[]>([]);
+  const [importSource, setImportSource] = useState("");
+  const [importMessage, setImportMessage] = useState("");
   const [copied, setCopied] = useState(false);
   const [forgetting, setForgetting] = useState(false);
   const autoStarted = useRef(new Set<string>());
+  const stoppedByUser = useRef(new Set<string>());
+  const browserKey = JSON.stringify([project.id, session?.id ?? null]);
+  useEffect(() => {
+    autoStarted.current.delete(browserKey);
+  }, [browserKey]);
   const browserFrameRef = useRef<HTMLDivElement>(null);
   const onToneChangeRef = useRef(onToneChange);
 
@@ -101,39 +244,51 @@ export function AgentComputerPane({
   const refresh = useCallback(async () => {
     try {
       await queryClient.fetchQuery({
-        queryKey: ["computer", project.id],
-        queryFn: () => computerStatus(project.id),
+        queryKey: ["computer", project.id, session?.id],
+        queryFn: () => computerStatus(project.id, session?.id),
         staleTime: 0,
       });
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [project.id, queryClient]);
+  }, [project.id, session?.id, queryClient]);
 
   const apply = useCallback(
     async (next: Promise<AgentComputer>) => {
       setBusy(true);
       try {
-        queryClient.setQueryData(["computer", project.id], await next);
+        queryClient.setQueryData(["computer", project.id, session?.id], await next);
         setError("");
+        return true;
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+        return false;
       } finally {
         setBusy(false);
       }
     },
-    [project.id, queryClient],
+    [project.id, session?.id, queryClient],
   );
-  const run = (op: "start" | "stop" | "clear") => apply(computerControl(project.id, op));
+  const run = (op: "start" | "stop" | "clear") => {
+    if (op === "stop") stoppedByUser.current.add(browserKey);
+    else if (op === "start") stoppedByUser.current.delete(browserKey);
+    return apply(computerControl(project.id, op, session?.id));
+  };
 
   // Launching takes about a second, so opening the tab starts the browser. Only once per project:
   // after Turn off it stays off until started again.
   useEffect(() => {
-    if (!active || status !== "stopped" || autoStarted.current.has(project.id)) return;
-    autoStarted.current.add(project.id);
-    void apply(computerControl(project.id, "start"));
-  }, [active, status, project.id, apply]);
+    if (
+      !active ||
+      status !== "stopped" ||
+      autoStarted.current.has(browserKey) ||
+      stoppedByUser.current.has(browserKey)
+    )
+      return;
+    autoStarted.current.add(browserKey);
+    void apply(computerControl(project.id, "start", session?.id));
+  }, [active, status, project.id, session?.id, browserKey, apply]);
 
   const forgetCommand = async () => {
     setForgetting(true);
@@ -335,8 +490,98 @@ export function AgentComputerPane({
       </div>
     ) : (
       <div ref={browserFrameRef} className="flex flex-col">
-        <BrowserChromeRow frameRef={browserFrameRef} />
-        <BrowserSurface mode="dock" className="aspect-[16/10] w-full" />
+        <BrowserChromeRow
+          frameRef={browserFrameRef}
+          sessionId={session?.id}
+          profiles={computer?.profiles ?? []}
+          running={session?.status === "working" || session?.status === "verifying"}
+        />
+        <BrowserSurface
+          mode="dock"
+          className="aspect-[16/10] w-full"
+          emptyState={
+            <div className="pointer-events-auto grid max-h-full w-full max-w-sm justify-items-center gap-3 overflow-y-auto py-4">
+              <Globe className="size-5 text-dim" strokeWidth={1.5} aria-hidden />
+              <p className="m-0 text-sm font-medium text-ink">No preview yet</p>
+              {devServer ? (
+                <button
+                  type="button"
+                  className="btn-quiet px-3 py-1.5 text-xs"
+                  onClick={() => void openPreviewUrl(`http://localhost:${devServer.port}`)}
+                >
+                  Open local server · localhost:{devServer.port}
+                </button>
+              ) : (
+                <p className="m-0 text-xs text-dim">
+                  Enter a URL above, or start the project’s dev server to open it here.
+                </p>
+              )}
+              {localServers.length ? (
+                <div className="grid w-full gap-1 text-left">
+                  <p className="m-0 text-xs font-medium text-dim">Local servers</p>
+                  {localServers.slice(0, 6).map((server) => (
+                    <button
+                      key={server.port}
+                      type="button"
+                      onClick={() => void openPreviewUrl(server.url)}
+                      title={server.url}
+                      className="flex min-w-0 items-center gap-2 rounded-md border border-line px-2 py-1.5 text-left text-xs text-ink hover:bg-surface-muted"
+                    >
+                      <Globe className="size-4 shrink-0 text-dim" aria-hidden />
+                      <span className="truncate">{server.title || `localhost:${server.port}`}</span>
+                      <span className="ml-auto shrink-0 font-mono text-[10px] text-dim">
+                        {server.processName ? `${server.processName} · ` : ""}
+                        {server.port}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {recentUrls.length ? (
+                <div className="grid w-full gap-1 text-left">
+                  <p className="m-0 text-xs font-medium text-dim">Recently used</p>
+                  {recentUrls.slice(0, 8).map(({ url, title, favicon, visitedAt }) => (
+                    <div
+                      key={url}
+                      className="flex min-w-0 items-center rounded-md border border-line"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => void openPreviewUrl(url)}
+                        title={url}
+                        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs text-ink hover:bg-surface-muted"
+                      >
+                        {favicon ? (
+                          <img src={favicon} alt="" className="size-4 shrink-0 object-contain" />
+                        ) : (
+                          <Globe className="size-4 shrink-0 text-dim" aria-hidden />
+                        )}
+                        <span className="grid min-w-0 gap-0.5">
+                          <span className="truncate">{title || url}</span>
+                          {title || visitedAt ? (
+                            <span className="truncate text-[10px] text-dim">
+                              {title ? url : ""}
+                              {title && visitedAt ? " · " : ""}
+                              {visitedAt ? new Date(visitedAt).toLocaleDateString() : ""}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeRecentUrl(url)}
+                        aria-label={`Remove ${url} from history`}
+                        className="px-2 py-1.5 text-xs text-dim hover:text-ink"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          }
+        />
       </div>
     );
 
@@ -402,41 +647,252 @@ export function AgentComputerPane({
             <span className="ml-auto text-xs text-dim">{session ? "this task" : "project"}</span>
           </div>
           {computer && status !== "unavailable" && (
-            <div className={DETAIL_ROW}>
-              <span className={DETAIL_LABEL}>Browser profile</span>
-              <span
-                className="flex shrink-0 items-center gap-1 text-xs text-dim"
-                role="group"
-                aria-label="Browser profile"
-              >
-                {PROFILE_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-pressed={computer.profile === option.value}
-                    title={option.title}
-                    disabled={busy}
-                    onClick={() => void apply(computerProfile(project.id, option.value))}
-                    className={`h-6 rounded-xs px-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-amber ${computer.profile === option.value ? "bg-surface-muted text-ink ring-1 ring-line ring-inset" : "hover:text-ink"}`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-                {computer.profile === "default" && (
+            <div className="flex flex-col gap-2 px-4 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className={DETAIL_LABEL}>Default browser profile</span>
+                <select
+                  aria-label="Browser profile"
+                  disabled={busy}
+                  value={computer.profile}
+                  onChange={(event) =>
+                    void apply(computerProfile(project.id, event.target.value, session?.id))
+                  }
+                  className="max-w-[60%] rounded border border-line bg-panel px-2 py-1 text-xs text-ink disabled:opacity-50"
+                >
+                  {(
+                    computer.profiles ?? [
+                      { id: "default", name: "Default" },
+                      { id: "incognito", name: "Incognito" },
+                    ]
+                  ).map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2 text-xs">
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-quiet px-2 py-1"
+                  onClick={() => {
+                    setProfileName("");
+                    setProfileEditor("create");
+                  }}
+                >
+                  New profile
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="btn-quiet px-2 py-1"
+                  onClick={async () => {
+                    setProfileEditor("import");
+                    setImportMessage("");
+                    setImportSources([]);
+                    setImportSource("");
+                    setBusy(true);
+                    try {
+                      const result = await browserImportSources(project.id, session?.id);
+                      setImportSources(result.sources);
+                      setImportSource(result.sources[0]?.id ?? "");
+                    } catch (cause) {
+                      setImportMessage(
+                        cause instanceof Error ? cause.message : "Could not find browser profiles.",
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Import cookies
+                </button>
+                {computer.profile !== "default" && computer.profile !== "incognito" ? (
                   <>
-                    <span aria-hidden>·</span>
                     <button
                       type="button"
-                      onClick={() => void run("clear")}
                       disabled={busy}
-                      title="Sign out everywhere: clear this project's cookies, storage and cache"
-                      className="h-6 rounded-xs px-2 transition-colors hover:text-danger disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-amber"
+                      className="btn-quiet px-2 py-1"
+                      onClick={() => {
+                        setProfileName(
+                          computer.profiles.find((profile) => profile.id === computer.profile)
+                            ?.name ?? "",
+                        );
+                        setProfileEditor("rename");
+                      }}
                     >
-                      clear
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="btn-quiet px-2 py-1 text-danger"
+                      onClick={async () => {
+                        const name =
+                          computer.profiles.find((profile) => profile.id === computer.profile)
+                            ?.name ?? "this profile";
+                        if (
+                          await askConfirm({
+                            title: `Delete ${name}?`,
+                            description:
+                              "This removes the profile's cookies, site data, and cache. Conversations using it will switch to the default profile.",
+                            confirmLabel: "Delete profile",
+                          })
+                        )
+                          await apply(
+                            deleteComputerProfile(project.id, computer.profile, session?.id),
+                          );
+                      }}
+                    >
+                      Delete
                     </button>
                   </>
-                )}
-              </span>
+                ) : null}
+                {computer.profile !== "incognito" ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void run("clear")}
+                    className="btn-quiet px-2 py-1"
+                    title="Clear the default profile's cookies, storage and cache"
+                  >
+                    Clear default data
+                  </button>
+                ) : null}
+              </div>
+              <details className="rounded border border-line px-2 py-1.5 text-xs text-dim">
+                <summary className="cursor-pointer text-ink">Use system passkeys</summary>
+                <p className="mt-2 leading-relaxed">
+                  For native passkey prompts, restart ADE with <code>ADE_BROWSER_HEADED=1</code> and
+                  <code> ADE_BROWSER_EXECUTABLE</code> set to the absolute path of an installed full
+                  Chrome or Chromium browser. A desktop must be available on the computer running
+                  ADE.
+                </p>
+                <p className="mt-2 leading-relaxed">
+                  The browser opens a separate window for system prompts. Its profiles and sign-ins
+                  are separate from the default preview; import cookies if needed. Unset both
+                  settings and restart ADE to return to the default preview. Clearing a profile
+                  removes its stored data in both modes.
+                </p>
+              </details>
+              {profileEditor === "import" ? (
+                <form
+                  className="flex flex-col gap-2"
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    if (!importSource) return;
+                    setBusy(true);
+                    setImportMessage("");
+                    try {
+                      const result = await importBrowserCookies(
+                        project.id,
+                        importSource,
+                        session?.id,
+                        browser.tabs?.activeId,
+                        activeTabProfile,
+                      );
+                      setImportMessage(
+                        `Imported ${result.imported} cookies; skipped ${result.skipped}.${result.keyringMissing ? " Some cookies require an unlocked system key store; on Linux, install Python 3 and libsecret, or secret-tool." : ""} Reload the preview to use them.`,
+                      );
+                    } catch (cause) {
+                      setImportMessage(
+                        cause instanceof Error
+                          ? cause.message
+                          : "Could not import browser cookies.",
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  <p className="text-xs text-dim">
+                    Copy browser cookies into the current tab's profile, including signed-in
+                    sessions. Your system may ask to unlock its key store.
+                  </p>
+                  <select
+                    aria-label="Browser profile to import from"
+                    className="rounded border border-line bg-panel px-2 py-1 text-xs"
+                    disabled={busy || !importSources.length}
+                    value={importSource}
+                    onChange={(event) => setImportSource(event.target.value)}
+                  >
+                    {importSources.length ? (
+                      importSources.map((source) => (
+                        <option key={source.id} value={source.id}>
+                          {source.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">
+                        {busy ? "Looking for profiles…" : "No supported browser profiles found"}
+                      </option>
+                    )}
+                  </select>
+                  {importMessage ? (
+                    <p role="status" className="text-xs text-dim">
+                      {importMessage}
+                    </p>
+                  ) : null}
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="submit"
+                      disabled={busy || !importSource}
+                      className="btn-amber px-2 py-1 text-xs disabled:opacity-50"
+                    >
+                      Import cookies
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="btn-quiet px-2 py-1 text-xs"
+                      onClick={() => setProfileEditor(null)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </form>
+              ) : profileEditor ? (
+                <form
+                  className="flex gap-2"
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    const name = profileName.trim();
+                    if (!name) return;
+                    const operation =
+                      profileEditor === "create"
+                        ? createComputerProfile(project.id, name, session?.id)
+                        : renameComputerProfile(project.id, computer.profile, name, session?.id);
+                    if (await apply(operation)) {
+                      setProfileEditor(null);
+                      setProfileName("");
+                    }
+                  }}
+                >
+                  <input
+                    autoFocus
+                    aria-label="Profile name"
+                    maxLength={48}
+                    value={profileName}
+                    onChange={(event) => setProfileName(event.target.value)}
+                    className="min-w-0 flex-1 rounded border border-line bg-paper px-2 py-1 text-xs"
+                  />
+                  <button
+                    type="submit"
+                    disabled={busy || !profileName.trim()}
+                    className="btn-amber px-2 py-1 text-xs disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-quiet px-2 py-1 text-xs"
+                    onClick={() => setProfileEditor(null)}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : null}
             </div>
           )}
           {devCommand && (

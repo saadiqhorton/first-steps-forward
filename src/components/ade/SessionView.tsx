@@ -21,12 +21,14 @@ import {
   needsYou,
   timeAgo,
   uploadAttachment,
+  uploadBrowserRecording,
   useAde,
   useSession,
   useSessionLogs,
   useNow,
   useAdeState,
 } from "@/lib/ade/store";
+import { isBrowserRecording } from "@/lib/ade/browser/composerFeedback";
 
 function waitingPreview(prompt: string) {
   const visible = prompt.split("\n\nThe user attached these files")[0]?.trim() ?? "";
@@ -201,7 +203,13 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     try {
       let attachmentIds: string[] = [];
       if (files.length) {
-        attachmentIds = (await Promise.all(files.map(uploadAttachment))).map((a) => a.id);
+        attachmentIds = (
+          await Promise.all(
+            files.map((file) =>
+              isBrowserRecording(file) ? uploadBrowserRecording(file) : uploadAttachment(file),
+            ),
+          )
+        ).map((a) => a.id);
       }
       await steer(
         session.id,
@@ -399,7 +407,11 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           <AnimatePresence initial={false}>
             {threadMessages.map((m) => (
               <MotionItem key={m.id} layout={false}>
-                <SessionMessage message={m} agentName={agent?.short} />
+                <SessionMessage
+                  message={m}
+                  agentName={agent?.short}
+                  projectId={project.id}
+                />
               </MotionItem>
             ))}
           </AnimatePresence>
@@ -544,6 +556,9 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             </div>
           )}
           <Composer
+            key={`${project.id}:${session.id}`}
+            draftStorageKey={JSON.stringify([project.id, session.id])}
+            sessionId={session.id}
             mode="follow-up"
             selection={activeSelection}
             onSelectionChange={onSelectionChange}

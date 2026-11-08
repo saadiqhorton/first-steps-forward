@@ -24,11 +24,25 @@ export interface BrowserFileChooser {
   readonly accept: string;
 }
 
+export interface BrowserDownload {
+  readonly id: string;
+  readonly tabId: string;
+  readonly fileName: string;
+  readonly sizeBytes: number;
+  readonly completedAt: number;
+}
+
 export type BrowserStreamStatus = "connecting" | "open" | "reconnecting" | "closed";
 
 /** Messages the server sends as JSON text frames. */
 export type ServerMessage =
   | { readonly type: "viewport"; readonly width: number; readonly height: number }
+  | { readonly type: "downloads"; readonly downloads: readonly BrowserDownload[] }
+  | {
+      readonly type: "tabs";
+      readonly activeId: string | null;
+      readonly tabs: readonly BrowserTab[];
+    }
   | {
       readonly type: "control";
       readonly canOperate: true;
@@ -40,10 +54,14 @@ export type ServerMessage =
   | {
       readonly type: "pointer";
       readonly phase: "move" | "click";
+      readonly tabId?: string | null | undefined;
       readonly x: number;
       readonly y: number;
       readonly sequence: number;
     }
+  | { readonly type: "recording-key"; readonly label: string | null }
+  /** Whether the page element under a touch point accepts text, so mobile keyboards only open there. */
+  | { readonly type: "probe"; readonly x: number; readonly y: number; readonly editable: boolean }
   | {
       readonly type: "nav";
       readonly url: string;
@@ -51,6 +69,10 @@ export type ServerMessage =
       readonly loading: boolean;
       readonly canGoBack: boolean;
       readonly canGoForward: boolean;
+      readonly error: BrowserNavigationError | null;
+      readonly fileNotShown: BrowserFileNotShown | null;
+      /** This tab is showing the first page opened in it. */
+      readonly opened: boolean;
     }
   /** Text the page copied when this viewer pressed copy or cut. */
   | { readonly type: "clipboard"; readonly text: string }
@@ -88,9 +110,15 @@ export type ClientMessage =
       readonly modifiers: number;
     }
   | { readonly type: "text"; readonly text: string }
+  | { readonly type: "probe"; readonly x: number; readonly y: number }
+  | { readonly type: "resize"; readonly width: number; readonly height: number }
   | { readonly type: "navigate"; readonly url: string }
   | { readonly type: "history"; readonly delta: -1 | 1 }
   | { readonly type: "reload"; readonly ignoreCache?: boolean }
+  | { readonly type: "stop-loading" }
+  | { readonly type: "tab-audio"; readonly id: string; readonly muted: boolean }
+  | { readonly type: "tab"; readonly action: "new"; readonly profileId?: string }
+  | { readonly type: "tab"; readonly action: "select" | "close"; readonly id: string }
   | { readonly type: "dialog"; readonly accept: boolean; readonly promptText?: string };
 
 export interface BrowserStreamViewport {
@@ -108,6 +136,7 @@ export interface BrowserStreamControl {
 
 export interface BrowserStreamPointer {
   readonly phase: "move" | "click";
+  readonly tabId?: string | null | undefined;
   readonly x: number;
   readonly y: number;
   readonly sequence: number;
@@ -119,6 +148,35 @@ export interface BrowserStreamNav {
   readonly loading: boolean;
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
+  readonly error: BrowserNavigationError | null;
+  readonly fileNotShown: BrowserFileNotShown | null;
+  /** The first page opened in this tab; the preview surfaces itself when it is not on screen. */
+  readonly opened: boolean;
+}
+
+export interface BrowserFileNotShown {
+  readonly url: string;
+  readonly fileName: string;
+  readonly downloadId: string | null;
+  readonly status: "saving" | "ready" | "failed";
+}
+
+export interface BrowserNavigationError {
+  readonly url: string;
+  readonly description: string;
+}
+
+export interface BrowserTab {
+  readonly id: string;
+  readonly url: string;
+  readonly title: string;
+  readonly profileId?: string;
+  readonly favicon?: string;
+  readonly audio?: { readonly muted: boolean; readonly audible: boolean };
+}
+export interface BrowserTabs {
+  readonly activeId: string | null;
+  readonly tabs: readonly BrowserTab[];
 }
 
 export interface BrowserStreamOptions {
@@ -128,12 +186,20 @@ export interface BrowserStreamOptions {
   readonly viewer: string;
   readonly maxWidth: number;
   readonly maxHeight: number;
+  /** Keep this viewer on a specific tab, used for background recording. */
+  readonly tabId?: string;
+  readonly recordingFrameRate?: 30 | 60;
+  readonly showRecordingKeys?: boolean;
   /** The callback owns the bitmap and must call `close()` once it no longer needs it. */
   readonly onFrame: (bitmap: ImageBitmap) => void;
   readonly onViewport: (viewport: BrowserStreamViewport) => void;
   readonly onControl: (control: BrowserStreamControl) => void;
   readonly onPointer: (pointer: BrowserStreamPointer) => void;
+  readonly onRecordingKey?: (label: string | null) => void;
+  readonly onProbe?: (probe: { x: number; y: number; editable: boolean }) => void;
   readonly onNav: (nav: BrowserStreamNav) => void;
+  readonly onTabs: (tabs: BrowserTabs) => void;
+  readonly onDownloads?: (downloads: readonly BrowserDownload[]) => void;
   readonly onClipboard: (text: string) => void;
   readonly onError: (message: string) => void;
   readonly onStatus: (status: BrowserStreamStatus) => void;
@@ -187,9 +253,61 @@ export function parseServerMessage(text: string): ServerMessage | null {
   if (typeof value !== "object" || value === null) return null;
   const message = value as Record<string, unknown>;
   const { type } = message;
+  if (type === "tabs") {
+    const { activeId, tabs } = message;
+    if (!(activeId === null || isString(activeId)) || !Array.isArray(tabs)) return null;
+    if (
+      !tabs.every(
+        (tab: unknown) =>
+          typeof tab === "object" &&
+          tab !== null &&
+          isString((tab as Record<string, unknown>)["id"]) &&
+          isString((tab as Record<string, unknown>)["url"]) &&
+          isString((tab as Record<string, unknown>)["title"]) &&
+          ((tab as Record<string, unknown>)["profileId"] === undefined ||
+            isString((tab as Record<string, unknown>)["profileId"])) &&
+          ((tab as Record<string, unknown>)["audio"] === undefined ||
+            (typeof (tab as Record<string, unknown>)["audio"] === "object" &&
+              (tab as Record<string, unknown>)["audio"] !== null &&
+              isBoolean(
+                ((tab as Record<string, unknown>)["audio"] as Record<string, unknown>)["muted"],
+              ) &&
+              isBoolean(
+                ((tab as Record<string, unknown>)["audio"] as Record<string, unknown>)["audible"],
+              ))) &&
+          ((tab as Record<string, unknown>)["favicon"] === undefined ||
+            (isString((tab as Record<string, unknown>)["favicon"]) &&
+              /^data:image\/png;base64,[a-z0-9+/]+=*$/i.test(
+                (tab as Record<string, string>)["favicon"]!,
+              ) &&
+              (tab as Record<string, string>)["favicon"]!.length <= 134_000)),
+      )
+    )
+      return null;
+    return { type, activeId, tabs: tabs as BrowserTab[] };
+  }
   if (type === "viewport") {
     const { width, height } = message;
     return isNumber(width) && isNumber(height) ? { type, width, height } : null;
+  }
+  if (type === "downloads") {
+    const { downloads } = message;
+    if (
+      !Array.isArray(downloads) ||
+      !downloads.every((item: unknown) => {
+        if (!item || typeof item !== "object") return false;
+        const value = item as Record<string, unknown>;
+        return (
+          isString(value["id"]) &&
+          isString(value["tabId"]) &&
+          isString(value["fileName"]) &&
+          isNumber(value["sizeBytes"]) &&
+          isNumber(value["completedAt"])
+        );
+      })
+    )
+      return null;
+    return { type, downloads: downloads as BrowserDownload[] };
   }
   if (type === "control") {
     const { canOperate, controller, generation, dialog, fileChooser } = message;
@@ -202,23 +320,54 @@ export function parseServerMessage(text: string): ServerMessage | null {
       : null;
   }
   if (type === "pointer") {
-    const { phase, x, y, sequence } = message;
+    const { phase, x, y, sequence, tabId } = message;
     return (phase === "move" || phase === "click") &&
+      (tabId === undefined || tabId === null || isString(tabId)) &&
       isNumber(x) &&
       isNumber(y) &&
       isNumber(sequence)
-      ? { type, phase, x, y, sequence }
+      ? { type, phase, x, y, sequence, tabId }
       : null;
   }
   if (type === "nav") {
-    const { url, title, loading, canGoBack, canGoForward } = message;
+    const { url, title, loading, canGoBack, canGoForward, error, fileNotShown, opened } = message;
+    const validError =
+      error == null ||
+      (typeof error === "object" &&
+        isString((error as Record<string, unknown>)["url"]) &&
+        isString((error as Record<string, unknown>)["description"]));
+    const validFile = fileNotShown == null ||
+      (typeof fileNotShown === "object" && isString((fileNotShown as Record<string, unknown>)["url"]) &&
+        isString((fileNotShown as Record<string, unknown>)["fileName"]) &&
+        ((fileNotShown as Record<string, unknown>)["downloadId"] === null || isString((fileNotShown as Record<string, unknown>)["downloadId"])) &&
+        ["saving", "ready", "failed"].includes(String((fileNotShown as Record<string, unknown>)["status"])));
     return isString(url) &&
       isString(title) &&
       isBoolean(loading) &&
       isBoolean(canGoBack) &&
-      isBoolean(canGoForward)
-      ? { type, url, title, loading, canGoBack, canGoForward }
+      isBoolean(canGoForward) &&
+      isBoolean(opened) &&
+      validError && validFile
+      ? {
+          type,
+          url,
+          title,
+          loading,
+          canGoBack,
+          canGoForward,
+          error: (error as BrowserNavigationError | null | undefined) ?? null,
+          fileNotShown: (fileNotShown as BrowserFileNotShown | null | undefined) ?? null,
+          opened,
+        }
       : null;
+  }
+  if (type === "recording-key") {
+    const { label } = message;
+    return label === null || (isString(label) && label.length <= 100) ? { type, label } : null;
+  }
+  if (type === "probe") {
+    const { x, y, editable } = message;
+    return isNumber(x) && isNumber(y) && isBoolean(editable) ? { type, x, y, editable } : null;
   }
   if (type === "clipboard") {
     const { text } = message;
@@ -257,6 +406,10 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
   const target = new URL(options.url, window.location.href);
   target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
   target.searchParams.set("viewer", options.viewer);
+  if (options.tabId) target.searchParams.set("tab", options.tabId);
+  if (options.recordingFrameRate)
+    target.searchParams.set("recordingFrameRate", String(options.recordingFrameRate));
+  if (options.showRecordingKeys) target.searchParams.set("recordingKeys", "1");
   target.searchParams.set("maxWidth", String(Math.max(1, Math.round(options.maxWidth))));
   target.searchParams.set("maxHeight", String(Math.max(1, Math.round(options.maxHeight))));
 
@@ -297,6 +450,12 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
         failures = 0;
         options.onViewport({ width: message.width, height: message.height });
         return;
+      case "tabs":
+        options.onTabs({ activeId: message.activeId, tabs: message.tabs });
+        return;
+      case "downloads":
+        options.onDownloads?.(message.downloads);
+        return;
       case "control":
         control = {
           canOperate: true,
@@ -310,10 +469,17 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
       case "pointer":
         options.onPointer({
           phase: message.phase,
+          tabId: message.tabId,
           x: message.x,
           y: message.y,
           sequence: message.sequence,
         });
+        return;
+      case "recording-key":
+        options.onRecordingKey?.(message.label);
+        return;
+      case "probe":
+        options.onProbe?.({ x: message.x, y: message.y, editable: message.editable });
         return;
       case "nav":
         options.onNav({
@@ -322,6 +488,9 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
           loading: message.loading,
           canGoBack: message.canGoBack,
           canGoForward: message.canGoForward,
+          error: message.error,
+          fileNotShown: message.fileNotShown,
+          opened: message.opened,
         });
         return;
       case "clipboard":

@@ -10,6 +10,7 @@
 // /preview-stream upgrades (see handleUpgrade in ade-local.mjs).
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
+import { browserScope } from "./browser-scope.mjs";
 import {
   DEFAULT_VIEWPORT,
   INPUT_BUTTONS,
@@ -17,6 +18,7 @@ import {
   MAX_MODIFIER_MASK,
   STREAM_PATH,
   STREAM_CLOSE_CODES,
+  VIEWPORT_LIMITS,
   WEBSOCKET_CLOSE_REASON_MAX_BYTES,
 } from "../shared/browser-contract.mjs";
 
@@ -111,6 +113,12 @@ function inputFrom(msg) {
       if (msg.text.length > MAX_INPUT_TEXT_CHARS) return null;
       return { type: "text", text: msg.text };
     }
+    case "probe": {
+      const x = finiteNumber(msg.x);
+      const y = finiteNumber(msg.y);
+      if (x === null || y === null) return null;
+      return { type: "probe", x, y };
+    }
     default:
       return null;
   }
@@ -126,6 +134,10 @@ const navMessage = (nav) => ({
   loading: nav.loading,
   canGoBack: nav.canGoBack,
   canGoForward: nav.canGoForward,
+  error: nav.error ?? null,
+  fileNotShown: nav.fileNotShown ?? null,
+  // The first page on a tab, so a viewer can show the browser the agent just opened.
+  opened: nav.opened === true,
 });
 
 const safeCall = (fn) => {
@@ -222,18 +234,28 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
         room.fileChooser = session.fileChooser();
         room.unsubs.push(
           session.on("nav", (nav) => broadcast(room, navMessage(nav))),
-          session.on("viewport", (size) =>
-            broadcast(room, { type: "viewport", width: size.width, height: size.height }),
-          ),
+          session.on("tabs", (tabs) => broadcast(room, { type: "tabs", ...tabs })),
+          session.on("downloads", (downloads) => broadcast(room, { type: "downloads", downloads })),
+          session.on("viewport", (size) => {
+            for (const viewer of room.viewers)
+              if (!viewer.recordingTabId || viewer.recordingTabId === size.tabId)
+                send(viewer, { type: "viewport", width: size.width, height: size.height });
+          }),
           session.on("pointer", (p) =>
             broadcast(room, {
               type: "pointer",
               phase: p.phase,
+              tabId: p.tabId,
               x: p.x,
               y: p.y,
               sequence: p.sequence,
             }),
           ),
+          session.on("recording-key", (event) => {
+            for (const viewer of room.viewers)
+              if (viewer.showRecordingKeys && viewer.recordingTabId === event.tabId)
+                send(viewer, { type: "recording-key", label: event.label });
+          }),
           session.on("dialog", (dialog) => {
             room.dialog = dialog ?? null;
             broadcastControl(room);
@@ -312,17 +334,26 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
       return false;
     }
     const projectId = params.get("project") ?? "";
+    const sessionId = params.get("session");
     const viewerId = params.get("viewer") ?? "";
+    const tabId = params.get("tab");
     if (!projectId || !viewerId) {
       ws.close(CLOSE_BAD_REQUEST, "project and viewer are required");
+      return false;
+    }
+    if (tabId !== null && !/^tab-\d+$/.test(tabId)) {
+      ws.close(CLOSE_BAD_REQUEST, "invalid tab");
       return false;
     }
     rec.viewerId = viewerId;
     rec.maxWidth = intParam(params, "maxWidth", DEFAULT_MAX_WIDTH, MAX_WIDTH);
     rec.maxHeight = intParam(params, "maxHeight", DEFAULT_MAX_HEIGHT, MAX_HEIGHT);
     rec.quality = intParam(params, "quality", DEFAULT_QUALITY, MAX_QUALITY);
+    const frameRate = params.get("recordingFrameRate");
+    rec.showRecordingKeys = params.get("recordingKeys") === "1" && !!tabId;
+    rec.recordingTabId = tabId;
 
-    const room = roomFor(projectId);
+    const room = roomFor(browserScope(projectId, sessionId));
     try {
       await room.ready;
     } catch (error) {
@@ -337,13 +368,32 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
     }
     rec.room = room;
     room.viewers.add(rec);
-    const size = room.session.viewport();
+    let size;
+    try {
+      size = room.session.viewport(tabId);
+    } catch {
+      ws.close(CLOSE_BAD_REQUEST, "browser tab is no longer open");
+      return false;
+    }
     send(rec, { type: "viewport", width: size.width, height: size.height });
     sendControl(rec, room);
+    if (typeof room.session.tabs === "function")
+      send(rec, { type: "tabs", ...room.session.tabs() });
+    if (typeof room.session.downloads === "function")
+      send(rec, { type: "downloads", downloads: room.session.downloads() });
     send(rec, navMessage(room.session.nav()));
     try {
       const stop = await room.session.startScreencast(
-        { maxWidth: rec.maxWidth, maxHeight: rec.maxHeight, quality: rec.quality },
+        {
+          maxWidth: rec.maxWidth,
+          maxHeight: rec.maxHeight,
+          quality: rec.quality,
+          ...(frameRate === "30" || frameRate === "60"
+            ? { ackPaceMs: 1000 / Number(frameRate) }
+            : {}),
+          ...(rec.showRecordingKeys ? { showRecordingKeys: true } : {}),
+          ...(tabId ? { tabId } : {}),
+        },
         (jpeg, ack) => onFrame(rec, jpeg, ack),
       );
       if (rec.closed)
@@ -393,6 +443,64 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
           ),
         );
         return;
+      case "stop-loading":
+        await guarded(
+          rec,
+          control.humanInterrupt(rec.viewerId, () => session.stopLoading()),
+        );
+        return;
+      case "resize": {
+        const width = Math.round(Number(msg.width));
+        const height = Math.round(Number(msg.height));
+        if (
+          !Number.isFinite(width) ||
+          !Number.isFinite(height) ||
+          width < VIEWPORT_LIMITS.minWidth ||
+          width > VIEWPORT_LIMITS.maxWidth ||
+          height < VIEWPORT_LIMITS.minHeight ||
+          height > VIEWPORT_LIMITS.maxHeight
+        )
+          return;
+        await guarded(
+          rec,
+          control.human(rec.viewerId, () => session.resize(width, height)),
+        );
+        return;
+      }
+      case "tab-audio":
+        if (
+          typeof msg.id !== "string" ||
+          !/^tab-\d+$/.test(msg.id) ||
+          typeof msg.muted !== "boolean"
+        )
+          return;
+        await guarded(
+          rec,
+          control.human(rec.viewerId, () => session.setTabAudio(msg.id, msg.muted)),
+        );
+        return;
+      case "tab":
+        if (!["new", "select", "close"].includes(msg.action)) return;
+        if (
+          msg.action === "new" &&
+          msg.profileId !== undefined &&
+          (typeof msg.profileId !== "string" ||
+            !/^(?:default|incognito|[0-9a-f-]{36})$/i.test(msg.profileId))
+        )
+          return;
+        if (msg.action !== "new" && (typeof msg.id !== "string" || !/^tab-\d+$/.test(msg.id)))
+          return;
+        await guarded(
+          rec,
+          control.human(rec.viewerId, () =>
+            msg.action === "new"
+              ? session.newTab(msg.profileId)
+              : msg.action === "select"
+                ? session.selectTab(msg.id)
+                : session.closeTab(msg.id),
+          ),
+        );
+        return;
       case "dialog":
         if (typeof msg.accept !== "boolean") return;
         if (msg.promptText !== undefined && typeof msg.promptText !== "string") return;
@@ -415,6 +523,8 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
             const result = await session.input(input);
             // A copy or cut key's text goes to this viewer's own clipboard.
             if (result?.copied) send(rec, { type: "clipboard", text: result.copied });
+            // A touch probe only answers the viewer that asked, so it can raise a keyboard.
+            if (result?.probe) send(rec, { type: "probe", ...result.probe });
           }),
         );
       }
@@ -447,8 +557,9 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
      * @returns {string} origin-relative stream path for `projectId`, without the
      * per-viewer query params; the page resolves it against its own origin.
      */
-    url(projectId) {
+    url(projectId, sessionId) {
       const params = new URLSearchParams({ project: projectId, token });
+      if (sessionId) params.set("session", sessionId);
       return `${STREAM_PATH}?${params}`;
     },
     /** Disconnects every viewer. */

@@ -28,6 +28,7 @@ import type {
 } from "./types";
 import { NoticeDialogHost, warnUser } from "@/components/ade/NoticeDialog";
 import { TokenGate } from "@/components/ade/TokenGate";
+import { recordingAttachment } from "@/lib/ade/browser/recordingUpload";
 
 const empty: AdeState = {
   hydrated: false,
@@ -158,12 +159,58 @@ export function useNow() {
 // 2-second polling refresh) so dependent effects do not refetch constantly.
 export const agentModels = (agentId: AgentId) =>
   request<AgentModelsResult>(`/api/agents/${agentId}/models`);
-export const computerStatus = (projectId: string) =>
-  request<AgentComputer>(`/api/projects/${projectId}/computer`);
-export const computerControl = (projectId: string, op: "start" | "stop" | "clear") =>
-  request<AgentComputer>(`/api/projects/${projectId}/computer/${op}`, "POST");
-export const computerProfile = (projectId: string, profile: AgentComputer["profile"]) =>
-  request<AgentComputer>(`/api/projects/${projectId}/computer/profile`, "POST", { profile });
+const computerPath = (projectId: string, suffix: string, sessionId?: string | null) =>
+  `/api/projects/${encodeURIComponent(projectId)}/computer${suffix}${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ""}`;
+export const computerStatus = (projectId: string, sessionId?: string | null) =>
+  request<AgentComputer>(computerPath(projectId, "", sessionId));
+export const computerControl = (
+  projectId: string,
+  op: "start" | "stop" | "clear",
+  sessionId?: string | null,
+) => request<AgentComputer>(computerPath(projectId, `/${op}`, sessionId), "POST");
+export const computerProfile = (
+  projectId: string,
+  profile: AgentComputer["profile"],
+  sessionId?: string | null,
+) => request<AgentComputer>(computerPath(projectId, "/profile", sessionId), "POST", { profile });
+export const createComputerProfile = (projectId: string, name: string, sessionId?: string | null) =>
+  request<AgentComputer>(computerPath(projectId, "/profiles", sessionId), "POST", { name });
+export const renameComputerProfile = (
+  projectId: string,
+  profileId: string,
+  name: string,
+  sessionId?: string | null,
+) =>
+  request<AgentComputer>(
+    computerPath(projectId, `/profiles/${encodeURIComponent(profileId)}`, sessionId),
+    "PATCH",
+    { name },
+  );
+export const deleteComputerProfile = (
+  projectId: string,
+  profileId: string,
+  sessionId?: string | null,
+) =>
+  request<AgentComputer>(
+    computerPath(projectId, `/profiles/${encodeURIComponent(profileId)}`, sessionId),
+    "DELETE",
+  );
+export const browserImportSources = (projectId: string, sessionId?: string | null) =>
+  request<{ sources: { id: string; name: string }[] }>(
+    computerPath(projectId, "/import-sources", sessionId),
+  );
+export const importBrowserCookies = (
+  projectId: string,
+  sourceId: string,
+  sessionId?: string | null,
+  tabId?: string | null,
+  profileId?: string | null,
+) =>
+  request<{ imported: number; skipped: number; keyringMissing?: boolean }>(
+    computerPath(projectId, "/import", sessionId),
+    "POST",
+    { sourceId, ...(tabId ? { tabId } : {}), ...(profileId ? { profileId } : {}) },
+  );
 /** Answer a dev command request no session holds (the right pane shows it on the project). */
 export const answerDevCommand = (projectId: string, requestId: string, allow: boolean) =>
   request(`/api/projects/${projectId}/dev/command/answer`, "POST", {
@@ -215,6 +262,20 @@ export async function uploadAttachment(file: File): Promise<MessageAttachment> {
     mime: file.type || "application/octet-stream",
     contentBase64,
   });
+}
+
+/** Browser recordings use a streaming upload so long clips do not become base64 request bodies. */
+export async function uploadBrowserRecording(file: File): Promise<MessageAttachment> {
+  const saved = recordingAttachment(file);
+  if (saved) return saved;
+  const response = await fetch("/api/attachments/recording", {
+    method: "POST",
+    headers: { "content-type": "video/webm" },
+    body: file,
+  });
+  const value = (await response.json()) as MessageAttachment & { error?: string };
+  if (!response.ok) throw new Error(value.error ?? `Local API returned ${response.status}`);
+  return value;
 }
 export const searchSessions = (projectId: string, query: string) =>
   request<{ ids: string[] }>(

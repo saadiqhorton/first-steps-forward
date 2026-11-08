@@ -11,6 +11,90 @@
 // Versus T3 this is a plain module: no Effect runtime, no tab broker and no desktop attach.
 
 import path from "node:path";
+import { readFile } from "node:fs/promises";
+import { inspectElementAt } from "./browser-inspection.mjs";
+import { recordingKeyLabel, recordingKeysAreSensitive } from "./browser-recording-input.mjs";
+import { createBrowserDownloads } from "./browser-downloads.mjs";
+import { captureBrowserFavicon } from "./browser-favicon.mjs";
+import { browserAudioAvailable, tabAudioState } from "./browser-audio.mjs";
+
+// react-grab 0.1.32, bundled for injection into the inspected page (see THIRD_PARTY_NOTICES.md).
+const reactGrabSource = readFile(
+  new URL("./browser-react-grab.bundle.js", import.meta.url),
+  "utf8",
+);
+const reactGrabInstalling = new WeakMap();
+
+// A touch tap only opens the on-screen keyboard when the page element under it takes text.
+// From T3's ServerBrowser.ts EDITABLE_AT_POINT_SCRIPT; open shadow roots are included.
+const EDITABLE_AT_POINT_SCRIPT = `(x, y) => {
+  let element = document.elementFromPoint(x, y);
+  while (element && element.shadowRoot) {
+    const inner = element.shadowRoot.elementFromPoint(x, y);
+    if (!inner || inner === element) break;
+    element = inner;
+  }
+  if (element && element.tagName === "LABEL" && element.control) element = element.control;
+  if (!element) return false;
+  if (element.tagName === "IFRAME" || element.tagName === "FRAME") return true;
+  if (element.isContentEditable) return true;
+  if (element.tagName === "TEXTAREA") return !element.disabled && !element.readOnly;
+  if (element.tagName !== "INPUT") return false;
+  const nonText = ["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"];
+  return !nonText.includes(element.type) && !element.disabled && !element.readOnly;
+}`;
+
+async function reactContextAt(page, point) {
+  try {
+    if (!(await page.evaluate(() => typeof globalThis.__adeReactGrab === "function"))) {
+      let installing = reactGrabInstalling.get(page);
+      if (!installing) {
+        installing = reactGrabSource.then(async (content) => {
+          const cdp = await page.context().newCDPSession(page);
+          try {
+            const result = await cdp.send("Runtime.evaluate", {
+              expression: content,
+              allowUnsafeEvalBlockedByCSP: true,
+            });
+            if (result.exceptionDetails) throw new Error("Could not load React inspection.");
+          } finally {
+            await cdp.detach().catch(noop);
+          }
+        });
+        reactGrabInstalling.set(page, installing);
+      }
+      try {
+        await installing;
+      } finally {
+        if (reactGrabInstalling.get(page) === installing) reactGrabInstalling.delete(page);
+      }
+    }
+    return await page.evaluate(async ({ x, y }) => {
+      let element = document.elementFromPoint(x, y);
+      while (element?.shadowRoot) {
+        const inner = element.shadowRoot.elementFromPoint(x, y);
+        if (!inner || inner === element) break;
+        element = inner;
+      }
+      if (!element || typeof globalThis.__adeReactGrab !== "function") return null;
+      const context = await Promise.race([
+        Promise.resolve(globalThis.__adeReactGrab(element)),
+        new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+      ]);
+      if (!context) return null;
+      const stack = (context.stack ?? []).slice(0, 40).map((frame) => ({
+        functionName: frame.functionName ?? null,
+        fileName: frame.fileName ?? null,
+        lineNumber: frame.lineNumber ?? null,
+        columnNumber: frame.columnNumber ?? null,
+      }));
+      return { componentName: context.componentName ?? null, stack };
+    }, point);
+  } catch {
+    // Source metadata is optional; CSP and production builds may prevent inspection.
+    return null;
+  }
+}
 
 import { presentAsChrome } from "./browser-contexts.mjs";
 import {
@@ -214,7 +298,7 @@ class Screencast {
 
   /**
    * @param {{ context: () => import("playwright-core").BrowserContext, lastWheelAt: () => number }} host
-   * @param {{ maxWidth: number, maxHeight: number, quality: number }} params
+   * @param {{ maxWidth: number, maxHeight: number, quality: number, ackPaceMs?: number }} params
    * @param {(jpeg: Buffer, ack: () => void) => void} onFrame
    */
   constructor(host, params, onFrame) {
@@ -265,7 +349,8 @@ class Screencast {
   }
 
   async #attach(page) {
-    const session = await this.#host.context().newCDPSession(page);
+    const context = typeof page.context === "function" ? page.context() : this.#host.context();
+    const session = await context.newCDPSession(page);
     this.#page = page;
     this.#session = session;
     session.on("Page.screencastFrame", (frame) => this.#frame(session, frame));
@@ -316,6 +401,7 @@ class Screencast {
     while (this.#recent[0] < arrivedAt - SCREENCAST_MOTION_WINDOW_MS) this.#recent.shift();
     const lastWheel = this.#host.lastWheelAt();
     if (
+      !this.#params.ackPaceMs &&
       !this.#motion &&
       this.#recent.length >= SCREENCAST_MOTION_FRAMES &&
       arrivedAt - lastWheel < SCREENCAST_MOTION_WINDOW_MS
@@ -349,7 +435,7 @@ class Screencast {
           this.#framesInFlight -= 1;
           void session.send("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(noop);
         },
-        arrivedAt + SCREENCAST_ACK_PACE_MS - Date.now(),
+        arrivedAt + (this.#params.ackPaceMs ?? SCREENCAST_ACK_PACE_MS) - Date.now(),
       );
     };
     this.#onFrame(Buffer.from(frame.data, "base64"), ack);
@@ -359,6 +445,16 @@ class Screencast {
 class BrowserSession {
   #context;
   #onClosed;
+  #ownership;
+  #owned = new Set();
+  #contexts = new Map();
+  #acquiringProfiles = new Map();
+  #pageProfiles = new WeakMap();
+  #initialProfile;
+  #acquireProfile;
+  #defaultProfile;
+  #validProfile;
+  #closePromise;
   #active = null;
   #closed = false;
   #listeners = new Map();
@@ -367,11 +463,35 @@ class BrowserSession {
   /** Each watched page's preparation; navigations wait for it. */
   #preparing = new WeakMap();
   #screencasts = new Set();
+  #pinnedScreencasts = new Set();
+  #devtoolsSessions = new Set();
+  #recordingKeyPages = new Map();
   #viewport = { ...DEFAULT_VIEWPORT };
+  #pageViewports = new WeakMap();
+  #tabSettings = new WeakMap();
+  #annotationStyles = new Map();
+  #tabIds = new WeakMap();
+  #tabTitles = new WeakMap();
+  #tabFavicons = new WeakMap();
+  #faviconGenerations = new WeakMap();
+  #restoreUrls = new WeakMap();
+  #navigationErrors = new WeakMap();
+  #navigationRequests = new WeakMap();
+  #failedTransitions = new WeakMap();
+  #fileNotShown = new WeakMap();
+  /** The tab whose first page this browser session just opened, until a viewer is shown it. */
+  #openedPage = null;
+  #audioStates = new WeakMap();
+  #audioGenerations = new WeakMap();
+  #audioRefreshes = new WeakSet();
+  #tabSequence = 0;
+  #selectedBlank = null;
+  #creatingTab = false;
   #lastWheelAt = 0;
   #inputChain = Promise.resolve();
   #pressedKeys = new Map();
   #pressedButtons = new Map();
+  #stopCounts = new WeakMap();
   #title = "";
   #loading = false;
   #history = { canGoBack: false, canGoForward: false };
@@ -386,37 +506,133 @@ class BrowserSession {
   /** @type {{ id: string, page: import("playwright-core").Page, chooser: import("playwright-core").FileChooser, multiple: boolean, accept: string } | null} */
   #fileChooser = null;
   #fileChooserSeq = 0;
+  #downloads = createBrowserDownloads((downloads) => this.#emit("downloads", downloads));
 
   /** @private Use createBrowserHub. */
-  constructor(context, onClosed) {
+  constructor(
+    context,
+    onClosed,
+    ownership,
+    profileId,
+    acquireProfile,
+    defaultProfile,
+    validProfile,
+  ) {
     this.#context = context;
     this.#onClosed = onClosed;
+    this.#ownership = ownership;
+    this.#initialProfile = profileId ?? "default";
+    this.#acquireProfile = acquireProfile;
+    this.#defaultProfile = defaultProfile ?? (() => this.#initialProfile);
+    this.#validProfile = validProfile ?? ((profile) => profile === this.#initialProfile);
   }
 
-  static async open({ context, onClosed }) {
-    const session = new BrowserSession(context, onClosed);
-    await session.#init();
-    return session;
+  static async open({
+    context,
+    onClosed,
+    ownership,
+    releaseContext,
+    profileId,
+    acquireProfile,
+    defaultProfile,
+    validProfile,
+  }) {
+    const session = new BrowserSession(
+      context,
+      onClosed,
+      ownership,
+      profileId,
+      acquireProfile,
+      defaultProfile,
+      validProfile,
+    );
+    try {
+      await session.#init(releaseContext);
+      return session;
+    } catch (error) {
+      await session.close();
+      throw error;
+    }
   }
 
-  async #init() {
-    this.#context.on("close", () => this.#finish());
+  async #registerContext(profileId, context, release) {
+    const entry = { context, release, initialPage: null, onClose: null, onPage: null };
+    this.#contexts.set(profileId, entry);
+    if (this.#ownership && !this.#ownership.contexts.has(context)) {
+      this.#ownership.contexts.add(context);
+      const initial = context.pages().find((page) => !this.#ownership.owners.has(page));
+      if (initial && this.#claim(initial, profileId)) entry.initialPage = initial;
+    }
+    entry.onClose = () => void this.close();
+    context.on("close", entry.onClose);
     // Pages may write the clipboard as they would in a normal tab, as T3 grants.
-    await this.#context.grantPermissions(["clipboard-write"]).catch(noop);
-    this.#context.on("page", (page) => {
-      this.#watch(page);
-      this.#activate(page);
-    });
-    for (const page of this.#context.pages()) this.#watch(page);
+    await context.grantPermissions(["clipboard-write"]).catch(noop);
+    if (this.#closed) throw new Error("The browser closed.");
+    entry.onPage = (page) => {
+      if (!this.#ownership) {
+        this.#claim(page, profileId);
+        if (this.#creatingTab) this.#selectedBlank = page;
+        this.#activate(page);
+        return;
+      }
+      // A page opened by page script belongs to its opener's conversation. Pages explicitly
+      // created by ADE are claimed by the caller of #newPage instead.
+      void page
+        .opener()
+        .then((opener) => {
+          if (this.#closed || !opener || this.#ownership.owners.get(opener) !== this) return;
+          if (!this.#claim(page, profileId)) return;
+          this.#activate(page);
+          this.#emitTabs();
+        })
+        .catch(noop);
+    };
+    context.on("page", entry.onPage);
+    return entry;
+  }
+
+  async #entryFor(profileId) {
+    // Registration includes asynchronous permission setup. Concurrent tab creation must wait
+    // for that setup rather than observing the partially registered context.
+    const pending = this.#acquiringProfiles.get(profileId);
+    if (pending) return pending;
+    const existing = this.#contexts.get(profileId);
+    if (existing) return existing;
+    if (!this.#acquireProfile || !this.#validProfile(profileId))
+      throw new Error("Browser profile not found.");
+    const work = (async () => {
+      const lease = await this.#acquireProfile(profileId);
+      if (this.#closed) {
+        await lease.release();
+        throw new Error("The browser closed.");
+      }
+      return this.#registerContext(profileId, lease.context, lease.release);
+    })();
+    this.#acquiringProfiles.set(profileId, work);
+    try {
+      return await work;
+    } finally {
+      if (this.#acquiringProfiles.get(profileId) === work)
+        this.#acquiringProfiles.delete(profileId);
+    }
+  }
+
+  async #init(releaseContext) {
+    const entry = await this.#registerContext(this.#initialProfile, this.#context, releaseContext);
+    if (!this.#ownership) {
+      for (const page of this.#context.pages()) this.#claim(page, this.#initialProfile);
+    }
     const usable = this.#usable();
     let initial = usable.find((p) => p.url() && p.url() !== "about:blank") ?? usable.at(-1);
-    if (!initial) initial = await this.#context.newPage();
+    if (initial === entry.initialPage) entry.initialPage = null;
+    if (!initial) initial = await this.#newPage(this.#initialProfile);
     this.#watch(initial);
     // The first page presents as Chrome before anything navigates it.
     await this.#preparing.get(initial);
     this.#activate(initial);
     this.#poll = setInterval(() => {
       if (!this.#dialog) void this.#refreshNav();
+      for (const page of this.#usable()) void this.#refreshAudio(page);
     }, NAV_POLL_MS);
     this.#poll.unref?.();
   }
@@ -427,22 +643,461 @@ class BrowserSession {
 
   /** How many viewers are streaming this session's screen. */
   get viewerCount() {
-    return this.#screencasts.size;
+    return this.#screencasts.size + this.#devtoolsSessions.size;
   }
 
   /** Current navigation state. canGoBack and canGoForward are cached from CDP history. */
   nav() {
     return {
-      url: this.#active?.url() ?? "about:blank",
+      url: this.#active
+        ? (this.#restoreUrls.get(this.#active) ?? this.#active.url())
+        : "about:blank",
       title: this.#title,
       loading: this.#loading,
       canGoBack: this.#history.canGoBack,
       canGoForward: this.#history.canGoForward,
+      error: this.#active ? (this.#navigationErrors.get(this.#active) ?? null) : null,
+      fileNotShown: this.#active ? (this.#fileNotShown.get(this.#active) ?? null) : null,
+      // True while this tab is showing the first page opened in it, so a hidden preview can
+      // surface the browser the agent just opened. Cleared by the next navigation on the tab.
+      opened: this.#active !== null && this.#openedPage === this.#active,
     };
   }
 
-  viewport() {
+  viewport(tabId) {
+    if (tabId) {
+      const page = this.#tabPage(tabId);
+      if (page !== this.#active)
+        return this.#pageViewports.get(page) ?? page.viewportSize() ?? { ...this.#viewport };
+    }
     return { ...this.#viewport };
+  }
+
+  #tabId(page) {
+    let id = this.#tabIds.get(page);
+    if (!id) {
+      id = `tab-${++this.#tabSequence}`;
+      this.#tabIds.set(page, id);
+    }
+    return id;
+  }
+
+  #tabPage(id) {
+    if (!id) return this.#page();
+    const page = this.#usable().find((candidate) => this.#tabId(candidate) === id);
+    if (!page) throw new Error("That browser tab is no longer open.");
+    return page;
+  }
+
+  tabs() {
+    return {
+      activeId: this.#active ? this.#tabId(this.#active) : null,
+      tabs: this.#usable().map((page) => ({
+        id: this.#tabId(page),
+        url: this.#restoreUrls.get(page) ?? page.url(),
+        title: this.#tabTitles.get(page) ?? "",
+        ...(this.#tabFavicons.has(page) ? { favicon: this.#tabFavicons.get(page) } : {}),
+        ...(this.#audioStates.has(page) ? { audio: this.#audioStates.get(page) } : {}),
+        ...(this.#ownership
+          ? { profileId: this.#pageProfiles.get(page) ?? this.#initialProfile }
+          : {}),
+      })),
+    };
+  }
+
+  activeProfile() {
+    return this.#active
+      ? (this.#pageProfiles.get(this.#active) ?? this.#initialProfile)
+      : this.#initialProfile;
+  }
+
+  profileForTab(tabId) {
+    const page = this.#tabPage(tabId);
+    return this.#pageProfiles.get(page) ?? this.#initialProfile;
+  }
+
+  downloads() {
+    return this.#downloads.list();
+  }
+
+  openDownload(id) {
+    return this.#downloads.get(id);
+  }
+
+  hasProfile(profileId) {
+    // A profile can still hold a context lease after its last tab closes.
+    return this.#contexts.has(profileId) || this.#acquiringProfiles.has(profileId);
+  }
+
+  /** Reopen a conversation's saved tabs before the first viewer or agent action attaches. */
+  async restoreTabs(snapshot) {
+    if (!snapshot?.tabs?.length) return;
+    const initial = this.#page();
+    await Promise.all(
+      this.#usable()
+        .filter((page) => page !== initial)
+        .map((page) => page.close().catch(noop)),
+    );
+    this.#tabSequence = Math.max(
+      this.#tabSequence,
+      ...snapshot.tabs.map((tab) => Number(tab.id.slice(4)) || 0),
+    );
+    const navigations = [];
+    for (const [index, tab] of snapshot.tabs.entries()) {
+      if (this.#closed) return;
+      const profile =
+        typeof tab.profileId === "string" && this.#validProfile(tab.profileId)
+          ? tab.profileId
+          : this.#validProfile("default")
+            ? "default"
+            : this.#initialProfile;
+      if (index > 0) await this.newTab(profile);
+      else if (profile !== this.activeProfile()) {
+        await this.newTab(profile);
+        await initial.close().catch(noop);
+      }
+      const page = this.#page();
+      this.#tabIds.set(page, tab.id);
+      this.#selectedBlank = page;
+      if (tab.url !== "about:blank") {
+        navigations.push(
+          (async () => {
+            try {
+              const target = normalizeBrowserUrl(tab.url);
+              await this.#preparing.get(page);
+              await page.goto(target, { waitUntil: "commit", timeout: 4000 });
+              if (this.#selectedBlank === page) this.#selectedBlank = null;
+            } catch {
+              this.#restoreUrls.set(page, tab.url);
+            }
+          })(),
+        );
+      }
+    }
+    await Promise.all(navigations);
+    const selected = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
+    if (selected) await this.selectTab(selected.id);
+    this.#emitTabs();
+  }
+
+  #emitTabs() {
+    this.#emit("tabs", this.tabs());
+  }
+
+  async newTab(profileId = this.#defaultProfile()) {
+    this.#creatingTab = true;
+    try {
+      const page = await this.#newPage(profileId);
+      this.#watch(page);
+      this.#selectedBlank = page;
+      this.#activate(page);
+      this.#emitTabs();
+    } finally {
+      this.#creatingTab = false;
+    }
+  }
+
+  async selectTab(id) {
+    const page = this.#usable().find((candidate) => this.#tabId(candidate) === id);
+    if (!page) throw new Error("That browser tab is no longer open.");
+    this.#selectedBlank = page.url() === "about:blank" ? page : null;
+    this.#activate(page);
+    this.#emitTabs();
+  }
+
+  async closeTab(id) {
+    const page = this.#usable().find((candidate) => this.#tabId(candidate) === id);
+    if (!page) throw new Error("That browser tab is no longer open.");
+    if (this.#selectedBlank === page) this.#selectedBlank = null;
+    await page.close();
+    this.#emitTabs();
+  }
+
+  /** Set actual Chromium tab mute, publishing only state confirmed by Chrome. */
+  async setTabAudio(id, muted) {
+    const page = this.#tabPage(id);
+    const generation = (this.#audioGenerations.get(page) ?? 0) + 1;
+    this.#audioGenerations.set(page, generation);
+    const state = await tabAudioState(this.#contextOf(page), await this.#control(page), muted);
+    if (!state) throw new Error("Tab audio control is unavailable in this browser.");
+    if (this.#closed || page.isClosed() || this.#audioGenerations.get(page) !== generation) return;
+    this.#audioStates.set(page, state);
+    this.#emitTabs();
+  }
+
+  /** Describes the real element at a viewport point without changing browser control. */
+  async inspectElement(x, y, tabId, includeContext = true) {
+    const page = this.#tabPage(tabId);
+    const element = await page.evaluate(inspectElementAt, { x, y });
+    if (!element || !includeContext) return element;
+    const context = await reactContextAt(page, { x, y });
+    if (!context) return element;
+    const source = context.stack.find((frame) => frame.fileName) ?? element.source;
+    return {
+      ...element,
+      componentName: context.componentName ?? element.componentName,
+      source,
+      stack: context.stack,
+    };
+  }
+
+  async inspectRegion(rect, tabId) {
+    const page = this.#tabPage(tabId);
+    const candidates = await page.evaluate(inspectElementAt, { region: rect });
+    const elements = await Promise.all(
+      candidates.map(async ({ element, center }) => {
+        // React Grab inspects the topmost element at a point. Keep the actual selected
+        // candidate when another overlapping element covers its center.
+        const top = await page.evaluate(inspectElementAt, center);
+        if (top?.selector !== element.selector) return element;
+        const context = await reactContextAt(page, center);
+        if (!context) return element;
+        return {
+          ...element,
+          componentName: context.componentName ?? element.componentName,
+          source: context.stack.find((frame) => frame.fileName) ?? element.source,
+          stack: context.stack,
+        };
+      }),
+    );
+    return elements.filter(
+      (element, index) =>
+        element &&
+        elements.findIndex((candidate) => candidate?.selector === element.selector) === index,
+    );
+  }
+
+  /** Remeasure selected elements after scrolling or page layout changes. */
+  async annotationRects(selectors, tabId) {
+    const page = this.#tabPage(tabId);
+    return Promise.all(
+      selectors.map(async (selector) => {
+        let handle;
+        try {
+          handle = await page.$(selector);
+          if (!handle) return null;
+          return await handle.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            if (
+              !rect.width ||
+              !rect.height ||
+              style.visibility === "hidden" ||
+              style.display === "none"
+            )
+              return null;
+            let left = Math.max(0, rect.left);
+            let top = Math.max(0, rect.top);
+            let right = Math.min(document.documentElement.clientWidth, rect.right);
+            let bottom = Math.min(document.documentElement.clientHeight, rect.bottom);
+            const parent = (node) => {
+              if (node.parentElement) return node.parentElement;
+              const root = node.getRootNode();
+              return root instanceof ShadowRoot ? root.host : null;
+            };
+            if (style.position !== "fixed") {
+              for (let ancestor = parent(element); ancestor; ancestor = parent(ancestor)) {
+                if (ancestor === document.body || ancestor === document.documentElement) break;
+                const ancestorStyle = getComputedStyle(ancestor);
+                const bounds = ancestor.getBoundingClientRect();
+                if (ancestorStyle.overflowX !== "visible") {
+                  left = Math.max(left, bounds.left + ancestor.clientLeft);
+                  right = Math.min(right, bounds.left + ancestor.clientLeft + ancestor.clientWidth);
+                }
+                if (ancestorStyle.overflowY !== "visible") {
+                  top = Math.max(top, bounds.top + ancestor.clientTop);
+                  bottom = Math.min(
+                    bottom,
+                    bounds.top + ancestor.clientTop + ancestor.clientHeight,
+                  );
+                }
+              }
+            }
+            return right > left && bottom > top
+              ? { x: left, y: top, width: right - left, height: bottom - top }
+              : null;
+          });
+        } catch {
+          return null;
+        } finally {
+          await handle?.dispose().catch(noop);
+        }
+      }),
+    );
+  }
+
+  /** Capture the page directly at device resolution instead of re-encoding a streamed JPEG. */
+  async captureScreenshot(tabId) {
+    return this.#tabPage(tabId).screenshot({
+      type: "png",
+      scale: "device",
+      timeout: DEFAULT_TIMEOUT_MS,
+    });
+  }
+
+  /** Import cookies into this conversation's selected shared profile. */
+  async importCookies(cookies, tabId) {
+    let imported = 0;
+    let skipped = 0;
+    const cdp = await this.#control(this.#tabPage(tabId));
+    // Playwright's addCookies rewrites URL cookies and disallows an explicit path. CDP lets
+    // host-only cookies keep both their original path and their host-only scope.
+    for (let offset = 0; offset < cookies.length; offset += 16) {
+      const outcomes = await Promise.all(
+        cookies.slice(offset, offset + 16).map(async (cookie) => {
+          try {
+            return (await cdp.send("Network.setCookie", cookie)).success === true;
+          } catch {
+            return false;
+          }
+        }),
+      );
+      imported += outcomes.filter(Boolean).length;
+      skipped += outcomes.filter((ok) => !ok).length;
+    }
+    return { imported, skipped };
+  }
+
+  async openDevtools(tabId) {
+    const page = this.#tabPage(tabId);
+    const session = await this.#contextOf(page).newCDPSession(page);
+    this.#devtoolsSessions.add(session);
+    session.once("close", () => this.#devtoolsSessions.delete(session));
+    return {
+      session,
+      close: async () => {
+        this.#devtoolsSessions.delete(session);
+        await session.detach().catch(noop);
+      },
+    };
+  }
+
+  /** Temporarily preview a style change and remember the original inline value for restoration. */
+  async setAnnotationStyle(sessionId, selector, property, value, tabId) {
+    const page = this.#tabPage(tabId);
+    let entries = this.#annotationStyles.get(sessionId);
+    if (!entries) this.#annotationStyles.set(sessionId, (entries = new Map()));
+    const key = `${selector}\0${property}`;
+    let entry = entries.get(key);
+    if (!entry) {
+      const handle = await page.$(selector);
+      if (!handle) throw new Error("The selected element is no longer on the page.");
+      try {
+        const baseline = await handle.evaluate(
+          (element, name) => ({
+            value: element.style.getPropertyValue(name),
+            priority: element.style.getPropertyPriority(name),
+            computed: getComputedStyle(element).getPropertyValue(name).trim(),
+          }),
+          property,
+        );
+        entry = { handle, selector, property, ...baseline };
+        entries.set(key, entry);
+      } catch (error) {
+        await handle.dispose().catch(noop);
+        throw error;
+      }
+    }
+    const result = await entry.handle.evaluate(
+      (element, input) => {
+        if (!CSS.supports(input.property, input.value))
+          throw new Error("That style value is not valid.");
+        element.style.setProperty(input.property, input.value, "important");
+        const rect = element.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      },
+      { property, value },
+    );
+    return { selector, property, value, previousValue: entry.computed, rect: result };
+  }
+
+  async restoreAnnotationStyles(sessionId, selector) {
+    const entries = this.#annotationStyles.get(sessionId);
+    if (!entries) return;
+    for (const [key, entry] of entries) {
+      if (selector && selector !== entry.selector) continue;
+      entries.delete(key);
+      await entry.handle
+        .evaluate(
+          (element, baseline) => {
+            if (baseline.value)
+              element.style.setProperty(baseline.property, baseline.value, baseline.priority);
+            else element.style.removeProperty(baseline.property);
+          },
+          { property: entry.property, value: entry.value, priority: entry.priority },
+        )
+        .catch(noop);
+      await entry.handle.dispose().catch(noop);
+    }
+    if (!entries.size) this.#annotationStyles.delete(sessionId);
+  }
+
+  #settingsFor(page) {
+    let settings = this.#tabSettings.get(page);
+    if (!settings) {
+      settings = { viewport: { ...DEFAULT_VIEWPORT }, zoomFactor: 1, colorScheme: "system" };
+      this.#tabSettings.set(page, settings);
+    }
+    return settings;
+  }
+
+  browserSettings(tabId) {
+    const settings = this.#settingsFor(this.#tabPage(tabId));
+    return {
+      viewport: { ...settings.viewport },
+      zoomFactor: settings.zoomFactor,
+      colorScheme: settings.colorScheme,
+    };
+  }
+
+  /** Applies the same viewport, color scheme and zoom controls as T3's server browser. */
+  async adjustBrowser(input) {
+    const page = this.#tabPage(input.tabId);
+    const settings = this.#settingsFor(page);
+    if (input.viewport)
+      settings.viewport = {
+        width: Math.round(input.viewport.width),
+        height: Math.round(input.viewport.height),
+      };
+    if (input.zoomFactor !== undefined) settings.zoomFactor = input.zoomFactor;
+    if (input.colorScheme !== undefined) settings.colorScheme = input.colorScheme;
+    if (input.viewport || input.zoomFactor !== undefined) await this.#applyBrowserViewport(page);
+    if (input.colorScheme !== undefined)
+      await page.emulateMedia({
+        colorScheme: input.colorScheme === "system" ? null : input.colorScheme,
+      });
+    if (input.clear === "cookies") await this.#contextOf(page).clearCookies();
+    if (input.clear === "cache")
+      await (await this.#control(page)).send("Network.clearBrowserCache");
+    return this.browserSettings(input.tabId);
+  }
+
+  /** Fits the page to a viewer's pane in "fill" mode, keeping this tab's other settings. */
+  async resize(width, height) {
+    const page = this.#active;
+    if (!page) return;
+    const next = {
+      width: Math.round(Number(width)),
+      height: Math.round(Number(height)),
+    };
+    if (!(next.width > 0 && next.height > 0)) return;
+    const settings = this.#settingsFor(page);
+    if (settings.viewport.width === next.width && settings.viewport.height === next.height) return;
+    settings.viewport = next;
+    await this.#applyBrowserViewport(page);
+  }
+
+  async #applyBrowserViewport(page) {
+    const { viewport: size, zoomFactor } = this.#settingsFor(page);
+    await page.setViewportSize(size);
+    const cdp = await this.#control(page);
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: Math.max(1, Math.round(size.width / zoomFactor)),
+      height: Math.max(1, Math.round(size.height / zoomFactor)),
+      deviceScaleFactor: RENDER_SCALE * zoomFactor,
+      mobile: false,
+    });
+    await this.#syncViewport(page);
   }
 
   /**
@@ -466,10 +1121,17 @@ class BrowserSession {
    */
   async startScreencast(options = {}, onFrame) {
     if (this.#closed || !this.#active) throw cdpUnavailable(new Error("The browser closed."));
+    const target = options.tabId
+      ? this.#usable().find((page) => this.#tabId(page) === options.tabId)
+      : this.#active;
+    if (!target) throw new Error("The recorded browser tab is no longer open.");
     const params = {
       maxWidth: Math.max(1, Math.round(numberOr(options.maxWidth, DEFAULT_VIEWPORT.width))),
       maxHeight: Math.max(1, Math.round(numberOr(options.maxHeight, DEFAULT_VIEWPORT.height))),
       quality: Math.min(100, Math.max(1, Math.round(numberOr(options.quality, 70)))),
+      ...(Number.isFinite(options.ackPaceMs)
+        ? { ackPaceMs: Math.max(1000 / 60, Math.min(100, options.ackPaceMs)) }
+        : {}),
     };
     // A viewer attaching re-reads the real viewport, so its first frame matches the mapping.
     if (this.#active) void this.#syncViewport(this.#active);
@@ -479,14 +1141,29 @@ class BrowserSession {
       onFrame,
     );
     this.#screencasts.add(stream);
+    if (options.tabId) this.#pinnedScreencasts.add(stream);
+    if (options.showRecordingKeys)
+      this.#recordingKeyPages.set(target, (this.#recordingKeyPages.get(target) ?? 0) + 1);
+    let releasedKeys = false;
+    const releaseKeys = () => {
+      if (releasedKeys || !options.showRecordingKeys) return;
+      releasedKeys = true;
+      const count = this.#recordingKeyPages.get(target) ?? 0;
+      if (count <= 1) this.#recordingKeyPages.delete(target);
+      else this.#recordingKeyPages.set(target, count - 1);
+    };
     try {
-      await stream.start(this.#active);
+      await stream.start(target);
     } catch (cause) {
+      releaseKeys();
       this.#screencasts.delete(stream);
+      this.#pinnedScreencasts.delete(stream);
       throw cdpUnavailable(cause);
     }
     return async () => {
+      releaseKeys();
       this.#screencasts.delete(stream);
+      this.#pinnedScreencasts.delete(stream);
       await stream.stop();
     };
   }
@@ -494,8 +1171,8 @@ class BrowserSession {
   /**
    * Human input for the active page, applied in arrival order. Rejects if CDP fails. A copy or
    * cut key resolves with the text it copied, for the viewer's own clipboard.
-   * @param {object} message protocol `mouse`, `wheel`, `key` or `text` message
-   * @returns {Promise<{ copied?: string } | undefined>}
+   * @param {object} message protocol `mouse`, `wheel`, `key`, `text` or `probe` message
+   * @returns {Promise<{ copied?: string, probe?: { x: number, y: number, editable: boolean } } | undefined>}
    */
   input(message) {
     const run = this.#inputChain.then(() => this.#dispatch(message));
@@ -527,6 +1204,7 @@ class BrowserSession {
         return;
       case "key": {
         const params = keyEventParams(message);
+        if (message.action === "down") await this.#recordKey(page, message.key, message.modifiers);
         const command = params.commands?.[0];
         const copying = params.type !== "keyUp" && (command === "copy" || command === "cut");
         // Clears any copy a page script recorded without a real key, so only this one counts.
@@ -548,6 +1226,19 @@ class BrowserSession {
           });
         }
         return;
+      case "probe": {
+        const x = Number(message.x);
+        const y = Number(message.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        // A page dialog blocks script, so a probe that cannot answer is reported as "not editable".
+        const { result } = await cdp
+          .send("Runtime.evaluate", {
+            expression: `(${EDITABLE_AT_POINT_SCRIPT})(${x}, ${y})`,
+            returnByValue: true,
+          })
+          .catch(() => ({ result: undefined }));
+        return { probe: { x, y, editable: result?.value === true } };
+      }
     }
   }
 
@@ -587,7 +1278,21 @@ class BrowserSession {
     const target = normalizeBrowserUrl(url);
     const page = this.#page();
     await this.#preparing.get(page);
-    await this.#go(page.goto(target, { waitUntil: "commit", timeout: DEFAULT_TIMEOUT_MS }));
+    // A failed Chromium navigation rejects before its internal error document commits.
+    // Starting a retry during that transition lets the old error document cancel the retry.
+    await this.#failedTransitions.get(page);
+    // A tab still on about:blank is opening its first page; later pages replace a real one.
+    const first = !page.url() || page.url() === "about:blank";
+    if (!first && this.#openedPage === page) this.#openedPage = null;
+    try {
+      await this.#go(page.goto(target, { waitUntil: "commit", timeout: DEFAULT_TIMEOUT_MS }));
+      if (first) this.#openedPage = page;
+      this.#emitNav();
+    } catch (error) {
+      this.#restoreUrls.set(page, target);
+      this.#emitNav();
+      throw error;
+    }
   }
 
   /** @param {-1 | 1} delta */
@@ -599,12 +1304,22 @@ class BrowserSession {
 
   async reload({ ignoreCache } = {}) {
     const page = this.#page();
+    const failedUrl = this.#navigationErrors.get(page)?.url;
+    if (failedUrl) return this.navigate(failedUrl);
     if (ignoreCache === true) {
       const cdp = await this.#control(page);
       await cdp.send("Page.reload", { ignoreCache: true });
       return;
     }
     await this.#go(page.reload({ waitUntil: "commit", timeout: DEFAULT_TIMEOUT_MS }));
+  }
+
+  async stopLoading() {
+    const page = this.#page();
+    this.#stopCounts.set(page, (this.#stopCounts.get(page) ?? 0) + 1);
+    const cdp = await this.#control(page);
+    await cdp.send("Page.stopLoading");
+    this.#setLoading(false);
   }
 
   /** Answers the pending dialog. Clears it before answering, so a failure never leaves it stuck. */
@@ -641,8 +1356,8 @@ class BrowserSession {
         return { text: this.#statusText() };
       case "navigate": {
         const url = normalizeBrowserUrl(input.url);
-        await this.#preparing.get(page);
-        await this.#go(page.goto(url, { waitUntil: "load", timeout: DEFAULT_TIMEOUT_MS }));
+        await this.navigate(url);
+        await page.waitForLoadState("load", { timeout: 5000 }).catch(noop);
         return { text: await this.#settledStatus() };
       }
       case "back":
@@ -660,7 +1375,7 @@ class BrowserSession {
         return { text: await this.#settledStatus() };
       }
       case "reload":
-        await this.#go(page.reload({ waitUntil: "commit", timeout: DEFAULT_TIMEOUT_MS }));
+        await this.reload();
         await page.waitForLoadState("load", { timeout: 5000 }).catch(noop);
         return { text: await this.#settledStatus() };
       case "snapshot":
@@ -701,6 +1416,7 @@ class BrowserSession {
       }
       case "press": {
         const key = requireString(input.key, "key");
+        await this.#recordKey(page, key);
         await page.keyboard.press(key);
         return { text: `Pressed ${key}.` };
       }
@@ -841,11 +1557,19 @@ class BrowserSession {
         await this.#cursor(to, "move");
         break;
       }
-      case "type":
-        await page.keyboard.type(requireString(input.text, "text"));
+      case "type": {
+        const text = requireString(input.text, "text");
+        if (this.#recordingKeyPages.has(page)) {
+          for (const character of text) {
+            await this.#recordKey(page, character);
+            await page.keyboard.type(character);
+          }
+        } else await page.keyboard.type(text);
         break;
+      }
       case "key":
         for (const chord of xdotoolChords(input.keys)) {
+          await this.#recordKey(page, chord);
           await page.keyboard.press(chord);
           await sleep(40);
         }
@@ -1048,8 +1772,10 @@ class BrowserSession {
 
   // Emits the agent cursor like T3's pointerFor: a move, then for clicks a click just after.
   async #cursor(point, phase) {
+    const tabId = this.#active ? this.#tabId(this.#active) : null;
     this.#emit("pointer", {
       phase: "move",
+      tabId,
       x: point.x,
       y: point.y,
       sequence: ++this.#pointerSequence,
@@ -1058,11 +1784,19 @@ class BrowserSession {
     if (phase !== "click") return;
     this.#emit("pointer", {
       phase: "click",
+      tabId,
       x: point.x,
       y: point.y,
       sequence: ++this.#pointerSequence,
     });
     await sleep(AGENT_CURSOR_CLICK_LEAD_MS);
+  }
+
+  async #recordKey(page, key, modifiers = 0) {
+    if (!this.#recordingKeyPages.has(page)) return;
+    const sensitive = await withTimeout(page.evaluate(recordingKeysAreSensitive), 300, true);
+    const label = sensitive ? null : recordingKeyLabel(key, modifiers);
+    this.#emit("recording-key", { tabId: this.#tabId(page), label });
   }
 
   /**
@@ -1123,6 +1857,16 @@ class BrowserSession {
       const { type, message } = dialogState(this.#dialog.dialog);
       lines.push(`Dialog: ${type} "${message}" is waiting. Call browser_dialog to answer it.`);
     }
+    const activeId = this.#active ? this.#tabId(this.#active) : null;
+    const downloads = this.#downloads.list().filter((item) => item.tabId === activeId);
+    if (downloads.length) {
+      lines.push("Downloads:");
+      for (const item of downloads) {
+        const saved = this.#downloads.get(item.id);
+        if (saved)
+          lines.push(`- ${JSON.stringify(item.fileName)} (${item.sizeBytes} bytes): ${saved.path}`);
+      }
+    }
     return lines.join("\n");
   }
 
@@ -1132,12 +1876,22 @@ class BrowserSession {
   }
 
   async #go(promise) {
+    const page = this.#active;
+    const stopCount = page ? (this.#stopCounts.get(page) ?? 0) : 0;
     try {
       return await promise;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
+      if (
+        page &&
+        /ERR_ABORTED|Navigation.*interrupted/i.test(message) &&
+        (this.#stopCounts.get(page) ?? 0) > stopCount
+      )
+        return null;
       if (message.includes("Download is starting")) {
-        throw new Error("That address is a file this browser cannot show, so it was downloaded.");
+        throw new Error(
+          "That address is a file this browser cannot show, so it was downloaded. Call browser_status to find the saved file.",
+        );
       }
       const net = /ERR_[A-Z_]+/.exec(message);
       if (net) throw new Error(`Navigation failed: ${net[0]}`);
@@ -1145,18 +1899,39 @@ class BrowserSession {
     }
   }
 
-  close() {
-    if (this.#closed) return Promise.resolve();
+  async close() {
+    if (this.#closePromise) return this.#closePromise;
+    // Publish the promise before emitting "closed": a listener may synchronously call close.
+    this.#closePromise = Promise.resolve().then(async () => {
+      await Promise.allSettled([...this.#acquiringProfiles.values()]);
+      if (this.#ownership)
+        await Promise.all([...this.#owned].map((page) => page.close().catch(noop)));
+      this.#owned.clear();
+      await Promise.all(
+        [...this.#contexts.values()].map((entry) =>
+          entry.release ? entry.release().catch(noop) : entry.context.close().catch(noop),
+        ),
+      );
+      await this.#downloads.close();
+      this.#contexts.clear();
+    });
     this.#finish();
-    return this.#context.close().catch(noop);
+    return this.#closePromise;
   }
 
   #finish() {
     if (this.#closed) return;
     this.#closed = true;
     clearInterval(this.#poll);
+    for (const entry of this.#contexts.values()) {
+      if (entry.onPage) entry.context.off("page", entry.onPage);
+      if (entry.onClose) entry.context.off("close", entry.onClose);
+    }
     for (const stream of this.#screencasts) void stream.stop();
+    for (const session of this.#devtoolsSessions) void session.detach().catch(noop);
+    this.#devtoolsSessions.clear();
     this.#screencasts.clear();
+    this.#pinnedScreencasts.clear();
     this.#emit("closed");
     this.#listeners.clear();
     this.#onClosed?.();
@@ -1169,51 +1944,199 @@ class BrowserSession {
   }
 
   #usable() {
-    return this.#context
-      .pages()
-      .filter(
-        (page) => !page.isClosed() && !/^(?:devtools|chrome|chrome-untrusted):/i.test(page.url()),
-      );
+    return (this.#ownership ? [...this.#owned] : this.#context.pages()).filter(
+      (page) => !page.isClosed() && !/^(?:devtools|chrome|chrome-untrusted):/i.test(page.url()),
+    );
+  }
+
+  #claim(page, profileId = this.#initialProfile) {
+    if (this.#ownership) {
+      const owner = this.#ownership.owners.get(page);
+      if (owner && owner !== this) return false;
+      this.#ownership.owners.set(page, this);
+      this.#owned.add(page);
+    }
+    this.#pageProfiles.set(page, profileId);
+    this.#watch(page);
+    return true;
+  }
+
+  async #newPage(profileId = this.#defaultProfile()) {
+    const entry = await this.#entryFor(profileId);
+    const existing = entry.initialPage;
+    entry.initialPage = null;
+    if (existing && !existing.isClosed()) return existing;
+    const page = await entry.context.newPage();
+    if (this.#closed) {
+      await page.close().catch(noop);
+      throw new Error("The browser closed.");
+    }
+    this.#claim(page, profileId);
+    return page;
+  }
+
+  #contextOf(page) {
+    return typeof page.context === "function" ? page.context() : this.#context;
   }
 
   #control(page) {
     let cdp = this.#controls.get(page);
     if (!cdp) {
-      cdp = this.#context.newCDPSession(page);
+      cdp = this.#contextOf(page).newCDPSession(page);
       this.#controls.set(page, cdp);
       cdp.catch(() => this.#controls.delete(page));
     }
     return cdp;
   }
 
+  async #captureFavicon(page) {
+    const generation = (this.#faviconGenerations.get(page) ?? 0) + 1;
+    this.#faviconGenerations.set(page, generation);
+    const icon = await captureBrowserFavicon(page);
+    if (this.#closed || page.isClosed() || this.#faviconGenerations.get(page) !== generation)
+      return;
+    if (icon) this.#tabFavicons.set(page, icon);
+    else this.#tabFavicons.delete(page);
+    this.#emitTabs();
+  }
+
+  async #refreshAudio(page) {
+    if (this.#audioRefreshes.has(page) || this.#closed || page.isClosed()) return;
+    this.#audioRefreshes.add(page);
+    const generation = this.#audioGenerations.get(page) ?? 0;
+    try {
+      const context = this.#contextOf(page);
+      const state = browserAudioAvailable(context)
+        ? await tabAudioState(context, await this.#control(page))
+        : null;
+      if (this.#closed || page.isClosed() || (this.#audioGenerations.get(page) ?? 0) !== generation)
+        return;
+      const previous = this.#audioStates.get(page);
+      if (!state) this.#audioStates.delete(page);
+      else this.#audioStates.set(page, state);
+      if (JSON.stringify(previous ?? null) !== JSON.stringify(state)) this.#emitTabs();
+    } catch {
+      // A worker may be stopped or unavailable for this Chrome build or profile.
+      if ((this.#audioGenerations.get(page) ?? 0) === generation && this.#audioStates.has(page)) {
+        this.#audioStates.delete(page);
+        this.#emitTabs();
+      }
+    } finally {
+      this.#audioRefreshes.delete(page);
+    }
+  }
+
   #watch(page) {
     if (this.#watched.has(page)) return;
     this.#watched.add(page);
+    this.#tabId(page);
     page.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(DEFAULT_TIMEOUT_MS);
+    page.on("download", (download) => {
+      const request = this.#navigationRequests.get(page);
+      const isNavigation =
+        request?.url() === download.url() &&
+        /ERR_ABORTED/i.test(request.failure()?.errorText ?? "");
+      let entry;
+      if (isNavigation) {
+        entry = {
+          url: download.url(),
+          fileName: String(download.suggestedFilename() || "download")
+            .replace(/[\u0000-\u001f\u007f/\\]/g, "_")
+            .slice(0, 255),
+          downloadId: null,
+          status: "saving",
+        };
+        this.#restoreUrls.set(page, entry.url);
+        this.#fileNotShown.set(page, entry);
+        if (page === this.#active) this.#emitNav();
+      }
+      void this.#downloads.save(page, this.#tabId(page), download).then((saved) => {
+        if (!entry || this.#closed || this.#fileNotShown.get(page) !== entry) return;
+        this.#fileNotShown.set(
+          page,
+          saved
+            ? { ...entry, fileName: saved.fileName, downloadId: saved.id, status: "ready" }
+            : { ...entry, status: "failed" },
+        );
+        if (page === this.#active) this.#emitNav();
+      });
+    });
     this.#preparing.set(page, this.#prepare(page));
+    void this.#refreshAudio(page);
     // Listening intercepts the picker; whoever drives the page answers it (T3's onFileChooser).
     page.on("filechooser", (chooser) => void this.#offerFileChooser(page, chooser));
     const mainNavigation = (request) =>
       request.isNavigationRequest() && request.frame() === page.mainFrame();
     page.on("request", (request) => {
-      if (page !== this.#active || !mainNavigation(request)) return;
+      if (!mainNavigation(request)) return;
+      this.#navigationRequests.set(page, request);
+      this.#navigationErrors.delete(page);
+      this.#fileNotShown.delete(page);
+      if (page !== this.#active) return;
       this.#refs = null;
       this.#setLoading(true);
     });
     page.on("requestfailed", (request) => {
-      if (page === this.#active && mainNavigation(request)) this.#setLoading(false);
+      if (!mainNavigation(request) || this.#navigationRequests.get(page) !== request) return;
+      const description = request.failure()?.errorText ?? "";
+      // Canceled requests include downloads, redirects and user-initiated stops; they are not
+      // connection failures and must not replace the page with an unreachable screen.
+      if (description && !/ERR_ABORTED/i.test(description)) {
+        const url = request.url();
+        if (/^https?:\/\//i.test(url)) {
+          this.#restoreUrls.set(page, url);
+          this.#navigationErrors.set(page, { url, description: description.slice(0, 256) });
+          let finish;
+          const transition = new Promise((resolve) => {
+            const onNavigation = (frame) => {
+              if (frame === page.mainFrame()) finish();
+            };
+            const timer = setTimeout(() => finish(), 1000);
+            timer.unref?.();
+            finish = () => {
+              clearTimeout(timer);
+              page.off("framenavigated", onNavigation);
+              resolve();
+            };
+            page.on("framenavigated", onNavigation);
+          });
+          this.#failedTransitions.set(page, transition);
+          void transition.then(() => {
+            if (this.#failedTransitions.get(page) === transition)
+              this.#failedTransitions.delete(page);
+          });
+        }
+      }
+      if (page === this.#active) this.#setLoading(false);
+      else this.#emitTabs();
     });
     page.on("load", () => {
-      if (page !== this.#active) return;
+      void this.#captureFavicon(page);
+      if (page !== this.#active) {
+        void page
+          .title()
+          .then((title) => {
+            this.#tabTitles.set(page, title.slice(0, 512));
+            this.#emitTabs();
+          })
+          .catch(noop);
+        return;
+      }
       this.#setLoading(false);
       void this.#refreshNav();
     });
     // A main-frame navigation makes its page the active one, like T3's most recent navigation.
     page.on("framenavigated", (frame) => {
       if (frame !== page.mainFrame()) return;
-      this.#activate(page);
-      if (page !== this.#active) return;
+      this.#faviconGenerations.set(page, (this.#faviconGenerations.get(page) ?? 0) + 1);
+      this.#tabFavicons.delete(page);
+      if (/^https?:\/\//i.test(page.url())) this.#restoreUrls.delete(page);
+      if (page !== this.#active) {
+        this.#emitTabs();
+        return;
+      }
+      if (page.url() !== "about:blank" && this.#selectedBlank === page) this.#selectedBlank = null;
       this.#refs = null;
       void this.#refreshNav();
     });
@@ -1236,10 +2159,11 @@ class BrowserSession {
     if (key === this.#lastNav) return;
     this.#lastNav = key;
     this.#emit("nav", nav);
+    this.#emitTabs();
   }
 
   async #refreshNav() {
-    if (this.#active?.url() === "about:blank") {
+    if (this.#active?.url() === "about:blank" && this.#active !== this.#selectedBlank) {
       const nonBlank = this.#usable().find((p) => p.url() && p.url() !== "about:blank");
       if (nonBlank && nonBlank !== this.#active) {
         this.#activate(nonBlank);
@@ -1256,7 +2180,10 @@ class BrowserSession {
       null,
     );
     if (this.#closed || seq !== this.#navSeq || page !== this.#active) return;
-    if (title !== null) this.#title = title.slice(0, 512);
+    if (title !== null) {
+      this.#title = title.slice(0, 512);
+      this.#tabTitles.set(page, this.#title);
+    }
     if (history) {
       const count = history.entries.length;
       this.#history = {
@@ -1273,12 +2200,27 @@ class BrowserSession {
     if (!this.#usable().includes(page)) return;
     const previous = this.#active;
     this.#active = page;
+    this.#context = this.#contextOf(page);
     this.#refs = null;
     this.#title = "";
     this.#loading = false;
     if (previous) void this.#releaseHeldInput(previous);
-    for (const stream of this.#screencasts) void stream.retarget(page);
-    void this.#syncViewport(page);
+    this.#emitTabs();
+    this.#emitNav();
+    for (const stream of this.#screencasts)
+      if (!this.#pinnedScreencasts.has(stream)) void stream.retarget(page);
+    const settings = this.#settingsFor(page);
+    if (
+      settings.zoomFactor !== 1 ||
+      settings.viewport.width !== DEFAULT_VIEWPORT.width ||
+      settings.viewport.height !== DEFAULT_VIEWPORT.height
+    ) {
+      void this.#applyBrowserViewport(page).catch(noop);
+    } else {
+      void this.#syncViewport(page);
+    }
+    if (settings.colorScheme !== "system")
+      void page.emulateMedia({ colorScheme: settings.colorScheme }).catch(noop);
     void this.#refreshNav();
   }
 
@@ -1295,13 +2237,18 @@ class BrowserSession {
       null,
     );
     if (!size || size.width <= 0 || size.height <= 0) return;
+    this.#pageViewports.set(page, { width: size.width, height: size.height });
     if (page !== this.#active) return;
     if (size.width === this.#viewport.width && size.height === this.#viewport.height) return;
     this.#viewport = { width: size.width, height: size.height };
-    this.#emit("viewport", this.viewport());
+    this.#emit("viewport", { ...this.viewport(), tabId: this.#tabId(page) });
   }
 
   async #pageGone(page) {
+    this.#owned.delete(page);
+    if (this.#openedPage === page) this.#openedPage = null;
+    void this.#downloads.closePage(page);
+    this.#emitTabs();
     if (this.#dialog?.page === page) {
       this.#dialog = null;
       this.#emit("dialog", null);
@@ -1316,7 +2263,9 @@ class BrowserSession {
       return;
     }
     // Keep one page, as T3 keeps a tab. The new page's event activates it.
-    const fresh = await this.#context.newPage().catch(() => null);
+    const fresh = await this.#newPage(this.#pageProfiles.get(page) ?? this.#defaultProfile()).catch(
+      () => null,
+    );
     if (fresh && !this.#active) {
       this.#watch(fresh);
       this.#activate(fresh);
@@ -1360,24 +2309,99 @@ function browserIdleMs() {
  * closed, so an idle ADE leaves no Chrome running; the next call reopens it.
  * @param {{ contextFor: (projectId: string) => Promise<import("playwright-core").BrowserContext>, idleMs?: number }} options
  */
-export function createBrowserHub({ contextFor, idleMs = browserIdleMs() }) {
+export function createBrowserHub({
+  contextFor,
+  acquireContext,
+  defaultProfile,
+  validProfile,
+  idleMs = browserIdleMs(),
+  sessionStore,
+  shouldPersist = () => true,
+}) {
   /** @type {Map<string, Promise<BrowserSession>>} */
   const sessions = new Map();
   /** Sessions that finished opening, for synchronous status checks. */
   const open = new Map();
   /** When each project's session was last asked for (agent action, viewer attach) or watched. */
   const lastUsed = new Map();
+  const snapshots = new Map();
+  const closing = new Map();
+  const ownership = { owners: new WeakMap(), contexts: new WeakSet() };
   /** @type {ReturnType<typeof setInterval> | undefined} */
   let sweeper;
 
   async function connect(projectId, onClosed) {
     let context;
+    let lease;
     try {
-      context = await contextFor(projectId);
+      if (acquireContext) {
+        lease = await acquireContext(projectId);
+        context = lease.context;
+      } else context = await contextFor(projectId);
     } catch (cause) {
       throw cdpUnavailable(cause);
     }
-    return BrowserSession.open({ context, onClosed });
+    let session;
+    try {
+      session = await BrowserSession.open({
+        context,
+        onClosed,
+        ...(lease
+          ? {
+              ownership,
+              releaseContext: lease.release,
+              profileId: lease.profileId,
+              acquireProfile: (profileId) => acquireContext(projectId, profileId),
+              defaultProfile: () => defaultProfile?.(projectId) ?? lease.profileId ?? "default",
+              validProfile: (profileId) =>
+                validProfile?.(projectId, profileId) ??
+                profileId === (lease.profileId ?? "default"),
+            }
+          : {}),
+      });
+      if (sessionStore && shouldPersist(projectId)) {
+        const saved = await sessionStore.read(projectId);
+        if (saved) await session.restoreTabs(saved);
+        const saveSnapshot = (value) => {
+          const previous = snapshots.get(projectId);
+          if (previous) clearTimeout(previous.timer);
+          const persistent = value.tabs.filter((tab) => tab.profileId !== "incognito");
+          const snapshot = {
+            activeId: persistent.some((tab) => tab.id === value.activeId)
+              ? value.activeId
+              : (persistent.at(-1)?.id ?? null),
+            tabs: persistent.map(({ id, url, profileId }) => ({
+              id,
+              url,
+              ...(profileId ? { profileId } : {}),
+            })),
+          };
+          const timer = setTimeout(() => {
+            snapshots.delete(projectId);
+            void sessionStore.write(projectId, snapshot).catch(noop);
+          }, 250);
+          timer.unref?.();
+          snapshots.set(projectId, { timer, snapshot });
+        };
+        session.on("tabs", saveSnapshot);
+        session.on("closed", () => {
+          const pending = snapshots.get(projectId);
+          if (!pending) return;
+          clearTimeout(pending.timer);
+          snapshots.delete(projectId);
+          // A browser process can disappear without going through hub.close(). Preserve the
+          // latest tab state in that case, too, instead of losing the debounced update.
+          void sessionStore.write(projectId, pending.snapshot).catch(noop);
+        });
+        saveSnapshot(session.tabs());
+      }
+      return session;
+    } catch (error) {
+      if (session) await session.close();
+      else if (lease) await lease.release();
+      else await context.close().catch(noop);
+      throw error;
+    }
   }
 
   /** Closes sessions that have no viewer and went unused for `idleMs`. */
@@ -1401,16 +2425,33 @@ export function createBrowserHub({ contextFor, idleMs = browserIdleMs() }) {
   }
 
   /** Closes the project's session and its context. */
-  async function close(projectId) {
+  function close(projectId) {
     const key = String(projectId);
-    const current = sessions.get(key);
-    sessions.delete(key);
-    open.delete(key);
-    lastUsed.delete(key);
-    syncSweeper();
-    if (!current) return;
-    const session = await current.catch(() => null);
-    await session?.close();
+    const existing = closing.get(key);
+    if (existing) return existing;
+    const work = Promise.resolve().then(async () => {
+      const current = sessions.get(key);
+      sessions.delete(key);
+      open.delete(key);
+      lastUsed.delete(key);
+      syncSweeper();
+      if (!current) return;
+      const session = await current.catch(() => null);
+      const snapshot = snapshots.get(key);
+      if (snapshot) {
+        clearTimeout(snapshot.timer);
+        snapshots.delete(key);
+        await sessionStore?.write(key, snapshot.snapshot).catch(noop);
+      }
+      await session?.close();
+    });
+    closing.set(key, work);
+    void work
+      .finally(() => {
+        if (closing.get(key) === work) closing.delete(key);
+      })
+      .catch(noop);
+    return work;
   }
 
   return {
@@ -1420,6 +2461,7 @@ export function createBrowserHub({ contextFor, idleMs = browserIdleMs() }) {
      */
     async get(projectId) {
       const key = String(projectId);
+      await closing.get(key)?.catch(noop);
       lastUsed.set(key, Date.now());
       const current = sessions.get(key);
       if (current) {
@@ -1476,6 +2518,7 @@ export function createBrowserHub({ contextFor, idleMs = browserIdleMs() }) {
 
     async closeAll() {
       await Promise.all([...sessions.keys()].map((key) => close(key)));
+      await sessionStore?.flush();
     },
   };
 }

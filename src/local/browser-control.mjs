@@ -118,6 +118,18 @@ class Control {
     });
   }
 
+  /** Interrupts a pending navigation without waiting behind it in the input queue. */
+  async humanInterrupt(viewerId, run) {
+    this.#assertOpen();
+    if (this.#owner !== viewerId) return undefined;
+    const work = Promise.resolve().then(() => {
+      if (this.#closed || this.#owner !== viewerId) return undefined;
+      return run();
+    });
+    this.track(work);
+    return work;
+  }
+
   /**
    * Reads that need no control and do not queue, so the agent can look at a page
    * while the human drives it.
@@ -128,6 +140,15 @@ class Control {
   async observe(run) {
     this.#assertOpen();
     return run();
+  }
+
+  /** Serializes browser settings with agent and viewer input without taking ownership. */
+  async system(run) {
+    this.#assertOpen();
+    return this.#enqueue(async () => {
+      this.#assertOpen();
+      return run();
+    });
   }
 
   /**

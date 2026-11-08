@@ -87,6 +87,33 @@ test("start waits out the first install without a bound and reports installing m
   assert.equal(computers.status("p").status, "running");
 });
 
+test("stopping during browser installation prevents the stale start from reopening it", async () => {
+  let finishFirst;
+  let calls = 0;
+  const installer = fakeInstaller({
+    state: "installing",
+    executable: () =>
+      ++calls === 1
+        ? new Promise((resolve) => {
+            finishFirst = resolve;
+          })
+        : "/opt/chrome-headless-shell",
+  });
+  const hub = fakeHub();
+  const computers = createComputerManager({ installer, hub });
+  const stale = computers.start("p");
+  const rejected = assert.rejects(stale, { code: "browser_closed" });
+  await Promise.resolve();
+  await computers.stop("p");
+  assert.equal(computers.status("p").status, "stopped");
+  installer.state = "installed";
+  await computers.start("p");
+  finishFirst("/opt/chrome-headless-shell");
+  await rejected;
+  assert.deepEqual(hub.opened, ["p"]);
+  assert.equal(computers.status("p").status, "running");
+});
+
 test("a failed start shows its words and setup command until the next start", async () => {
   let fail = true;
   const hub = fakeHub({

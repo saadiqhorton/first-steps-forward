@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createServer } from "node:http";
 
 const home = mkdtempSync(path.join(os.tmpdir(), "ade-att-api-"));
 mkdirSync(path.join(home, ".ade"), { mode: 0o700 });
@@ -131,6 +132,36 @@ test("POST /api/attachments rejects empty and oversize uploads", async () => {
     contentBase64: Buffer.alloc(10 * 1024 * 1024 + 1).toString("base64"),
   });
   assert.equal(big.status, 400);
+});
+
+test("browser recordings larger than ordinary attachments stream through the API", async (t) => {
+  const server = createServer((req, res) => {
+    void handle(req, res);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const video = Buffer.alloc(11 * 1024 * 1024, 23);
+  const response = await fetch(`${base}/api/attachments/recording`, {
+    method: "POST",
+    headers: { "content-type": "video/webm" },
+    body: video,
+  });
+  assert.equal(response.status, 201);
+  const meta = await response.json();
+  assert.equal(meta.size, video.length);
+  const downloaded = await fetch(`${base}/api/attachments/${meta.id}`);
+  assert.equal(downloaded.status, 200);
+  assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), video);
+  const range = await fetch(`${base}/api/attachments/${meta.id}`, {
+    headers: { range: "bytes=10-19" },
+  });
+  assert.equal(range.status, 206);
+  assert.equal(range.headers.get("content-range"), `bytes 10-19/${video.length}`);
+  assert.deepEqual(Buffer.from(await range.arrayBuffer()), video.subarray(10, 20));
 });
 
 test("session create stores attachment metadata without paths in message text", async () => {

@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "ADE Browser Audio",
+  "version": "1.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1a8buxasx7fwqly3gcHdNhx91VzMwij+PwFPM6Kv+V2r0Hr9bDK99ZZcu+Jf+WNMHhlDiTiqtoR176y4HCTfofTqgVdxZDVfLZIgwe5CA7txR4zSq7lrrLUgk8TA00Izk09olwIfr8xOTABEX71OzsPaw91JX/YDeDAiN7xCjUvElo1uuA8399iyeLyh3JDhiyoGllEuwrv5JEn2pmXGz5veSQUoKTX6hUwSeFs+vzT+BwfnOcHM29jQbNfPSzDOJr5r7ioSS3BR/nPUE13ALlGpPdCKsVknl6svZBvM+kwhrvwXkfuipiY7vdz2I2X/mNJNUdU1eXrX3CB0nTq23wIDAQAB",
+  "permissions": ["debugger"],
+  "background": { "service_worker": "worker.js" }
+}

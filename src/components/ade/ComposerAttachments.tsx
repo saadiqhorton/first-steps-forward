@@ -1,5 +1,6 @@
 import { File, Paperclip, X } from "lucide-react";
 import type { RefObject } from "react";
+import { recordingAttachment } from "@/lib/ade/browser/recordingUpload";
 
 export type AttachmentDraft = {
   key: string;
@@ -62,7 +63,10 @@ export function ComposerAttachments({
                 <span className="min-w-0 truncate text-[12px]" title={name}>
                   {name}
                   {!draft.previewUrl ? (
-                    <span className="text-dim"> · {formatSize(draft.file.size)}</span>
+                    <span className="text-dim">
+                      {" "}
+                      · {formatSize(recordingAttachment(draft.file)?.size ?? draft.file.size)}
+                    </span>
                   ) : null}
                 </span>
                 <button

@@ -41,10 +41,14 @@ const failurePhase = (error) => ({
 export function createComputerManager({ installer, hub }) {
   const phases = new Map();
   const pending = new Map();
+  const explicitlyStopped = new Set();
+  // Invalidate starts that are still installing or opening when a stop is requested.
+  const generations = new Map();
 
   function status(projectId) {
     const base = { projectId, screen: SCREEN };
     if (hub.peek(projectId)) return { ...base, status: "running" };
+    if (explicitlyStopped.has(projectId)) return { ...base, status: "stopped" };
     const install = installer.status();
     if (install.state === "unsupported")
       return { ...base, status: "unavailable", detail: install.detail };
@@ -63,26 +67,38 @@ export function createComputerManager({ installer, hub }) {
   /** Starts the project's browser, waiting out a first install however long it takes. */
   function start(projectId) {
     if (pending.has(projectId)) return pending.get(projectId);
+    explicitlyStopped.delete(projectId);
+    const generation = generations.get(projectId) ?? 0;
+    const stillCurrent = () => (generations.get(projectId) ?? 0) === generation;
     phases.set(projectId, { status: "starting", detail: "Starting the browser." });
     const promise = (async () => {
       await installer.executable({ wait: Infinity });
+      if (!stillCurrent())
+        throw Object.assign(new Error("The browser was stopped."), { code: "browser_closed" });
       await hub.get(projectId);
+      if (!stillCurrent())
+        throw Object.assign(new Error("The browser was stopped."), { code: "browser_closed" });
     })()
       .then(
         () => {
-          phases.delete(projectId);
+          if (stillCurrent()) phases.delete(projectId);
         },
         (error) => {
-          phases.set(projectId, failurePhase(error));
+          if (stillCurrent()) phases.set(projectId, failurePhase(error));
           throw error;
         },
       )
-      .finally(() => pending.delete(projectId));
+      .finally(() => {
+        if (pending.get(projectId) === promise) pending.delete(projectId);
+      });
     pending.set(projectId, promise);
     return promise;
   }
 
   async function stop(projectId) {
+    explicitlyStopped.add(projectId);
+    generations.set(projectId, (generations.get(projectId) ?? 0) + 1);
+    pending.delete(projectId);
     phases.delete(projectId);
     await hub.close(projectId);
   }
@@ -93,6 +109,7 @@ export function createComputerManager({ installer, hub }) {
    * @returns {Promise<{ status: number, payload: object }>}
    */
   async function action(projectId, body) {
+    explicitlyStopped.delete(projectId);
     let session;
     try {
       session = await hub.get(projectId);

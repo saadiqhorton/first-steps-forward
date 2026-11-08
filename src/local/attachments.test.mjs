@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 import {
   saveAttachment,
   readAttachment,
@@ -13,6 +14,7 @@ import {
   MAX_FILE_BYTES,
   MAX_TURN_BYTES,
   MAX_FILES,
+  saveRecording,
 } from "./attachments.mjs";
 
 test("save and read roundtrip", async () => {
@@ -29,6 +31,27 @@ test("save and read roundtrip", async () => {
     const read = await readAttachment(dataDir, meta.id);
     assert.equal(read.bytes.toString(), "hello attachment");
     assert.ok(read.absPath.includes(meta.id));
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("recordings stream to disk and can be resolved for an agent without loading video bytes", async () => {
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), "ade-recording-"));
+  try {
+    const chunk = Buffer.alloc(1024 * 1024, 7);
+    const meta = await saveRecording(
+      dataDir,
+      Readable.from(Array.from({ length: 11 }, () => chunk)),
+    );
+    assert.equal(meta.size, 11 * 1024 * 1024);
+    assert.equal(meta.mime, "video/webm");
+    const [resolved] = await resolveAttachments(dataDir, [meta.id], { includeBytes: false });
+    assert.equal(resolved.absPath.endsWith(`${meta.id}/file`), true);
+    assert.equal(resolved.bytes, undefined);
+    const read = await readAttachment(dataDir, meta.id);
+    assert.equal(read.bytes.length, meta.size);
+    assert.equal(read.bytes[read.bytes.length - 1], 7);
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
   }

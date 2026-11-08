@@ -141,9 +141,10 @@ export function AgentActivity({
   const working = status === "working";
   const expanded = working || currentOpen;
   const contentType = items.length ? getContentType(items) : (initialContentType ?? "mixed");
-  const cappedHeight = Math.min(contentHeight, Math.max(0, maxHeight));
-  const viewportHeight = working ? Math.max(0, maxHeight) : cappedHeight;
-  const capped = contentHeight > maxHeight;
+  const limit = maxHeight === null ? null : Math.max(0, maxHeight);
+  const capped = limit !== null && contentHeight > limit;
+  const viewportHeight =
+    limit === null ? contentHeight : working ? limit : Math.min(contentHeight, limit);
   const streamOffset = working ? Math.min(0, viewportHeight - contentHeight) : 0;
 
   useLayoutEffect(() => {

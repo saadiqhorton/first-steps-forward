@@ -95,6 +95,7 @@ const installFailed = (detail, cause) =>
  *   release?: ReturnType<typeof browserRelease>,
  *   fetchImpl?: typeof fetch,
  *   waitMs?: number,
+ *   env?: NodeJS.ProcessEnv,
  * }} options
  */
 export function createBrowserInstaller({
@@ -104,7 +105,12 @@ export function createBrowserInstaller({
   release = browserRelease(platform, arch),
   fetchImpl = fetch,
   waitMs = DEFAULT_WAIT_MS,
+  env = process.env,
 }) {
+  // Never discover or connect to the user's ordinary browser profile. A headed browser is
+  // explicitly selected by the operator and still uses ADE's own isolated profiles.
+  const headed = env.ADE_BROWSER_HEADED === "1";
+  const configuredExecutable = (env.ADE_BROWSER_EXECUTABLE ?? "").trim();
   const installRoot = path.join(
     baseDir,
     "tools",
@@ -117,6 +123,26 @@ export function createBrowserInstaller({
   let state = { tag: "idle" };
   const progress = { downloadedBytes: 0, unpacking: false };
   let gate = Promise.resolve();
+
+  async function systemExecutable() {
+    const help = "Set ADE_BROWSER_EXECUTABLE to the absolute path of a full Chrome or Chromium executable.";
+    if (!configuredExecutable || !path.isAbsolute(configuredExecutable)) {
+      throw coded("browser_unsupported", `ADE's visible browser needs a local browser executable. ${help}`);
+    }
+    if (/chrome-headless-shell(?:\.exe)?$/i.test(path.basename(configuredExecutable))) {
+      throw coded("browser_unsupported", `Chrome's headless shell cannot show passkey dialogs. ${help}`);
+    }
+    let info;
+    try {
+      info = await fs.stat(configuredExecutable);
+    } catch {
+      throw coded("browser_unsupported", `ADE cannot find the selected browser. ${help}`);
+    }
+    if (!info.isFile() || (platform !== "win32" && (info.mode & 0o111) === 0)) {
+      throw coded("browser_unsupported", `The selected browser is not an executable file. ${help}`);
+    }
+    return configuredExecutable;
+  }
 
   async function installedExecutable() {
     if (!release) return null;
@@ -378,6 +404,16 @@ export function createBrowserInstaller({
      * @returns {Promise<string>}
      */
     async executable({ wait = waitMs } = {}) {
+      if (headed) {
+        try {
+          const executable = await systemExecutable();
+          state = { tag: "installed", executable };
+          return executable;
+        } catch (error) {
+          state = { tag: "failed", error };
+          throw error;
+        }
+      }
       if (!release) throw unsupportedError();
       const current = await join();
       if (current.tag === "installed") return current.executable;
@@ -402,10 +438,14 @@ export function createBrowserInstaller({
     },
 
     /** The installed executable, without starting an install. */
-    installed: installedExecutable,
+    installed: () => headed ? systemExecutable().catch(() => null) : installedExecutable(),
 
     /** Install state for status displays; never starts an install. */
     status() {
+      if (headed) {
+        if (state.tag === "failed") return { state: "failed", detail: state.error.message };
+        return { state: state.tag === "installed" ? "installed" : "idle" };
+      }
       if (!release) return { state: "unsupported", detail: unsupportedError().message };
       if (state.tag === "installing") return { state: "installing", progress: snapshotProgress() };
       if (state.tag === "failed") return { state: "failed", detail: state.error.message };

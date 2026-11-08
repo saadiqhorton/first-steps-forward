@@ -13,6 +13,8 @@ import {
   parseRepoSource,
 } from "../project-sources.mjs";
 import { body } from "../http.mjs";
+import { browserScope } from "../browser-scope.mjs";
+import { browserProfiles, browserProfileStorageKey } from "../browser-profiles.mjs";
 
 /** Folder picking, and `/api/projects`: add (by path, clone or new folder), remove, diff, checks. */
 export async function projects(ctx) {
@@ -23,6 +25,7 @@ export async function projects(ctx) {
     sessionLogs,
     state,
     browserContexts,
+    browserSessionStore,
     devServers,
     controls,
     computers,
@@ -153,10 +156,22 @@ export async function projects(ctx) {
         error: "Stop the running agent or dev process before removing this project.",
       });
     const removedSessions = state.sessions.filter((s) => s.projectId === parts[1]);
-    // The project's browser and its stored profile are ADE metadata too.
-    await computers.stop(parts[1]).catch(() => {});
-    await controls.delete(parts[1]);
-    await browserContexts.clearProfile(parts[1]).catch(() => {});
+    // Browser state belongs to the project even when tabs use a conversation scope or
+    // a named profile. Close all scopes before removing their snapshots and profile data.
+    const scopes = [
+      parts[1],
+      ...removedSessions.map((session) => browserScope(parts[1], session.id)),
+    ];
+    await Promise.all(scopes.map((scope) => computers.stop(scope).catch(() => {})));
+    await Promise.all(scopes.map((scope) => controls.delete(scope)));
+    await Promise.all(scopes.map((scope) => browserSessionStore?.remove(scope)));
+    await Promise.all(
+      browserProfiles(state.projects[idx])
+        .filter((profile) => profile.id !== "incognito")
+        .map((profile) =>
+          browserContexts.clearProfile(browserProfileStorageKey(parts[1], profile.id)),
+        ),
+    );
     state.projects.splice(idx, 1);
     state.sessions = state.sessions.filter((s) => s.projectId !== parts[1]);
     await Promise.all(removedSessions.map((session) => sessionLogs.remove(session.id)));

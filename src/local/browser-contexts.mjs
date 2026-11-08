@@ -8,6 +8,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 import { sandboxDisabled } from "./browser-host.mjs";
@@ -17,6 +18,7 @@ export const INCOGNITO_PROFILE_ID = "incognito";
 export const CONTEXT_VIEWPORT = DEFAULT_VIEWPORT;
 const CONTEXT_OPTIONS = { viewport: CONTEXT_VIEWPORT, deviceScaleFactor: BROWSER_RENDER_SCALE };
 const noop = () => {};
+const AUDIO_EXTENSION_PATH = fileURLToPath(new URL("./browser-audio-extension", import.meta.url));
 
 const UA_PLATFORMS = { darwin: "macOS", linux: "Linux", win32: "Windows" };
 
@@ -75,10 +77,26 @@ export function createBrowserContexts({
   onContextClose,
   launcher = chromium,
 }) {
+  const headed = env.ADE_BROWSER_HEADED === "1";
   /** @type {Map<string, Promise<import("playwright-core").BrowserContext>>} */
   const contexts = new Map();
   /** @type {Map<string, Promise<void>>} */
   const clearing = new Map();
+  // A profile may be used by several conversation previews at once. Serialize lease changes
+  // so the last release cannot close a context while another preview is acquiring it.
+  const leaseQueues = new Map();
+  const leases = new Map();
+  function withLeaseKey(key, action) {
+    const previous = leaseQueues.get(key) ?? Promise.resolve();
+    const current = previous.catch(noop).then(action);
+    leaseQueues.set(key, current);
+    void current
+      .finally(() => {
+        if (leaseQueues.get(key) === current) leaseQueues.delete(key);
+      })
+      .catch(noop);
+    return current;
+  }
   /** Keys of the contexts that live on the shared browser (isolated and incognito ones). */
   const shared = new Set();
   /** @type {Promise<import("playwright-core").Browser> | undefined} */
@@ -95,9 +113,27 @@ export function createBrowserContexts({
         "--disable-gpu",
         "--force-device-scale-factor=2",
         "--disable-blink-features=AutomationControlled",
+        ...(headed
+          ? [
+              `--disable-extensions-except=${AUDIO_EXTENSION_PATH}`,
+              `--load-extension=${AUDIO_EXTENSION_PATH}`,
+            ]
+          : []),
       ],
-      ignoreDefaultArgs: ["--enable-automation"],
-      headless: true,
+      // Playwright mutes headless Chromium by default. The browser runs on the ADE host,
+      // so removing that flag lets page audio play through that machine's audio devices.
+      ignoreDefaultArgs: headed
+        ? [
+            "--enable-automation",
+            "--mute-audio",
+            "--disable-extensions",
+            "--use-mock-keychain",
+            "--password-store=basic",
+          ]
+        : ["--enable-automation", "--mute-audio"],
+      // A full local Chromium can display the operating system's WebAuthn dialogs. The
+      // downloaded headless shell cannot, so this requires an explicit executable as well.
+      headless: !headed,
       // Only an explicit operator opt-out disables sandboxing. Launch errors never do.
       chromiumSandbox: !sandboxDisabled(env),
     };
@@ -137,10 +173,12 @@ export function createBrowserContexts({
     released.then((instance) => instance.close()).catch(noop);
   }
 
-  function profileDirectory(profileId) {
+  function profileDirectory(profileId, visible = headed) {
     const encoded = encodeURIComponent(profileId);
     return path.join(
-      profilesDir,
+      // A system browser can be newer than the pinned headless shell. Separate data roots
+      // prevent a browser upgrade making headless profiles unreadable after switching back.
+      visible ? `${profilesDir}-headed` : profilesDir,
       profileId === "." || profileId === ".." ? encoded.replaceAll(".", "%2E") : encoded,
     );
   }
@@ -158,6 +196,38 @@ export function createBrowserContexts({
   }
 
   return {
+    /** Acquire a shared context until this preview releases its lease. */
+    async acquire(profileId, isolationKey) {
+      const key = JSON.stringify([profileId, isolationKey ?? null]);
+      const context = await withLeaseKey(key, async () => {
+        const existing = leases.get(key);
+        if (existing) {
+          existing.count++;
+          return existing.context;
+        }
+        const instance = await this.contextFor(profileId, isolationKey);
+        leases.set(key, { context: instance, count: 1 });
+        instance.once("close", () => {
+          if (leases.get(key)?.context === instance) leases.delete(key);
+        });
+        return instance;
+      });
+      let released = false;
+      return {
+        context,
+        release: async () => {
+          if (released) return;
+          released = true;
+          await withLeaseKey(key, async () => {
+            const entry = leases.get(key);
+            if (!entry || entry.context !== context) return;
+            if (--entry.count > 0) return;
+            leases.delete(key);
+            await context.close().catch(noop);
+          });
+        },
+      };
+    },
     /**
      * The context for a persistent profile, or a fresh isolated one per `isolationKey`.
      * @returns {Promise<import("playwright-core").BrowserContext>}
@@ -198,21 +268,30 @@ export function createBrowserContexts({
     async clearProfile(profileId) {
       if (profileId === INCOGNITO_PROFILE_ID) return;
       const key = JSON.stringify([profileId, null]);
-      const run = (async () => {
-        const pending = contexts.get(key);
-        if (pending) {
-          contexts.delete(key);
-          const context = await pending.catch(() => undefined);
-          await context?.close();
+      // Serialize with acquisitions and releases. Otherwise an acquisition can reuse a lease
+      // whose context is already being closed and hand a dead browser to a new conversation.
+      return withLeaseKey(key, async () => {
+        const run = (async () => {
+          const pending = contexts.get(key);
+          if (pending) {
+            contexts.delete(key);
+            const context = await pending.catch(() => undefined);
+            await context?.close();
+          }
+          leases.delete(key);
+          // A clear/delete applies to the profile in both launch modes.
+          await Promise.all([
+            fs.rm(profileDirectory(profileId, false), { recursive: true, force: true }),
+            fs.rm(profileDirectory(profileId, true), { recursive: true, force: true }),
+          ]);
+        })();
+        clearing.set(key, run);
+        try {
+          await run;
+        } finally {
+          if (clearing.get(key) === run) clearing.delete(key);
         }
-        await fs.rm(profileDirectory(profileId), { recursive: true, force: true });
-      })();
-      clearing.set(key, run);
-      try {
-        await run;
-      } finally {
-        if (clearing.get(key) === run) clearing.delete(key);
-      }
+      });
     },
 
     close() {

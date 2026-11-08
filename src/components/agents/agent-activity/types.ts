@@ -88,8 +88,8 @@ export interface AgentActivityProps {
   renderWorkingStatus?: (context: { label: ReactNode; duration: number }) => ReactNode;
   /** Optional renderer for the contents before the built-in disclosure chevron. */
   renderCompletedStatus?: (context: { summary: ReactNode; duration: number }) => ReactNode;
-  /** Maximum visible activity height before the stream begins gliding. */
-  maxHeight?: number;
+  /** Maximum visible activity height before the stream begins gliding; null shows all rows. */
+  maxHeight?: number | null;
   className?: string;
   contentClassName?: string;
 }

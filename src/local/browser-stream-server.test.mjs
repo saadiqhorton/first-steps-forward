@@ -31,6 +31,7 @@ function fakeSession() {
     calls,
     screencasts,
     nav: () => ({ ...nav }),
+    tabs: () => ({ activeId: "tab-1", tabs: [{ id: "tab-1", url: nav.url, title: nav.title }] }),
     viewport: () => ({ ...viewport }),
     fileChooser: () => null,
     pendingDialog: () => pendingDialog,
@@ -61,6 +62,8 @@ function fakeSession() {
       // A ctrl+c reports what the page copied, like BrowserSession.input.
       if (msg.type === "key" && msg.action === "down" && msg.key === "c" && msg.modifiers === 2)
         return { copied: "copied text" };
+      // Points above 100px accept text, so probe replies are easy to tell apart.
+      if (msg.type === "probe") return { probe: { x: msg.x, y: msg.y, editable: msg.y < 100 } };
     },
     releaseInput() {
       for (const { key, code } of heldKeys.values()) {
@@ -76,6 +79,22 @@ function fakeSession() {
     },
     async reload(opts) {
       calls.push({ name: "reload", opts });
+    },
+    async newTab() {
+      calls.push({ name: "newTab" });
+    },
+    async selectTab(id) {
+      calls.push({ name: "selectTab", id });
+    },
+    async closeTab(id) {
+      calls.push({ name: "closeTab", id });
+    },
+    async setTabAudio(id, muted) {
+      calls.push({ name: "setTabAudio", id, muted });
+    },
+    async resize(width, height) {
+      calls.push({ name: "resize", width, height });
+      viewport = { width, height };
     },
     async dialog(opts) {
       calls.push({ name: "dialog", opts });
@@ -291,6 +310,9 @@ test("on connect sends viewport, control and nav, and starts a clamped screencas
     loading: false,
     canGoBack: false,
     canGoForward: false,
+    error: null,
+    fileNotShown: null,
+    opened: false,
   });
   const session = sessions.get("p1");
   assert.deepEqual(session.screencasts[0].opts, { maxWidth: 7680, maxHeight: 500, quality: 40 });
@@ -376,6 +398,101 @@ test("gates input to the owner and broadcasts control to the second viewer", asy
   await closedWith(b);
   assert.equal(session.calls.filter((call) => call.name === "input").length, 1);
   a.ws.close();
+});
+
+test("a touch probe answers only the viewer that asked, and only with control", async (t) => {
+  const sessions = new Map();
+  const { server, controls } = setup(t, { sessions });
+  await listen(t, server);
+  const a = await open(streamUrl(server, "p1", "A"));
+  const b = await open(streamUrl(server, "p1", "B"));
+  await until(() => a.ofType("tabs").length === 1 && b.ofType("tabs").length === 1, "tab state");
+
+  // No control yet: the probe is dropped for everyone.
+  a.send({ type: "probe", x: 10, y: 20 });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(a.ofType("probe").length, 0);
+
+  controls.for("p1").take("A");
+  await until(() => a.lastControl()?.controller === "you", "you controller");
+  a.send({ type: "probe", x: 10, y: 20 });
+  a.send({ type: "probe", x: "bad", y: 20 });
+  const answer = await until(() => a.ofType("probe")[0], "probe answer");
+  assert.deepEqual(answer, { type: "probe", x: 10, y: 20, editable: true });
+  assert.equal(a.ofType("probe").length, 1);
+  assert.equal(b.ofType("probe").length, 0);
+  assert.deepEqual(
+    sessions
+      .get("p1")
+      .calls.filter((call) => call.name === "input")
+      .map((call) => call.msg),
+    [{ type: "probe", x: 10, y: 20 }],
+  );
+  a.ws.close();
+  b.ws.close();
+});
+
+test("a viewer can fit the page to its pane within the viewport limits", async (t) => {
+  const sessions = new Map();
+  const { server, controls } = setup(t, { sessions });
+  await listen(t, server);
+  const a = await open(streamUrl(server, "p1", "A"));
+  await until(() => a.ofType("tabs").length === 1, "tab state");
+  controls.for("p1").take("A");
+  await until(() => a.lastControl()?.controller === "you", "you controller");
+  a.send({ type: "resize", width: 700.6, height: 500.4 });
+  a.send({ type: "resize", width: 50, height: 500 });
+  a.send({ type: "resize", width: 10_000, height: 500 });
+  await until(() => sessions.get("p1").calls.some((call) => call.name === "resize"), "resize");
+  assert.deepEqual(
+    sessions.get("p1").calls.filter((call) => call.name === "resize"),
+    [{ name: "resize", width: 701, height: 500 }],
+  );
+  a.ws.close();
+});
+
+test("tab controls are sent only for the viewer holding browser control", async (t) => {
+  const sessions = new Map();
+  const { server, controls } = setup(t, { sessions });
+  await listen(t, server);
+  const a = await open(streamUrl(server, "p1", "A"));
+  const b = await open(streamUrl(server, "p1", "B"));
+  await until(() => a.ofType("tabs").length === 1 && b.ofType("tabs").length === 1, "tab state");
+  controls.for("p1").take("A");
+  b.send({ type: "tab", action: "new" });
+  b.send({ type: "tab-audio", id: "tab-1", muted: true });
+  a.send({ type: "tab", action: "select", id: "tab-1" });
+  a.send({ type: "tab-audio", id: "tab-1", muted: true });
+  await until(
+    () => sessions.get("p1").calls.some((call) => call.name === "selectTab"),
+    "selected tab",
+  );
+  assert.equal(
+    sessions.get("p1").calls.some((call) => call.name === "newTab"),
+    false,
+  );
+  await until(
+    () => sessions.get("p1").calls.some((call) => call.name === "setTabAudio"),
+    "muted tab",
+  );
+  assert.deepEqual(
+    sessions.get("p1").calls.filter((call) => call.name === "setTabAudio"),
+    [{ name: "setTabAudio", id: "tab-1", muted: true }],
+  );
+  a.send({ type: "tab", action: "new" });
+  await until(() => sessions.get("p1").calls.some((call) => call.name === "newTab"), "new tab");
+  a.ws.close();
+  b.ws.close();
+});
+
+test("a recording viewer can request a stream pinned to a tab", async (t) => {
+  const sessions = new Map();
+  const { server } = setup(t, { sessions });
+  await listen(t, server);
+  const client = await open(streamUrl(server, "p1", "recorder", { tab: "tab-1" }));
+  await until(() => sessions.get("p1")?.screencasts.length === 1, "pinned stream");
+  assert.equal(sessions.get("p1").screencasts[0].opts.tabId, "tab-1");
+  client.ws.close();
 });
 
 test("a copy key sends the copied text to that viewer only, and file pickers ride on control", async (t) => {

@@ -35,6 +35,7 @@ import { SectionFade } from "./motion";
 import { AgentComputerPane } from "./AgentComputerPane";
 import { BrowserMiniPlayer } from "./browser/BrowserMiniPlayer";
 import { BrowserPreviewProvider } from "./browser/BrowserPreviewProvider";
+import { BROWSER_OPEN_EVENT } from "@/lib/ade/browser/openInPreview.mjs";
 import { RightPaneHostContext } from "./rightPaneContext";
 import { RightPaneTabs } from "./RightPaneTabs";
 import { RightRail } from "./RightRail";
@@ -156,6 +157,10 @@ function PaneSlot({ el }: { el: HTMLDivElement }) {
 export function Shell({ children }: { children: ReactNode }) {
   const [rightHost, setRightHost] = useState<HTMLDivElement | null>(null);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const conversationId = useRouterState({
+    select: (state) =>
+      (state.matches.at(-1)?.params as { sessionId?: string } | undefined)?.sessionId ?? null,
+  });
   const routeProjectId = projectIdFromPath(pathname);
   const { projects, activeProjectId } = useAdeState((state) => ({
     projects: state.projects,
@@ -174,7 +179,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <RightPaneHostContext.Provider value={rightHost}>
-      <BrowserPreviewProvider projectId={activeProject?.id ?? null}>
+      <BrowserPreviewProvider projectId={activeProject?.id ?? null} sessionId={conversationId}>
         <ShellInner activeProject={activeProject} onRightHostChange={setRightHost}>
           {children}
         </ShellInner>
@@ -378,6 +383,16 @@ function ShellInner({
   }, [effectiveDock, hydrateSideGroup, hydrateBottomGroup]);
 
   const [collapsedRight, setCollapsedRight] = useState(false);
+
+  // A link from chat or the terminal brings the browser tab forward.
+  useEffect(() => {
+    const open = () => {
+      setRightTab("computer");
+      setCollapsedRight(false);
+    };
+    window.addEventListener(BROWSER_OPEN_EVENT, open);
+    return () => window.removeEventListener(BROWSER_OPEN_EVENT, open);
+  }, []);
 
   const expandRight = useCallback(() => {
     activePanelRef.current?.expand();

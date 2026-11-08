@@ -137,6 +137,31 @@ test("release runs afterDrain once work queued before the release has drained", 
   assert.deepEqual(log, ["input", "afterDrain", "agent"]);
 });
 
+test("browser settings wait for input and preserve the current controller", async () => {
+  const control = createControlRegistry().for("p1");
+  const started = deferred();
+  const finish = deferred();
+  const log = [];
+  const agent = control.agent(async () => {
+    started.resolve();
+    await finish.promise;
+    log.push("agent");
+  });
+  await started.promise;
+  const settings = control.system(async () => {
+    log.push("settings");
+    return "applied";
+  });
+  control.take("viewer");
+  const input = control.human("viewer", async () => log.push("viewer"));
+  finish.resolve();
+  await agent;
+  assert.equal(await settings, "applied");
+  await input;
+  assert.deepEqual(log, ["agent", "settings", "viewer"]);
+  assert.equal(control.state().owner, "viewer");
+});
+
 test("registry returns one control per project and delete releases the owner", async () => {
   const registry = createControlRegistry();
   const first = registry.for("p1");

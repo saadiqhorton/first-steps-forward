@@ -1,7 +1,7 @@
 // Adapted from T3 Code (https://github.com/pingdotgg/t3code): apps/web/src/components/preview/ThreadPreviewMiniPlayer.tsx (MiniPlayerShell).
 // Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
 
-import { PanelRight, PictureInPicture2, X } from "lucide-react";
+import { PanelRight, PictureInPicture2, Square, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import {
   clampMiniPlayerPosition,
@@ -12,11 +12,13 @@ import {
   type MiniPlayerFrame,
   type MiniPlayerResizeDirection,
 } from "@/lib/ade/browser/miniPlayerLayout.mjs";
-import { supportsPictureInPicture } from "@/lib/ade/browser/pictureInPicture";
 import { DEFAULT_VIEWPORT } from "@/shared/browser-contract.mjs";
+import {
+  openBrowserPictureInPicture,
+  supportsBrowserPictureInPicture,
+} from "@/lib/ade/browser/pictureInPicture.mjs";
 import type { RightDock } from "../rightPaneTypes";
 import { useShell } from "../shellContext";
-import { togglePictureInPicture } from "./browserActions";
 import { BrowserSurface } from "./BrowserSurface";
 import { useBrowserPreviewFrame, useBrowserPreviewState } from "./browserPreviewContext";
 import { useBrowserMiniPlayer, useBrowserPlacement } from "./browserPresentationContext";
@@ -98,7 +100,7 @@ function FloatingBrowser({ dock }: { dock: RightDock }) {
   const preview = useBrowserPreviewState();
   const frameState = useBrowserPreviewFrame();
   const { mini, setMini } = useBrowserMiniPlayer();
-  const { setPlace, projectId } = useBrowserPlacement();
+  const { setPlace } = useBrowserPlacement();
   const shell = useShell();
   const { control } = preview;
   const { viewport, canvas } = frameState;
@@ -117,7 +119,6 @@ function FloatingBrowser({ dock }: { dock: RightDock }) {
     container,
   });
   const controlling = control?.controller === "you";
-  const pipSupported = supportsPictureInPicture();
 
   const beginGesture = (
     event: PointerEvent<HTMLElement>,
@@ -217,6 +218,33 @@ function FloatingBrowser({ dock }: { dock: RightDock }) {
           aria-label="Floating browser controls"
           className="pointer-events-none flex items-center gap-0.5 rounded-full bg-panel/90 p-0.5 opacity-0 ring-1 ring-line ring-inset shadow-lg backdrop-blur-xl transition-opacity duration-150 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 group-data-[pill-open]:pointer-events-auto group-data-[pill-open]:opacity-100 motion-reduce:transition-none"
         >
+          {preview.capture.recording ? (
+            <button
+              type="button"
+              aria-label="Stop recording"
+              title="Stop recording"
+              onClick={() => {
+                preview.capture.stopRecording();
+                dockToPane();
+              }}
+              className={`${ICON_BUTTON} text-danger`}
+            >
+              <Square className="size-3.5" fill="currentColor" aria-hidden />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label="Pop out window"
+            title="Pop out window"
+            disabled={!canvas || !supportsBrowserPictureInPicture()}
+            onClick={() => {
+              if (!canvas) return;
+              void openBrowserPictureInPicture(canvas, "ADE browser").catch(() => undefined);
+            }}
+            className={`${ICON_BUTTON} disabled:opacity-40`}
+          >
+            <PictureInPicture2 className="size-3.5" aria-hidden />
+          </button>
           <button
             type="button"
             aria-label="Dock to pane"
@@ -226,20 +254,6 @@ function FloatingBrowser({ dock }: { dock: RightDock }) {
           >
             <PanelRight className="size-3.5" aria-hidden />
           </button>
-          {pipSupported ? (
-            <button
-              type="button"
-              aria-label="Picture in picture"
-              title="Picture in picture"
-              disabled={!canvas || !projectId}
-              onClick={() => {
-                if (canvas && projectId) void togglePictureInPicture(projectId, canvas);
-              }}
-              className={ICON_BUTTON}
-            >
-              <PictureInPicture2 className="size-3.5" aria-hidden />
-            </button>
-          ) : null}
           <button
             type="button"
             aria-label="Close floating browser"

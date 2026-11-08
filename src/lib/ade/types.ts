@@ -159,8 +159,9 @@ export interface AgentComputer {
   /** A host command that fixes the error, e.g. `npm run browser:setup`. */
   setupCommand?: string;
   screen: { width: number; height: number };
-  /** "default" keeps the project's logins and storage between runs; "incognito" starts clean. */
-  profile: "default" | "incognito";
+  /** The profile used by this conversation; named profiles share logins across conversations. */
+  profile: string;
+  profiles: { id: string; name: string }[];
 }
 /** An ACP agent's question, waiting on the user; the turn pauses until it is answered. */
 export interface PendingPermission {

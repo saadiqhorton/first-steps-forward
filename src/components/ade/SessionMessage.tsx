@@ -1,6 +1,13 @@
 import Markdown from "react-markdown";
+import type { ComponentPropsWithoutRef } from "react";
 import { File } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  isPreviewableUrl,
+  requestPreviewFileOpen,
+  requestPreviewOpen,
+  workspaceFileFromLink,
+} from "@/lib/ade/browser/openInPreview.mjs";
 import type { Message, MessageAttachment } from "@/lib/ade/types";
 
 function formatAttachmentSize(bytes: number) {
@@ -52,12 +59,29 @@ function AttachmentChips({ attachments }: { attachments: MessageAttachment[] }) 
   );
 }
 
+function AttachmentVideos({ attachments }: { attachments: MessageAttachment[] }) {
+  return attachments
+    .filter((attachment) => attachment.mime === "video/webm")
+    .map((attachment) => (
+      <video
+        key={attachment.id}
+        controls
+        preload="metadata"
+        className="mt-2 max-h-80 w-full rounded-lg bg-black"
+        src={`/api/attachments/${attachment.id}`}
+        aria-label={attachment.name}
+      />
+    ));
+}
+
 export function SessionMessage({
   message,
   agentName,
+  projectId,
 }: {
   message: Message;
   agentName?: string | undefined;
+  projectId?: string | undefined;
 }) {
   const { role, text, attachments = [] } = message;
   const structured = role === "agent" && isStructuredOutput(text);
@@ -67,13 +91,39 @@ export function SessionMessage({
   const longUser = role === "user" && (text.length > 480 || lineCount > 8);
   const attachmentRow = attachments.length ? <AttachmentChips attachments={attachments} /> : null;
 
+  // Links open in ADE's browser tab, as T3 does: web addresses and local HTML/PDF files.
+  const markdownLink = ({ href, children, ...props }: ComponentPropsWithoutRef<"a">) => (
+    <a
+      href={href}
+      {...props}
+      onClick={(event) => {
+        if (typeof href !== "string") return;
+        const web = isPreviewableUrl(href);
+        const file = web ? null : workspaceFileFromLink(href);
+        if (!web && !file) return;
+        event.preventDefault();
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) {
+          window.open(href, "_blank", "noopener,noreferrer");
+          return;
+        }
+        if (web) {
+          requestPreviewOpen(href);
+          return;
+        }
+        if (file && projectId) requestPreviewFileOpen(projectId, file);
+      }}
+    >
+      {children}
+    </a>
+  );
+
   const content = structured ? (
     <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-ink/5 p-3 font-mono text-xs leading-relaxed">
       {text}
     </pre>
   ) : role === "agent" ? (
     <div className="ade-markdown break-words">
-      <Markdown>{text}</Markdown>
+      <Markdown components={{ a: markdownLink }}>{text}</Markdown>
     </div>
   ) : (
     <div className="whitespace-pre-wrap break-words">{text}</div>
@@ -94,6 +144,7 @@ export function SessionMessage({
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2 min-w-0 overflow-hidden rounded-xl data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down bg-surface-muted px-4 py-3 text-sm leading-5.5 text-ink [overflow-wrap:anywhere]">
             <div className="whitespace-pre-wrap break-words">{text}</div>
+            <AttachmentVideos attachments={attachments} />
           </CollapsibleContent>
         </Collapsible>
       </div>
@@ -132,6 +183,7 @@ export function SessionMessage({
           <>
             {content}
             {attachmentRow}
+            <AttachmentVideos attachments={attachments} />
           </>
         )}
       </div>

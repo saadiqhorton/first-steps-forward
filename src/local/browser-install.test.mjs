@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { crc32 } from "node:zlib";
@@ -101,6 +101,28 @@ test("the pinned release covers each Chrome for Testing platform", () => {
     /chrome-for-testing-public\/.+\/linux64\/chrome-headless-shell-linux64\.zip$/,
   );
   assert.match(release.sha256, /^[0-9a-f]{64}$/);
+});
+
+test("visible mode requires an explicitly selected full browser and does not download", async () => {
+  const baseDir = mkdtempSync(path.join(os.tmpdir(), "ade-visible-browser-"));
+  baseDirs.push(baseDir);
+  const executable = path.join(baseDir, "chromium");
+  writeFileSync(executable, "#!/bin/sh\n", { mode: 0o755 });
+  const make = (chosen) => createBrowserInstaller({
+    baseDir,
+    env: { ADE_BROWSER_HEADED: "1", ADE_BROWSER_EXECUTABLE: chosen },
+    fetchImpl: () => { throw new Error("must not download"); },
+  });
+  const good = make(executable);
+  assert.equal(await good.executable(), executable);
+  assert.equal(await good.installed(), executable);
+  assert.equal(good.status().state, "installed");
+  for (const chosen of ["", "chromium", path.join(baseDir, "missing"), path.join(baseDir, "chrome-headless-shell")]) {
+    const installer = make(chosen);
+    await assert.rejects(installer.executable(), { code: "browser_unsupported" });
+    assert.equal(await installer.installed(), null);
+    assert.equal(installer.status().state, "failed");
+  }
 });
 
 test("installs a verified archive once and finds it afterwards", async () => {
