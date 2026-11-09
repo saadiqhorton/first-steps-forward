@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { claude } from "./claude.agent.mjs";
 import { codex } from "./codex.agent.mjs";
-import { opencode } from "./opencode.agent.mjs";
+import { opencode, parseOpencodeAuthJson, parseOpencodeAuthText } from "./opencode.agent.mjs";
 import { pi } from "./pi.agent.mjs";
 import { acpComputerServers } from "./computer-tools.mjs";
 
@@ -76,6 +76,85 @@ test("OpenCode adapter never opts into automatic permission approval", () => {
     },
   ]);
   assert.deepEqual(opencode.stderr("some other warning"), []);
+});
+
+test("OpenCode detection reads the 2.x JSON integration listing", async () => {
+  const calls = [];
+  const auth = await opencode.detectAuth(async (bin, args) => {
+    calls.push([bin, ...args]);
+    return {
+      code: 0,
+      stdout: JSON.stringify([
+        { id: "opencode-go", name: "OpenCode Go", connections: [{ id: "cred-1" }] },
+        { id: "ollama-cloud", name: "Ollama Cloud", connections: [{ id: "cred-2" }] },
+      ]),
+    };
+  });
+  assert.deepEqual(auth, {
+    signedIn: true,
+    providers: ["opencode-go", "ollama-cloud"],
+    account: "2 providers: opencode-go, ollama-cloud",
+  });
+  assert.deepEqual(calls, [["opencode", "auth", "list", "--format", "json"]]);
+});
+
+test("OpenCode detection reports no sign-in for an empty JSON store", async () => {
+  const auth = await opencode.detectAuth(async () => ({ code: 0, stdout: "[]" }));
+  assert.deepEqual(auth, { signedIn: false });
+});
+
+test("OpenCode detection falls back to the 1.x text table", async () => {
+  const calls = [];
+  const auth = await opencode.detectAuth(async (bin, args) => {
+    calls.push([bin, ...args]);
+    if (args.includes("--format"))
+      return { code: 1, stdout: "ERROR\n  Unrecognized flag: --format" };
+    return {
+      code: 0,
+      stdout: [
+        "\u250c  Credentials ~/.local/share/opencode/auth.json",
+        "\u2502",
+        "\u25cf  Anthropic oauth",
+        "\u2502",
+        "\u2514  2 credentials",
+        "",
+      ].join("\n"),
+    };
+  });
+  assert.deepEqual(auth, { signedIn: true, account: "Configured in OpenCode" });
+  assert.deepEqual(calls, [
+    ["opencode", "auth", "list", "--format", "json"],
+    ["opencode", "auth", "list"],
+  ]);
+});
+
+test("OpenCode detection counts credentials exactly (10 is not 0)", () => {
+  // The old `! /0 credentials/` check read "10 credentials" as signed out.
+  assert.equal(parseOpencodeAuthText("\u2514  10 credentials\n"), true);
+  assert.equal(parseOpencodeAuthText("\u2514  0 credentials\n"), false);
+});
+
+test("OpenCode detection reads the 2.x text rows and an empty store message", () => {
+  assert.equal(parseOpencodeAuthText("OpenCode Go   API key                     stored\n"), true);
+  assert.equal(parseOpencodeAuthText("No authenticated integrations\n"), false);
+});
+
+test("OpenCode detection never counts a failed listing as signed in", async () => {
+  const auth = await opencode.detectAuth(async (_bin, args) =>
+    args.includes("--format")
+      ? { code: 1, stdout: "Unrecognized flag: --format" }
+      : { code: 1, stdout: "credentials" },
+  );
+  assert.deepEqual(auth, { signedIn: false });
+});
+
+test("parseOpencodeAuthJson rejects streams that are not the 2.x shape", () => {
+  assert.equal(parseOpencodeAuthJson("Unrecognized flag: --format"), null);
+  assert.equal(parseOpencodeAuthJson('{"id":"x"}'), null);
+  assert.deepEqual(parseOpencodeAuthJson('[{"id":"x","connections":[]}]'), {
+    signedIn: false,
+    providers: [],
+  });
 });
 
 test("Pi adapter restricts shell tools and parses actual JSON events", () => {

@@ -2,6 +2,69 @@ import { opencodeComputerEnv } from "./computer-tools.mjs";
 import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
+/**
+ * Parse `opencode auth list --format json` (OpenCode 2.x): the integrations
+ * configured in its store, each with its connections. Returns null when the
+ * stream is not that shape, so the caller can fall back to the text table.
+ * Credential values are never present in this output and are never read here.
+ */
+export function parseOpencodeAuthJson(stdout) {
+  let data;
+  try {
+    data = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(data)) return null;
+  const entries = data.filter(
+    (entry) => entry && typeof entry === "object" && !Array.isArray(entry),
+  );
+  if (entries.length !== data.length) return null;
+  // A store entry only counts when it actually carries a connection; an
+  // integration listed with an empty `connections` array is not signed in.
+  const reportsConnections = entries.some((entry) => Array.isArray(entry.connections));
+  if (!reportsConnections) return { signedIn: entries.length > 0, providers: [] };
+  const providers = [];
+  for (const entry of entries) {
+    if (!Array.isArray(entry.connections) || entry.connections.length === 0) continue;
+    const id = typeof entry.id === "string" ? entry.id.trim() : "";
+    if (id) providers.push(id);
+  }
+  return { signedIn: providers.length > 0, providers };
+}
+
+/**
+ * Parse the human-readable `opencode auth list` table. Handles the 2.x rows
+ * (`Provider  Connection  stored`) and the 1.x box (`● Anthropic oauth`,
+ * `└ 2 credentials`). The footer's own count is authoritative when present so
+ * a header that merely says "Credentials" is never read as a sign-in.
+ */
+export function parseOpencodeAuthText(stdout) {
+  const text = typeof stdout === "string" ? stdout : "";
+  if (/no authenticated integrations/i.test(text)) return false;
+  const counts = [...text.matchAll(/\b(\d+)\s+credentials?\b/gi)].map((match) => Number(match[1]));
+  if (counts.length) return counts.some((count) => count > 0);
+  if (/^\s*\S.*\s{2,}stored\s*$/im.test(text)) return true;
+  return /^\s*[\u25cf\u25c6\u25aa\u2022]\s*\S/m.test(text);
+}
+
+/** Provider ids stay readable in the UI; odd ones are labelled, never echoed raw. */
+function providerLabel(id) {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(id) ? id : "(unusual provider name)";
+}
+
+/** @param {{ signedIn: boolean, providers: string[] }} parsed */
+function authResult(parsed) {
+  if (!parsed.signedIn) return { signedIn: false };
+  const providers = parsed.providers.filter(Boolean).slice(0, 50);
+  if (!providers.length) return { signedIn: true, account: "Configured in OpenCode" };
+  return {
+    signedIn: true,
+    providers,
+    account: `${providers.length} ${providers.length === 1 ? "provider" : "providers"}: ${providers.map(providerLabel).join(", ")}`,
+  };
+}
+
 /** Parse `opencode models` plain lines of `provider/model`. */
 export function parseOpencodeModels(stdout) {
   const ids = stdout
@@ -84,11 +147,19 @@ export const opencode = defineCliAgent({
   installHint: "Install from https://opencode.ai/download",
   tools: "OpenCode built-in tools; permission prompts are auto-rejected in non-interactive runs",
   async detectAuth(run) {
-    const result = await run("opencode", ["auth", "list"], { timeout: 7000 });
-    const signedIn =
-      /credentials|credentials configured|\u25cf/i.test(result.stdout) &&
-      !/0 credentials/i.test(result.stdout);
-    return { signedIn, ...(signedIn ? { account: "Configured in OpenCode" } : {}) };
+    // 2.x offers a machine-readable listing; 1.x rejects the flag, so fall
+    // back to its table. Both are the CLI's own supported read-only flow, and
+    // neither prints a credential value.
+    const json = await run("opencode", ["auth", "list", "--format", "json"], {
+      timeout: 10000,
+    });
+    if (json.code === 0) {
+      const parsed = parseOpencodeAuthJson(json.stdout);
+      if (parsed) return authResult(parsed);
+    }
+    const result = await run("opencode", ["auth", "list"], { timeout: 10000 });
+    const signedIn = result.code === 0 && parseOpencodeAuthText(result.stdout);
+    return signedIn ? { signedIn: true, account: "Configured in OpenCode" } : { signedIn: false };
   },
   /** The CLI's own cached model listing; never a network refresh, never quota. */
   async probeModels(run) {
