@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { connectBrowserStream, type BrowserStream } from "@/lib/ade/browser/browserStream";
 import { browserViewerId } from "@/lib/ade/browser/viewer";
-import { DEFAULT_VIEWPORT, BROWSER_RENDER_SCALE } from "@/shared/browser-contract.mjs";
+import {
+  DEFAULT_VIEWPORT,
+  BROWSER_RENDER_SCALE,
+  RECORDING_STORAGE_KEYS,
+} from "@/shared/browser-contract.mjs";
 import { withBrowserSession } from "@/lib/ade/browser/api";
 import { createRecordingUpload } from "@/lib/ade/browser/recordingUpload";
 import { MAX_BROWSER_RECORDING_BYTES } from "@/lib/ade/browser/composerFeedback";
@@ -336,10 +340,10 @@ export function useBrowserCapture(
       let showKeyPresses = false;
       try {
         frameRate =
-          window.localStorage.getItem("ade.browser.recordingFrameRate") === "60" ? 60 : 30;
+          window.localStorage.getItem(RECORDING_STORAGE_KEYS.frameRate) === "60" ? 60 : 30;
         showMousePresses =
-          window.localStorage.getItem("ade.browser.recordingShowMousePresses") === "1";
-        showKeyPresses = window.localStorage.getItem("ade.browser.recordingShowKeyPresses") === "1";
+          window.localStorage.getItem(RECORDING_STORAGE_KEYS.showMousePresses) === "1";
+        showKeyPresses = window.localStorage.getItem(RECORDING_STORAGE_KEYS.showKeyPresses) === "1";
       } catch {
         /* Storage is optional. */
       }

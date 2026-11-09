@@ -131,10 +131,12 @@ const call = async (urlPath, body) => {
 };
 const startDev = (name, body) => call(`/api/projects/p-${name}/dev/start`, body);
 const stopDev = (name) => call(`/api/projects/p-${name}/dev/stop`, {});
-const asked = (name) =>
-  _getSessionForTest(`s-${name}`).pendingPermissions?.find((p) => p.kind === "dev_command");
-const answer = (name, request, optionId) =>
-  call(`/api/sessions/s-${name}/permission`, { requestId: request.id, optionId });
+const asked = (name) => _getSessionForTest(`s-${name}`).pendingDevCommand;
+const answer = (name, request, decision) =>
+  call(`/api/projects/p-${name}/dev/command/answer`, {
+    requestId: request.id,
+    decision,
+  });
 async function waitFor(check, what) {
   for (let i = 0; i < 400; i += 1) {
     const value = await check();
@@ -172,7 +174,8 @@ test(
       const summary = (await call("/api/bootstrap")).json.sessions.find(
         (s) => s.id === "s-approve",
       );
-      assert.equal(summary.pendingPermissions.length, 1);
+      assert.equal(summary.pendingDevCommand?.command, command);
+      assert.equal(summary.pendingPermissions, undefined);
 
       const allowed = await answer("approve", request, "allow");
       assert.equal(allowed.status, 200);
@@ -449,7 +452,8 @@ test("waiting: a timeout leaves the request open, a repeat joins it, a new comma
       "the replacement",
     );
     assert.notEqual(second.id, request.id);
-    assert.equal(_getSessionForTest("s-wait").pendingPermissions.length, 1);
+    assert.equal(_getSessionForTest("s-wait").pendingDevCommand?.id, second.id);
+    assert.equal(_getSessionForTest("s-wait").pendingPermissions, undefined);
     await answer("wait", second, "deny");
     assert.equal((await secondCall).status, 403);
   } finally {

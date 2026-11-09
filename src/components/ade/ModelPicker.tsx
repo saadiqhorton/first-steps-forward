@@ -124,7 +124,7 @@ export function ModelPicker({
           )}
           <p className="mt-1 text-[11px] leading-relaxed text-dim">
             {result.note ??
-              (result.source === "acp" ? (
+              (result.completeCatalog ? (
                 <>
                   The models {agentName} itself reports offering. ADE applies the one you pick
                   through the agent's own model setting.

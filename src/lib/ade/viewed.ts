@@ -17,9 +17,9 @@ export function isUnread(
   return isUnreadJs(session, viewed);
 }
 
-/** Ready to review, blocked, or waiting on a permission answer. */
+/** Ready to review, blocked, or waiting on a permission / dev-command answer. */
 export function needsAttention(
-  session: Pick<SessionSummary, "status" | "pendingPermissions">,
+  session: Pick<SessionSummary, "status" | "pendingPermissions" | "pendingDevCommand">,
 ): boolean {
   return needsAttentionJs(session);
 }

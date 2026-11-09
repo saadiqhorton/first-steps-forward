@@ -203,12 +203,22 @@ export async function devCommandEnv({ dir, root, port }) {
 }
 
 /**
+ * Strip pre-demux leftovers that mixed ADE's own question into ACP permission asks.
+ * @param {{ pendingPermissions?: any[] }} session
+ */
+function dropLegacyDevCommandPermissions(session) {
+  if (!session.pendingPermissions) return;
+  session.pendingPermissions = session.pendingPermissions.filter((p) => p.kind !== "dev_command");
+  if (!session.pendingPermissions.length) delete session.pendingPermissions;
+}
+
+/**
  * The questions "Run this dev command?" waiting on the user: at most one per project. A request
- * is attached to the session whose agent proposed it (its `pendingPermissions`, so the session
- * shows Needs you) or, when ADE does not know the session, to the project for the right pane.
- * It outlives the turn that asked, because the answer is about the project; an identical
- * proposal joins it, a different one replaces it. Kept in memory only: after a restart the agent
- * proposes again.
+ * is attached to the session whose agent proposed it (`session.pendingDevCommand`, so the session
+ * shows Needs you) or, when ADE does not know the session, to the project for the right pane
+ * (`project.pendingDevCommand`). It outlives the turn that asked, because the answer is about
+ * the project; an identical proposal joins it, a different one replaces it. Kept in memory only:
+ * after a restart the agent proposes again.
  * @param {{ state: { projects: any[], sessions: any[] }, save: () => Promise<void>, emit?: (scope: string) => void, waitMs?: number }} deps
  */
 export function createDevCommandApprovals({ state, save, emit = () => {}, waitMs = 5 * 60_000 }) {
@@ -218,11 +228,9 @@ export function createDevCommandApprovals({ state, save, emit = () => {}, waitMs
 
   function detach(entry) {
     const session = state.sessions.find((s) => s.id === entry.sessionId);
-    if (!session?.pendingPermissions) return;
-    session.pendingPermissions = session.pendingPermissions.filter(
-      (p) => p.id !== entry.request.id,
-    );
-    if (!session.pendingPermissions.length) delete session.pendingPermissions;
+    if (!session) return;
+    if (session.pendingDevCommand?.id === entry.request.id) delete session.pendingDevCommand;
+    dropLegacyDevCommandPermissions(session);
     emit(`session:${session.id}`);
   }
   /** Close the project's request and tell everyone waiting on it what happened. */
@@ -249,6 +257,12 @@ export function createDevCommandApprovals({ state, save, emit = () => {}, waitMs
     pendingFor(projectId) {
       return pending.get(projectId)?.request;
     },
+    /** The open request attached to this session, if any. */
+    forSession(sessionId) {
+      for (const entry of pending.values())
+        if (entry.sessionId === sessionId) return entry.request;
+      return undefined;
+    },
     /**
      * Ask the user about `proposal`, or join the identical open request.
      * @param {{ id: string }} project
@@ -272,7 +286,8 @@ export function createDevCommandApprovals({ state, save, emit = () => {}, waitMs
       };
       pending.set(project.id, { request, sessionId: session?.id ?? null, waiters: new Set() });
       if (session) {
-        session.pendingPermissions = [...(session.pendingPermissions ?? []), request];
+        dropLegacyDevCommandPermissions(session);
+        session.pendingDevCommand = request;
         emit(`session:${session.id}`);
       }
       save().catch(() => {});

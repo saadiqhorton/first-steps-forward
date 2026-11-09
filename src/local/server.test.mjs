@@ -117,13 +117,21 @@ test("agents get the address the server actually listens on", () => {
 });
 
 // The published `ade` runs from wherever the user typed `npx`, not from the package.
-test("agent tool scripts resolve from ADE's own files, whatever the working directory", () => {
+test("agent tool scripts resolve from ADE's own files, whatever the working directory", async () => {
   const before = process.cwd();
   process.chdir(home);
   try {
+    const { computerMcpScript, computerPiExtension } = await import("./adapters/computer-tools.mjs");
+    const mcpScript = computerMcpScript();
+    const piExtension = computerPiExtension();
+    assert.ok(existsSync(mcpScript), mcpScript);
+    assert.ok(existsSync(piExtension), piExtension);
+    // Context itself only carries node + env; adapters resolve scripts.
     const context = computerContext({ id: "p", name: "p", path: home });
-    assert.ok(existsSync(context.mcpScript), context.mcpScript);
-    assert.ok(existsSync(context.piExtension), context.piExtension);
+    assert.equal(context.node, process.execPath);
+    assert.ok(context.env.ADE_API);
+    assert.equal("mcpScript" in context, false);
+    assert.equal("piExtension" in context, false);
   } finally {
     process.chdir(before);
   }

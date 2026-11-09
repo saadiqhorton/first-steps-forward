@@ -2,6 +2,9 @@
 // store.tsx: JSON in and out, and errors carry the HTTP status, the authRequired flag and the
 // server's `code` (for example "human_control" on a 409).
 
+import { viewportAcceptable } from "@/shared/browser-contract.mjs";
+import { request, type RequestError } from "../api";
+
 export interface BrowserControlState {
   /** Viewer id that holds control, or null while the agent drives. */
   readonly owner: string | null;
@@ -46,13 +49,7 @@ function savedBrowserSettings(
     const candidate = value as BrowserSettings;
     if (
       !candidate.viewport ||
-      !Number.isFinite(candidate.viewport.width) ||
-      !Number.isFinite(candidate.viewport.height) ||
-      candidate.viewport.width < 240 ||
-      candidate.viewport.width > 3840 ||
-      candidate.viewport.height < 240 ||
-      candidate.viewport.height > 3840 ||
-      candidate.viewport.width * candidate.viewport.height > 3840 * 2160 ||
+      !viewportAcceptable(candidate.viewport) ||
       !Number.isFinite(candidate.zoomFactor) ||
       candidate.zoomFactor < 0.25 ||
       candidate.zoomFactor > 5 ||
@@ -228,35 +225,7 @@ export const restoreBrowserAnnotationStyles = (
     { action: "restore", sessionId, ...(selector ? { selector } : {}) },
   );
 
-export type BrowserRequestError = Error & {
-  status?: number;
-  authRequired?: boolean;
-  code?: string;
-};
-
-async function request<T>(url: string, method = "GET", data?: unknown): Promise<T> {
-  const init: RequestInit = { method };
-  if (data) {
-    init.headers = { "content-type": "application/json" };
-    init.body = JSON.stringify(data);
-  }
-  const response = await fetch(url, init);
-  const value = (await response.json()) as {
-    error?: string;
-    code?: string;
-    authRequired?: boolean;
-  };
-  if (!response.ok) {
-    const error: BrowserRequestError = new Error(
-      value.error ?? `Local API returned ${response.status}`,
-    );
-    error.status = response.status;
-    error.authRequired = value.authRequired === true;
-    if (value.code !== undefined) error.code = value.code;
-    throw error;
-  }
-  return value as T;
-}
+export type BrowserRequestError = RequestError;
 
 export const getBrowserStatus = (projectId: string, conversationId?: string | null) =>
   request<BrowserStatus>(

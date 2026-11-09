@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { warnUser } from "@/components/ade/NoticeDialog";
+import { warnUser } from "@/lib/ade/userNotices";
 import type { DevCommandRequest } from "@/lib/ade/types";
 
 /**

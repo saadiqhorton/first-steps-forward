@@ -174,6 +174,7 @@ export function AgentActivity({
   };
 
   const liveLabel = activeLabel ?? getActiveLabel(contentType);
+  const shimmerLabel = typeof liveLabel === "string" ? liveLabel : getActiveLabel(contentType);
   const completedSummary = summary ?? getSummary(contentType, items, duration);
   const maskImage = capped
     ? working
@@ -197,7 +198,7 @@ export function AgentActivity({
           {renderWorkingStatus ? (
             renderWorkingStatus({ label: liveLabel, duration })
           ) : (
-            <ThinkingShimmer>{liveLabel}</ThinkingShimmer>
+            <ThinkingShimmer>{shimmerLabel}</ThinkingShimmer>
           )}
         </div>
       ) : (

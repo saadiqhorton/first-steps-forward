@@ -7,7 +7,11 @@ import { claude } from "./claude.agent.mjs";
 import { codex } from "./codex.agent.mjs";
 import { opencode, parseOpencodeAuthJson, parseOpencodeAuthText } from "./opencode.agent.mjs";
 import { pi } from "./pi.agent.mjs";
-import { acpComputerServers } from "./computer-tools.mjs";
+import {
+  acpComputerServers,
+  computerMcpScript,
+  computerPiExtension,
+} from "./computer-tools.mjs";
 
 const session = { id: "session-id", agentSessionId: undefined };
 
@@ -666,18 +670,16 @@ test("Pi maps effort to --thinking and plan to a read-only tools allowlist", () 
 
 const computer = {
   node: "/usr/bin/node",
-  mcpScript: "/ade/src/local/computer-mcp.mjs",
-  piExtension: "/ade/src/local/computer-pi-extension.mjs",
   env: { ADE_API: "http://127.0.0.1:3000", ADE_PROJECT_ID: "p1" },
 };
+const mcpScript = computerMcpScript();
+const piExtension = computerPiExtension();
 
 test("every agent gets the computer: Codex MCP overrides, OpenCode inline config, Pi extension", () => {
   const base = { projectPath: "/tmp/project", prompt: "Test it", session, continuing: false };
   const [, codexArgs, codexEnv] = codex.command({ ...base, computer });
   assert.ok(codexArgs.includes('mcp_servers.ade_computer.command="/usr/bin/node"'));
-  assert.ok(
-    codexArgs.includes('mcp_servers.ade_computer.args=["/ade/src/local/computer-mcp.mjs"]'),
-  );
+  assert.ok(codexArgs.includes(`mcp_servers.ade_computer.args=${JSON.stringify([mcpScript])}`));
   assert.ok(
     codexArgs.includes(
       'mcp_servers.ade_computer.env={ADE_API="http://127.0.0.1:3000",ADE_PROJECT_ID="p1"}',
@@ -710,11 +712,11 @@ test("every agent gets the computer: Codex MCP overrides, OpenCode inline config
 
   const [, , openCodeEnv] = opencode.command({ ...base, computer });
   const config = JSON.parse(openCodeEnv.OPENCODE_CONFIG_CONTENT);
-  assert.deepEqual(config.mcp.ade_computer.command, [computer.node, computer.mcpScript]);
+  assert.deepEqual(config.mcp.ade_computer.command, [computer.node, mcpScript]);
   assert.deepEqual(config.mcp.ade_computer.environment, computer.env);
 
   const [, piArgs, piEnv] = pi.command({ ...base, dataDir: "/data", computer });
-  assert.equal(piArgs[piArgs.indexOf("-e") + 1], computer.piExtension);
+  assert.equal(piArgs[piArgs.indexOf("-e") + 1], piExtension);
   const allowed = piArgs[piArgs.indexOf("--tools") + 1].split(",");
   assert.ok(allowed.includes("read") && allowed.includes("computer_screenshot"));
   assert.ok(!allowed.includes("bash"));
@@ -796,20 +798,22 @@ test("Claude pre-allows only ADE's own MCP server and never offers bypass mode",
 test("ACP agents receive the agent computer as a stdio MCP server", () => {
   const computer = {
     node: "/usr/bin/node",
-    mcpScript: "/ade/src/local/computer-mcp.mjs",
-    piExtension: "/ade/src/local/computer-pi-extension.mjs",
     env: { ADE_API: "http://127.0.0.1:3000", ADE_PROJECT_ID: "p1" },
   };
-  assert.deepEqual(acpComputerServers(computer), [
-    {
-      name: "ade_computer",
-      command: "/usr/bin/node",
-      args: ["/ade/src/local/computer-mcp.mjs"],
-      env: [
-        { name: "ADE_API", value: "http://127.0.0.1:3000" },
-        { name: "ADE_PROJECT_ID", value: "p1" },
-      ],
-    },
-  ]);
+  assert.deepEqual(claude.wireComputer(computer), {
+    mcpServers: [
+      {
+        name: "ade_computer",
+        command: "/usr/bin/node",
+        args: [mcpScript],
+        env: [
+          { name: "ADE_API", value: "http://127.0.0.1:3000" },
+          { name: "ADE_PROJECT_ID", value: "p1" },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(acpComputerServers(computer), claude.wireComputer(computer).mcpServers);
   assert.deepEqual(acpComputerServers(null), []);
+  assert.deepEqual(claude.wireComputer(null), { mcpServers: [] });
 });

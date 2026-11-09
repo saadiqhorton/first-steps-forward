@@ -38,6 +38,38 @@ test("concurrent stale workspace snapshots cannot erase a sent prompt", async ()
   }
 });
 
+test("live pending map wins over a stale session snapshot after reconcile", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ade-persistence-"));
+  const file = path.join(dir, "workspace.json");
+  try {
+    const settled = {
+      projects: [{ id: "p" }],
+      sessions: [
+        {
+          id: "s",
+          projectId: "p",
+          messages: [message("first", 1)],
+          updatedAt: 1,
+          pendingDevCommand: {
+            id: "stale",
+            kind: "dev_command",
+            command: "gone",
+            cwd: ".",
+            requestedAt: 1,
+          },
+        },
+      ],
+      processes: [],
+    };
+    await saveWorkspace(file, settled, { livePendingDevCommands: () => new Map() });
+    assert.equal(settled.sessions[0].pendingDevCommand, undefined);
+    const persisted = JSON.parse(await readFile(file, "utf8"));
+    assert.equal(persisted.sessions[0].pendingDevCommand, undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("reconciliation does not restore sessions for removed projects", async () => {
   const current = { projects: [], sessions: [], processes: [] };
   const saved = snapshot([message("first", 1)]);

@@ -83,6 +83,7 @@ const acpListed = (agentName, models) => ({
   available: true,
   models,
   source: "acp",
+  completeCatalog: true,
   command: `reported by ${agentName}`,
 });
 

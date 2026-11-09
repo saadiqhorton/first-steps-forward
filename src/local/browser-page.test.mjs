@@ -2,48 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
-  clampViewport,
   editingCommand,
   keyEventParams,
   modifiersOf,
   mouseEventParams,
-  normalizeBrowserUrl,
   wheelEventParams,
   xdotoolChords,
 } from "./browser-protocol.mjs";
-import {
-  createBrowserHub,
-  maskValues,
-  normalizeBrowserUrl as publicNormalizeBrowserUrl,
-} from "./browser-page.mjs";
+import { createBrowserHub, maskValues } from "./browser-page.mjs";
 import { createComputerManager } from "./computer.mjs";
-
-test("normalizeBrowserUrl adds https to bare hosts and http to loopback", () => {
-  assert.equal(normalizeBrowserUrl("example.com/a?b=1"), "https://example.com/a?b=1");
-  assert.equal(normalizeBrowserUrl("  localhost:5173  "), "http://localhost:5173/");
-  assert.equal(normalizeBrowserUrl("127.0.0.1:8080/x"), "http://127.0.0.1:8080/x");
-  assert.equal(normalizeBrowserUrl("http://example.com"), "http://example.com/");
-});
-
-test("browser-page keeps re-exporting protocol helpers for existing consumers", () => {
-  assert.equal(publicNormalizeBrowserUrl, normalizeBrowserUrl);
-});
-
-test("normalizeBrowserUrl refuses empty input and non-web schemes", () => {
-  assert.throws(() => normalizeBrowserUrl("   "), /Enter a URL/);
-  assert.throws(() => normalizeBrowserUrl("file:///etc/passwd"), /Only http and https/);
-  assert.throws(
-    () => normalizeBrowserUrl("javascript:alert(1)"),
-    /Only http and https|not a valid/,
-  );
-});
-
-test("clampViewport keeps sizes inside 240..3840 x 240..2160 and rounds", () => {
-  assert.deepEqual(clampViewport({ width: 100, height: 99 }), { width: 240, height: 240 });
-  assert.deepEqual(clampViewport({ width: 5000, height: 3000 }), { width: 3840, height: 2160 });
-  assert.deepEqual(clampViewport({ width: 1023.6, height: 767.2 }), { width: 1024, height: 767 });
-  assert.throws(() => clampViewport({ width: Number.NaN, height: 800 }), TypeError);
-});
 
 test("modifiersOf accepts only integers 0..15", () => {
   assert.equal(modifiersOf({ modifiers: 15 }), 15);
@@ -133,16 +100,6 @@ test("maskValues hides long values everywhere and short values only as whole wor
   );
   assert.equal(maskValues("cat concat", ["cat"]), `${"••••••••"} concat`);
   assert.equal(maskValues("nothing", []), "nothing");
-});
-
-test("normalizeBrowserUrl rejects bad input with code invalid_url", () => {
-  for (const input of ["", "   ", "file:///etc/passwd", "http://exa mple.com"]) {
-    assert.throws(
-      () => normalizeBrowserUrl(input),
-      (error) => error.code === "invalid_url",
-      `input ${JSON.stringify(input)}`,
-    );
-  }
 });
 
 test("xdotoolChords maps xdotool key names to Playwright chords, in order", () => {

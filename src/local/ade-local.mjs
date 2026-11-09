@@ -2,12 +2,12 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { processRunsIn as processMatches } from "./spawn.mjs";
 import { adapters } from "./adapters/index.mjs";
 import { getDiff, projectInfo } from "./project-git.mjs";
 import { createSessionTurns, shrinkLogLine, TurnRefused } from "./session-turns.mjs";
-import { createComputerManager, SCREEN } from "./computer.mjs";
+import { createComputerManager } from "./computer.mjs";
+import { DEFAULT_VIEWPORT } from "../shared/browser-contract.mjs";
 import { createBrowserHub } from "./browser-page.mjs";
 import { createBrowserSessionStore } from "./browser-session-store.mjs";
 import { browserScope, browserScopeParts } from "./browser-scope.mjs";
@@ -178,6 +178,10 @@ const summaryOf = (session) => {
     session.lastUserMessageAt ??
     session.messages?.filter((message) => message.role === "user").at(-1)?.at ??
     session.createdAt;
+  const pendingPermissions = (session.pendingPermissions ?? []).filter(
+    (p) => p.kind !== "dev_command",
+  );
+  const pendingDevCommand = devApprovals.forSession(session.id) ?? session.pendingDevCommand;
   return {
     id: session.id,
     projectId: session.projectId,
@@ -192,7 +196,8 @@ const summaryOf = (session) => {
     completedAt: session.completedAt,
     model: session.model,
     failureKind: session.failureKind,
-    pendingPermissions: session.pendingPermissions,
+    ...(pendingPermissions.length ? { pendingPermissions } : {}),
+    ...(pendingDevCommand ? { pendingDevCommand } : {}),
     lastUserMessageAt,
   };
 };
@@ -203,7 +208,16 @@ const bootstrapPayload = () => ({
   agents: state.agents,
 });
 async function save() {
-  await saveWorkspace(DATA_FILE, state);
+  await saveWorkspace(DATA_FILE, state, {
+    livePendingDevCommands() {
+      const live = new Map();
+      for (const session of state.sessions) {
+        const request = devApprovals.forSession(session.id);
+        if (request) live.set(session.id, request);
+      }
+      return live;
+    },
+  });
   const fingerprint = JSON.stringify(bootstrapPayload());
   if (fingerprint !== lastBootstrapFingerprint) {
     lastBootstrapFingerprint = fingerprint;
@@ -384,25 +398,20 @@ export function setListenAddress(address) {
   else listenBaseUrl = null;
 }
 /**
- * What a CLI needs to drive this project's agent computer: the MCP server
- * (Codex/OpenCode) or Pi extension path, plus the real loopback base URL of
- * the serving ADE instance. Null when that URL is not known yet — the tools
- * are then omitted rather than pointed at a guessed address. With the turn's
- * session id, the tools tell ADE which session asks (a dev command proposal
- * waits for the user's answer in that session).
+ * What a turn needs to drive this project's agent computer: Node plus the env
+ * that points tools at this ADE instance. Null when that URL is not known yet
+ * — the tools are then omitted rather than pointed at a guessed address. Each
+ * adapter's `wireComputer` resolves the MCP script or Pi extension path.
+ * With the turn's session id, the tools tell ADE which session asks (a dev
+ * command proposal waits for the user's answer in that session).
  * @param {{ id: string }} project
  * @param {string} [sessionId]
  */
 export function computerContext(project, sessionId) {
   const api = listenBaseUrl;
   if (!api) return null;
-  // Beside this file, not the working directory: the published `ade` runs from wherever
-  // the user typed `npx`, where these scripts don't exist and the tools would silently vanish.
-  const local = path.dirname(fileURLToPath(import.meta.url));
   return {
     node: process.execPath,
-    mcpScript: path.join(local, "computer-mcp.mjs"),
-    piExtension: path.join(local, "computer-pi-extension.mjs"),
     env: {
       ADE_API: api,
       ADE_PROJECT_ID: project.id,
@@ -428,7 +437,7 @@ function agentComputerFor(project) {
     };
   return {
     available: true,
-    screen: `${SCREEN.width}x${SCREEN.height}`,
+    screen: `${DEFAULT_VIEWPORT.width}x${DEFAULT_VIEWPORT.height}`,
     tools: COMPUTER_TOOLS.map((tool) => tool.name).join(", "),
     note: "You have your own browser (headless Chrome on this machine) that the user watches live in ADE. To view or test the project: dev_server_start, then computer_open_url with the localhost URL it reports, then use browser_snapshot refs or screenshots, clicks, and typing to verify behavior like a human QA tester.",
   };

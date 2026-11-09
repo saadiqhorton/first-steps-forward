@@ -1,7 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveAddressBarInput, resolveSearchUrlTemplate, isValidSearchUrlTemplate } from "./browser-address.mjs";
-import { normalizeBrowserUrl } from "../local/browser-protocol.mjs";
+import {
+  normalizeBrowserUrl,
+  resolveAddressBarInput,
+  resolveSearchUrlTemplate,
+  isValidSearchUrlTemplate,
+} from "./browser-address.mjs";
+
+test("normalizeBrowserUrl adds https to bare hosts and http to loopback", () => {
+  assert.equal(normalizeBrowserUrl("example.com/a?b=1"), "https://example.com/a?b=1");
+  assert.equal(normalizeBrowserUrl("  localhost:5173  "), "http://localhost:5173/");
+  assert.equal(normalizeBrowserUrl("127.0.0.1:8080/x"), "http://127.0.0.1:8080/x");
+  assert.equal(normalizeBrowserUrl("http://example.com"), "http://example.com/");
+});
+
+test("normalizeBrowserUrl refuses empty input and non-web schemes", () => {
+  assert.throws(() => normalizeBrowserUrl("   "), /Enter a URL/);
+  assert.throws(() => normalizeBrowserUrl("file:///etc/passwd"), /Only http and https/);
+  assert.throws(
+    () => normalizeBrowserUrl("javascript:alert(1)"),
+    /Only http and https|not a valid/,
+  );
+});
+
+test("normalizeBrowserUrl rejects bad input with code invalid_url", () => {
+  for (const input of ["", "   ", "file:///etc/passwd", "http://exa mple.com"]) {
+    assert.throws(
+      () => normalizeBrowserUrl(input),
+      (error) => error.code === "invalid_url",
+      `input ${JSON.stringify(input)}`,
+    );
+  }
+});
 
 test("the address bar searches text and keeps typed addresses and unsupported schemes distinct", () => {
   assert.equal(

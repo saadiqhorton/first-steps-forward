@@ -3,7 +3,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { LayoutGroup, motion, useReducedMotion } from "motion/react";
-import { motionTokens } from "../lib/motion-tokens";
+import { motionTokens } from "../motion-tokens";
 import styles from "./segmented-control.module.css";
 
 export interface Segment { value: string; label: string; /** Optional content after the label, such as a badge. */ accessory?: ReactNode; }

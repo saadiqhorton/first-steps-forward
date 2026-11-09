@@ -87,7 +87,7 @@ export function NewTaskForm({
             agentId,
             catalogIds,
             "",
-            result.available && result.source === "acp",
+            result.available && !!result.completeCatalog,
           );
           if (!resolved) return prev;
           return { ...prev, model: resolved, effort: "", speed: "" };

@@ -44,8 +44,7 @@ export async function devServer(ctx) {
   ) {
     const project = state.projects.find((x) => x.id === parts[1]);
     if (!project) return json(res, 404, { error: "Project not found." });
-    // The right pane answers a request no session holds; session cards use the session's
-    // permission route. Both go to the same answer.
+    // Session cards and the right pane both answer through this project route.
     if (parts[4] === "answer") {
       const data = await body(req);
       if (!["allow", "deny"].includes(data.decision))

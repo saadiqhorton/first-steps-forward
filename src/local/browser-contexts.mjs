@@ -15,8 +15,7 @@ import { sandboxDisabled } from "./browser-host.mjs";
 import { BROWSER_RENDER_SCALE, DEFAULT_VIEWPORT } from "../shared/browser-contract.mjs";
 
 export const INCOGNITO_PROFILE_ID = "incognito";
-export const CONTEXT_VIEWPORT = DEFAULT_VIEWPORT;
-const CONTEXT_OPTIONS = { viewport: CONTEXT_VIEWPORT, deviceScaleFactor: BROWSER_RENDER_SCALE };
+const CONTEXT_OPTIONS = { viewport: DEFAULT_VIEWPORT, deviceScaleFactor: BROWSER_RENDER_SCALE };
 const noop = () => {};
 const AUDIO_EXTENSION_PATH = fileURLToPath(new URL("./browser-audio-extension", import.meta.url));
 

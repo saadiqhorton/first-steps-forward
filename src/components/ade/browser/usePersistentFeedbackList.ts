@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type SetStateAction } from "react";
 import { loadFeedbackDraft, saveFeedbackDraft } from "@/lib/ade/browser/feedbackPersistence";
-import { warnUser } from "@/components/ade/NoticeDialog";
+import { warnUser } from "@/lib/ade/userNotices";
+import { sessionPairKey } from "@/shared/session-scope.mjs";
 
 function useStorageWarning() {
   const warned = useRef(false);
@@ -15,7 +16,7 @@ function useStorageWarning() {
 }
 
 export const feedbackScope = (projectId: string, sessionId: string) =>
-  JSON.stringify([projectId, sessionId]);
+  sessionPairKey(projectId, sessionId);
 
 /** Load each scope before writing it, retaining background recording drafts in memory. */
 export function usePersistentFeedbackList<T extends { id: string }, Stored>(

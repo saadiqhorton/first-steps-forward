@@ -5,8 +5,6 @@
 // per project; the first agent tool call starts the computer itself.
 import { DEFAULT_VIEWPORT } from "../shared/browser-contract.mjs";
 
-export const SCREEN = DEFAULT_VIEWPORT;
-
 /** HTTP status for a coded browser or computer error. Uncoded errors are bad input (400). */
 export const COMPUTER_ERROR_STATUS = {
   human_control: 409,
@@ -46,7 +44,7 @@ export function createComputerManager({ installer, hub }) {
   const generations = new Map();
 
   function status(projectId) {
-    const base = { projectId, screen: SCREEN };
+    const base = { projectId, screen: DEFAULT_VIEWPORT };
     if (hub.peek(projectId)) return { ...base, status: "running" };
     if (explicitlyStopped.has(projectId)) return { ...base, status: "stopped" };
     const install = installer.status();

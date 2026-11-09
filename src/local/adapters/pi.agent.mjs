@@ -1,9 +1,14 @@
 import { promises as fsp } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { COMPUTER_TOOL_NAMES } from "./computer-tools.mjs";
+import { piComputerWiring } from "./computer-tools.mjs";
 import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
+
+/** @param {import("./kit.mjs").ComputerContext | null} computer */
+function wireComputer(computer) {
+  return piComputerWiring(computer);
+}
 
 /** Thinking levels Pi accepts via `--thinking` (clamped per model by Pi itself). */
 export const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -66,6 +71,7 @@ export const pi = defineCliAgent({
     "Pi provides /login inside its interactive TUI; it does not expose a supported browser/device login command for this UI. Sign in with `pi`, then choose /login.",
   installHint: "Install from https://pi.dev/",
   tools: "read, edit, write, grep, find, ls (no shell), plus ADE's agent computer tools",
+  wireComputer,
   /**
    * Pi is multi-provider. Probe credential-store provider names (never
    * inspect or log credential values), falling back to known names when the
@@ -156,14 +162,15 @@ export const pi = defineCliAgent({
     const fileTools = permission === "plan" ? "read,grep,find,ls" : "read,edit,write,grep,find,ls";
     // Pi has no MCP client: ADE's agent computer arrives as a Pi extension
     // (-e) with its tool names added to the allowlist.
-    const tools = [fileTools, ...(computer ? COMPUTER_TOOL_NAMES : [])].join(",");
+    const wired = wireComputer(computer);
+    const tools = [fileTools, ...wired.toolNames].join(",");
     return [
       "pi",
       [
         "-p",
         "--mode",
         "json",
-        ...(computer ? ["-e", computer.piExtension] : []),
+        ...wired.args,
         // Extensions stay enabled so package-registered providers (e.g.
         // ollama-cloud via pi-ollama-cloud) resolve for a picked model. The
         // --tools allowlist below still sandboxes the run: other extension
@@ -187,7 +194,7 @@ export const pi = defineCliAgent({
         ...(attachments ?? []).map((a) => `@${a.path}`),
         prompt,
       ],
-      computer ? computer.env : {},
+      wired.env,
     ];
   },
   parse(line) {

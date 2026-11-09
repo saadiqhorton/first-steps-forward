@@ -1,29 +1,15 @@
+import { request, type RequestError } from "./api";
+
 /** Entry from `/api/editor/:id/entries` or search. */
 export type EditorEntry = { name: string; path: string; kind: "folder" | "file" };
 
 /** In-memory open document with draft + optimistic concurrency version. */
 export type EditorDocument = { saved: string; draft: string; version: string };
 
-export type EditorApiError = Error & { status?: number };
+export type EditorApiError = RequestError;
 
 export async function editorApi<T>(url: string, data?: object): Promise<T> {
-  const response = await fetch(
-    url,
-    data === undefined
-      ? undefined
-      : {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(data),
-        },
-  );
-  const value = await response.json();
-  if (!response.ok) {
-    const error = new Error(value.error || "File request failed.") as EditorApiError;
-    error.status = response.status;
-    throw error;
-  }
-  return value as T;
+  return request<T>(url, data === undefined ? "GET" : "POST", data);
 }
 
 export function isMarkdownPath(file: string) {

@@ -12,13 +12,15 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import { browserScope } from "./browser-scope.mjs";
 import {
+  CLIENT_STREAM_MESSAGE_TYPES,
   DEFAULT_VIEWPORT,
   INPUT_BUTTONS,
   MAX_INPUT_TEXT_CHARS,
   MAX_MODIFIER_MASK,
   STREAM_PATH,
   STREAM_CLOSE_CODES,
-  VIEWPORT_LIMITS,
+  STREAM_QUERY_PARAMS,
+  viewportAcceptable,
   WEBSOCKET_CLOSE_REASON_MAX_BYTES,
 } from "../shared/browser-contract.mjs";
 
@@ -346,11 +348,11 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
       return false;
     }
     rec.viewerId = viewerId;
-    rec.maxWidth = intParam(params, "maxWidth", DEFAULT_MAX_WIDTH, MAX_WIDTH);
-    rec.maxHeight = intParam(params, "maxHeight", DEFAULT_MAX_HEIGHT, MAX_HEIGHT);
-    rec.quality = intParam(params, "quality", DEFAULT_QUALITY, MAX_QUALITY);
-    const frameRate = params.get("recordingFrameRate");
-    rec.showRecordingKeys = params.get("recordingKeys") === "1" && !!tabId;
+    rec.maxWidth = intParam(params, STREAM_QUERY_PARAMS.maxWidth, DEFAULT_MAX_WIDTH, MAX_WIDTH);
+    rec.maxHeight = intParam(params, STREAM_QUERY_PARAMS.maxHeight, DEFAULT_MAX_HEIGHT, MAX_HEIGHT);
+    rec.quality = intParam(params, STREAM_QUERY_PARAMS.quality, DEFAULT_QUALITY, MAX_QUALITY);
+    const frameRate = params.get(STREAM_QUERY_PARAMS.recordingFrameRate);
+    rec.showRecordingKeys = params.get(STREAM_QUERY_PARAMS.recordingKeys) === "1" && !!tabId;
     rec.recordingTabId = tabId;
 
     const room = roomFor(browserScope(projectId, sessionId));
@@ -413,6 +415,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
     const msg = parseMessage(data);
     const room = rec.room;
     if (!msg || !room || rec.closed) return;
+    if (!CLIENT_STREAM_MESSAGE_TYPES.includes(msg.type)) return;
     const { control, session } = room;
     switch (msg.type) {
       case "ack": {
@@ -452,15 +455,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
       case "resize": {
         const width = Math.round(Number(msg.width));
         const height = Math.round(Number(msg.height));
-        if (
-          !Number.isFinite(width) ||
-          !Number.isFinite(height) ||
-          width < VIEWPORT_LIMITS.minWidth ||
-          width > VIEWPORT_LIMITS.maxWidth ||
-          height < VIEWPORT_LIMITS.minHeight ||
-          height > VIEWPORT_LIMITS.maxHeight
-        )
-          return;
+        if (!viewportAcceptable({ width, height })) return;
         await guarded(
           rec,
           control.human(rec.viewerId, () => session.resize(width, height)),

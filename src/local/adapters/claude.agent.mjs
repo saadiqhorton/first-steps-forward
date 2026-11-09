@@ -3,7 +3,13 @@
 // renamed @zed-industries/claude-code-acp), a bridge ADE sets up itself (see
 // ../acp-bridge.mjs). The turn itself runs in ../acp.mjs; this preset only
 // says how to launch it and what to ask for.
+import { acpComputerServers } from "./computer-tools.mjs";
 import { defineAcpAgent } from "./kit.mjs";
+
+/** @param {import("./kit.mjs").ComputerContext | null} computer */
+function wireComputer(computer) {
+  return { mcpServers: acpComputerServers(computer) };
+}
 
 export const claude = defineAcpAgent({
   id: "claude",
@@ -11,6 +17,7 @@ export const claude = defineAcpAgent({
   short: "Claude",
   bin: "claude",
   order: 4,
+  wireComputer,
   signIn: {
     note: "Claude Code signs in through its own CLI, which opens a browser. Run this in a terminal; if you already use Claude Code here, you are probably signed in already. Credentials stay in Claude Code's own store.",
     command: "claude auth login",

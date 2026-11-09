@@ -20,7 +20,7 @@ import {
 import { copyText } from "@/lib/ade/clipboard";
 import { getBrowserLocalServers } from "@/lib/ade/browser/api";
 import { BROWSER_OPEN_EVENT } from "@/lib/ade/browser/openInPreview.mjs";
-import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
+import { askConfirm, warnUser } from "@/lib/ade/userNotices";
 import { summarizeChecks } from "./ChecksList";
 import { DevCommandRequestCard } from "./DevCommandRequestCard";
 import { BrowserChromeRow } from "./browser/BrowserChromeRow";

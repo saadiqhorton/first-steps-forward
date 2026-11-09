@@ -203,7 +203,7 @@ export function AgentPicker({
     if (!value.model || !models?.available) return;
     const ids = (models.models ?? []).map((m) => m.id);
     if (ids.includes(value.model)) return;
-    if (models.source === "acp") {
+    if (models.completeCatalog) {
       // The agent's own list is all it accepts: an id outside it (say, one
       // remembered from another agent) would only fail the turn.
       const resolved = resolveModelForAgent(value.agentId, ids, "", true);
@@ -222,7 +222,7 @@ export function AgentPicker({
       value.agentId,
       catalogIds,
       "",
-      !!models?.available && models.source === "acp",
+      !!models?.available && !!models.completeCatalog,
     );
     if (!resolved) return;
     onChange({
@@ -253,10 +253,10 @@ export function AgentPicker({
         label: m.label && m.label !== m.id ? `${m.label} — ${m.id}` : m.id,
       });
     }
-    // An ACP agent's list is complete; it would reject any other id.
-    if (models?.source !== "acp") rows.push({ id: OTHER, label: "Other model id…" });
+    // A complete catalog is all the agent accepts; free-form ids would only fail the turn.
+    if (!models?.completeCatalog) rows.push({ id: OTHER, label: "Other model id…" });
     return rows;
-  }, [listedModels, models?.source]);
+  }, [listedModels, models?.completeCatalog]);
 
   const filteredModelRows = useMemo(() => {
     const q = modelQuery.trim().toLowerCase();
@@ -612,7 +612,7 @@ export function AgentPicker({
                       Offline bundled catalog — may omit newer models.
                     </p>
                   )}
-                  {models.source === "acp" && (
+                  {models.completeCatalog && (
                     <p className="mt-1 px-2 font-mono text-[10px] text-dim">
                       The models this agent reports offering.
                     </p>

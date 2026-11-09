@@ -10,8 +10,9 @@ import {
 import { type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { AdeProvider } from "@/lib/ade/store";
+import { AdeHosts } from "@/components/ade/AdeHosts";
 import { Shell } from "@/components/ade/Shell";
+import { AdeProvider } from "@/lib/ade/store";
 import { themeInitScript } from "@/lib/theme";
 
 function NotFoundComponent() {
@@ -111,10 +112,12 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AdeProvider>
-        <Shell>
-          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-          <Outlet />
-        </Shell>
+        <AdeHosts>
+          <Shell>
+            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+            <Outlet />
+          </Shell>
+        </AdeHosts>
       </AdeProvider>
     </QueryClientProvider>
   );

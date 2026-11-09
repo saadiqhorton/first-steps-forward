@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from "motion/react";
 import { useLayoutEffect, useRef, type ReactNode } from "react";
-import { motionTokens } from "@/components/arc/lib/motion-tokens";
+import { motionTokens } from "@/components/arc/motion-tokens";
 
 const exitTween = {
   duration: motionTokens.duration.exit,

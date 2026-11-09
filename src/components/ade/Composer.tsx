@@ -19,7 +19,7 @@ import {
   ComposerAttachments,
   type AttachmentDraft,
 } from "@/components/ade/ComposerAttachments";
-import { warnUser } from "@/components/ade/NoticeDialog";
+import { warnUser } from "@/lib/ade/userNotices";
 import {
   isBrowserRecording,
   ensureBrowserFeedbackLoaded,

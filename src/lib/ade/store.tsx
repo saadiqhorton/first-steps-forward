@@ -26,9 +26,9 @@ import type {
   SessionSummary,
   Workflow,
 } from "./types";
-import { NoticeDialogHost, warnUser } from "@/components/ade/NoticeDialog";
-import { TokenGate } from "@/components/ade/TokenGate";
 import { recordingAttachment } from "@/lib/ade/browser/recordingUpload";
+import { hasPendingUserRequest } from "@/lib/ade/sessionAttention.mjs";
+import { warnUser } from "@/lib/ade/userNotices";
 
 const empty: AdeState = {
   hydrated: false,
@@ -211,7 +211,7 @@ export const importBrowserCookies = (
     "POST",
     { sourceId, ...(tabId ? { tabId } : {}), ...(profileId ? { profileId } : {}) },
   );
-/** Answer a dev command request no session holds (the right pane shows it on the project). */
+/** Answer ADE's "Run this dev command?" (session card or right pane). */
 export const answerDevCommand = (projectId: string, requestId: string, allow: boolean) =>
   request(`/api/projects/${projectId}/dev/command/answer`, "POST", {
     requestId,
@@ -531,10 +531,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
   );
   return (
     <ActiveProjectCtx.Provider value={activeProjectValue}>
-      <Ctx.Provider value={api}>
-        {state.authRequired ? <TokenGate onUnlocked={() => refresh()} /> : children}
-        <NoticeDialogHost />
-      </Ctx.Provider>
+      <Ctx.Provider value={api}>{children}</Ctx.Provider>
     </ActiveProjectCtx.Provider>
   );
 }
@@ -599,8 +596,10 @@ export function isActive(s: Pick<SessionSummary, "status">) {
   return ACTIVE.includes(s.status);
 }
 /** The running turn is paused on an agent question only the user can answer. */
-export function needsYou(s: Pick<SessionSummary, "status" | "pendingPermissions">) {
-  return (s.pendingPermissions?.length ?? 0) > 0;
+export function needsYou(
+  s: Pick<SessionSummary, "status" | "pendingPermissions" | "pendingDevCommand">,
+) {
+  return hasPendingUserRequest(s);
 }
 export function timeAgo(now: number, t?: number) {
   if (!now || !t) return "";

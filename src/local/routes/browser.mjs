@@ -17,6 +17,7 @@ import {
   selectedBrowserProfile,
   browserProfileStorageKey,
 } from "../browser-profiles.mjs";
+import { VIEWPORT_LIMITS, viewportAcceptable } from "../../shared/browser-contract.mjs";
 
 const OBSERVE_BROWSER_ACTIONS = new Set(["status", "snapshot", "screenshot", "wait_for"]);
 const OBSERVE_COMPUTER_ACTIONS = new Set(["screenshot", "wait"]);
@@ -602,19 +603,9 @@ export async function browser(ctx) {
         return json(res, 400, { error: "Invalid color scheme." });
       if (input.clear !== undefined && !["cookies", "cache"].includes(input.clear))
         return json(res, 400, { error: "Invalid browser data selection." });
-      if (
-        input.viewport !== undefined &&
-        (!Number.isFinite(input.viewport?.width) ||
-          !Number.isFinite(input.viewport?.height) ||
-          input.viewport.width < 240 ||
-          input.viewport.width > 3840 ||
-          input.viewport.height < 240 ||
-          input.viewport.height > 3840 ||
-          input.viewport.width * input.viewport.height > 3840 * 2160)
-      )
+      if (input.viewport !== undefined && !viewportAcceptable(input.viewport ?? {}))
         return json(res, 400, {
-          error:
-            "Viewport dimensions must be 240–3840 pixels, with an area no larger than 3840×2160.",
+          error: `Viewport dimensions must be ${VIEWPORT_LIMITS.minWidth}–${VIEWPORT_LIMITS.maxWidth}×${VIEWPORT_LIMITS.minHeight}–${VIEWPORT_LIMITS.maxHeight} pixels, with an area no larger than ${VIEWPORT_LIMITS.maxWidth}×${VIEWPORT_LIMITS.maxHeight}.`,
         });
       try {
         const settings = await controls.for(scope).system(() => session.adjustBrowser(input));

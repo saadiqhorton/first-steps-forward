@@ -5,7 +5,7 @@ import {
   saveFeedbackDraft,
   saveFeedbackDrafts,
 } from "./feedbackPersistence";
-import { warnUser } from "@/components/ade/NoticeDialog";
+import { warnUser } from "@/lib/ade/userNotices";
 
 /** Browser feedback waits here until its conversation composer is mounted. */
 interface BrowserFeedbackDraft {

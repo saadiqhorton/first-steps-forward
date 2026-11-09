@@ -15,6 +15,7 @@ export async function sessionReads(ctx) {
     turns,
     UNSUPPORTED_RISK,
     resolveSessionOptions,
+    devApprovals,
     json,
   } = ctx;
   if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
@@ -41,6 +42,9 @@ export async function sessionReads(ctx) {
     const session = state.sessions.find((item) => item.id === parts[1]);
     if (!session) return json(res, 404, { error: "Session not found." });
     const { logs: _logs, ...detail } = session;
+    const pendingDevCommand = devApprovals.forSession(session.id) ?? session.pendingDevCommand;
+    if (pendingDevCommand) detail.pendingDevCommand = pendingDevCommand;
+    else delete detail.pendingDevCommand;
     return json(res, 200, { session: detail });
   }
   if (req.method === "POST" && parts[0] === "sessions" && parts.length === 1) {

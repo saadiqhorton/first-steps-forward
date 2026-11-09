@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Check, Clipboard, FilePenLine, Play, Sparkles, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import type { Agent, Workflow } from "@/lib/ade/types";
-import { warnUser } from "@/components/ade/NoticeDialog";
+import { warnUser } from "@/lib/ade/userNotices";
 import { copyText, isInsecureOrigin } from "@/lib/ade/clipboard";
 import { useAdeState } from "@/lib/ade/store";
 import { workflowAccent } from "./workflowFilters.mjs";

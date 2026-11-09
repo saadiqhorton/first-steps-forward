@@ -7,7 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
+import { askConfirm, warnUser } from "@/lib/ade/userNotices";
 import { useAde, useAdeState } from "@/lib/ade/store";
 
 export function ProjectsMenu({

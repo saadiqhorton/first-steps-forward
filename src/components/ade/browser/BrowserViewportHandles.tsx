@@ -10,6 +10,7 @@ import {
 } from "react";
 import { adjustBrowserSettings } from "@/lib/ade/browser/api";
 import type { BrowserStreamViewport } from "@/lib/ade/browser/browserStream";
+import { VIEWPORT_LIMITS, clampViewport } from "@/shared/browser-contract.mjs";
 
 type Direction = "west" | "east" | "south" | "southwest" | "southeast";
 type Size = { width: number; height: number };
@@ -23,26 +24,23 @@ type Gesture = {
   tabId: string | null;
 };
 
-const MIN_DIMENSION = 240;
-const MAX_DIMENSION = 3840;
-const MAX_AREA = 3840 * 2160;
-const clampDimension = (value: number) =>
-  Math.min(MAX_DIMENSION, Math.max(MIN_DIMENSION, Math.round(value)));
+const { minWidth, maxWidth, minHeight, maxHeight } = VIEWPORT_LIMITS;
+const MAX_AREA = maxWidth * maxHeight;
 
 function resizeAtRatio(desired: number, ratio: number, axis: "width" | "height"): Size {
   if (axis === "width") {
-    const minimum = Math.ceil(Math.max(MIN_DIMENSION, MIN_DIMENSION * ratio));
+    const minimum = Math.ceil(Math.max(minWidth, minHeight * ratio));
     const maximum = Math.floor(
-      Math.min(MAX_DIMENSION, MAX_DIMENSION * ratio, Math.sqrt(MAX_AREA * ratio)),
+      Math.min(maxWidth, maxHeight * ratio, Math.sqrt(MAX_AREA * ratio)),
     );
     let width = Math.min(maximum, Math.max(minimum, Math.round(desired)));
     let height = Math.round(width / ratio);
     while (width * height > MAX_AREA && width > minimum) height = Math.round(--width / ratio);
     return { width, height };
   }
-  const minimum = Math.ceil(Math.max(MIN_DIMENSION, MIN_DIMENSION / ratio));
+  const minimum = Math.ceil(Math.max(minHeight, minWidth / ratio));
   const maximum = Math.floor(
-    Math.min(MAX_DIMENSION, MAX_DIMENSION / ratio, Math.sqrt(MAX_AREA / ratio)),
+    Math.min(maxHeight, maxWidth / ratio, Math.sqrt(MAX_AREA / ratio)),
   );
   let height = Math.min(maximum, Math.max(minimum, Math.round(desired)));
   let width = Math.round(height * ratio);
@@ -113,8 +111,7 @@ export function BrowserViewportHandles({
               : "height";
       return resizeAtRatio(axis === "width" ? desiredWidth : desiredHeight, aspectRatio, axis);
     }
-    let width = clampDimension(desiredWidth);
-    let height = clampDimension(desiredHeight);
+    let { width, height } = clampViewport({ width: desiredWidth, height: desiredHeight });
     if (width * height > MAX_AREA) {
       if (Math.abs(horizontal) >= Math.abs(vertical)) width = Math.floor(MAX_AREA / height);
       else height = Math.floor(MAX_AREA / width);

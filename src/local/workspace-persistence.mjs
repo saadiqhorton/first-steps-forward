@@ -42,7 +42,7 @@ export async function reconcileWorkspaceMessages(file, current) {
  * Serialize read/merge/write across ADE processes sharing this file: a dev and a
  * production ADE (or a dev server mid-restart) may run against the same ~/.ade.
  */
-export async function saveWorkspace(file, current) {
+export async function saveWorkspace(file, current, options = {}) {
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const lock = `${file}.lock`;
   let acquired = false;
@@ -66,13 +66,31 @@ export async function saveWorkspace(file, current) {
   if (!acquired) throw new Error("ADE workspace is busy; could not safely save it.");
   const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
+    // Dev-command asks are memory-only (see dev-command.mjs). Reconcile can wipe
+    // them when a newer disk snapshot lacks the field. Re-apply from the live
+    // approvals map after reconcile so a concurrent save started before answer()
+    // cannot resurrect a settled ask from a stale session snapshot.
+    const pendingBefore = new Map(
+      current.sessions
+        .filter((session) => session.pendingDevCommand)
+        .map((session) => [session.id, session.pendingDevCommand]),
+    );
     await reconcileWorkspaceMessages(file, current);
+    const pendingDevCommands =
+      typeof options.livePendingDevCommands === "function"
+        ? options.livePendingDevCommands()
+        : pendingBefore;
+    for (const session of current.sessions) delete session.pendingDevCommand;
+    for (const [id, request] of pendingDevCommands) {
+      const session = current.sessions.find((item) => item.id === id);
+      if (session) session.pendingDevCommand = request;
+    }
     await fs.writeFile(
       tmp,
       JSON.stringify(
         {
           projects: current.projects,
-          sessions: current.sessions.map(({ logs, ...session }) => session),
+          sessions: current.sessions.map(({ logs, pendingDevCommand: _pending, ...session }) => session),
           processes: current.processes,
           workflows: current.workflows ?? [],
         },

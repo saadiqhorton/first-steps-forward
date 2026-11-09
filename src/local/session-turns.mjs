@@ -196,22 +196,18 @@ export function createSessionTurns({
     if (slot.child) stopProcess(slot.child);
   };
   /**
-   * Answer every open permission request "cancelled" (the turn is ending) and clear them. A
-   * dev command request stays: it is about the project, not this turn, and the dev server
-   * route answers it (see dev-command.mjs).
+   * Answer every open ACP permission request "cancelled" (the turn is ending) and clear them.
+   * Dev command approvals live on `session.pendingDevCommand` / the project and outlive the turn
+   * (see dev-command.mjs). Pre-demux leftovers with `kind === "dev_command"` in the permissions
+   * array are dropped without answering.
    */
   const dropPermissions = (session) => {
-    const kept = [];
     for (const request of session.pendingPermissions ?? []) {
-      if (request.kind === "dev_command") {
-        kept.push(request);
-        continue;
-      }
+      if (request.kind === "dev_command") continue;
       waiters.get(request.id)?.({ outcome: "cancelled" });
       waiters.delete(request.id);
     }
-    if (kept.length) session.pendingPermissions = kept;
-    else delete session.pendingPermissions;
+    delete session.pendingPermissions;
   };
   /** Files that were already dirty before this turn are the user's, not the agent's. */
   const flagBaseline = (session, changes) => {
@@ -871,12 +867,14 @@ export function createSessionTurns({
           );
           changed = true;
         }
-        // A permission request dies with the agent process that asked it.
+        // A permission request dies with the agent process that asked it. Dev command
+        // approvals are memory-only and re-proposed after restart (see dev-command.mjs).
         for (const key of [
           "pid",
           "steerNow",
           "steerNowAttachments",
           "pendingPermissions",
+          "pendingDevCommand",
           "checksCancelled",
         ])
           if (key in session) {

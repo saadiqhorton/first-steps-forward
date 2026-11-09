@@ -12,7 +12,7 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
-import { Globe, Upload, X } from "lucide-react";
+import { Globe, X } from "lucide-react";
 import { uploadAttachment, useAde } from "@/lib/ade/store";
 import { addBrowserFeedback } from "@/lib/ade/browser/composerFeedback";
 import {
@@ -37,7 +37,6 @@ import {
 import type {
   BrowserButton,
   BrowserDialog,
-  BrowserFileChooser,
   BrowserStreamViewport,
   ClientMessage,
 } from "@/lib/ade/browser/browserStream";
@@ -46,11 +45,14 @@ import { BrowserViewportHandles } from "./BrowserViewportHandles";
 import { BrowserAnnotationStyles } from "./BrowserAnnotationStyles";
 import { BrowserUnreachable } from "./BrowserUnreachable";
 import { BrowserFileNotShown } from "./BrowserFileNotShown";
+import { FileChooserPrompt } from "./FileChooserPrompt";
+import { PageDialog } from "./PageDialog";
 import { formatAnnotationFeedback } from "./annotationFeedback";
 import { BROWSER_ZOOM_EVENT } from "@/lib/ade/browser/openInPreview.mjs";
 import { feedbackScope } from "./usePersistentFeedbackList";
 import { CAPTURE_IMAGE_LIMIT, captureImageFile, encodeCaptureImage } from "./captureImage";
 import { useBrowserPreviewFrame, useBrowserPreviewState } from "./browserPreviewContext";
+import { MODIFIER_BITS, VIEWPORT_LIMITS } from "@/shared/browser-contract.mjs";
 
 const RESIZE_DEBOUNCE_MS = 150;
 const MULTI_CLICK_MS = 500;
@@ -64,7 +66,7 @@ const BACKSPACE_KEY = { key: "Backspace", code: "Backspace", keyCode: 8 } as con
 const DELETE_KEY = { key: "Delete", code: "Delete", keyCode: 46 } as const;
 const COPY_KEY = { key: "c", code: "KeyC", keyCode: 67 } as const;
 const CUT_KEY = { key: "x", code: "KeyX", keyCode: 88 } as const;
-const CTRL_MODIFIER = 2;
+const CTRL_MODIFIER = MODIFIER_BITS.ctrl;
 const TAP_SLOP_PX = 8;
 
 /** A page dialog answer. `key` ties it to the dialog it answers. */
@@ -387,7 +389,7 @@ export function BrowserSurface({
       const rect = stage.getBoundingClientRect();
       const width = Math.round(rect.width);
       const height = Math.round(rect.height);
-      if (width < 240 || height < 240) return;
+      if (width < VIEWPORT_LIMITS.minWidth || height < VIEWPORT_LIMITS.minHeight) return;
       const key = `${width}x${height}`;
       if (key === last) return;
       last = key;
@@ -1876,111 +1878,6 @@ export function BrowserSurface({
           onAnswer={(files) => void answerFileChooser(control.fileChooser!.id, files)}
         />
       ) : null}
-    </div>
-  );
-}
-
-/**
- * A file picker the page opened. Headless Chrome has no native picker, so the files come from
- * this machine's own picker and are sent to the page; answering takes control first.
- */
-function FileChooserPrompt({
-  chooser,
-  onAnswer,
-}: {
-  chooser: BrowserFileChooser;
-  onAnswer: (files: File[]) => void;
-}) {
-  const input = useRef<HTMLInputElement>(null);
-  return (
-    <div
-      role="dialog"
-      aria-label="Page file picker"
-      className="absolute top-1/2 left-1/2 z-[7] grid w-[min(20rem,calc(100%-1.5rem))] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-xl bg-panel p-3 text-xs text-ink shadow-lg ring-1 ring-line ring-inset"
-    >
-      <p className="m-0 break-words">
-        The page wants {chooser.multiple ? "files" : "a file"}. Choose{" "}
-        {chooser.multiple ? "them" : "one"} from this computer to send to it.
-      </p>
-      <input
-        ref={input}
-        type="file"
-        hidden
-        multiple={chooser.multiple}
-        accept={chooser.accept || undefined}
-        onChange={(event) => {
-          const files = Array.from(event.target.files ?? []);
-          if (files.length > 0) onAnswer(files);
-        }}
-      />
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={() => onAnswer([])}
-          className="btn-quiet px-3 py-1.5 text-xs"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={() => input.current?.click()}
-          className="btn-amber inline-flex items-center gap-2 px-3 py-1.5 text-xs"
-        >
-          <Upload className="size-4" strokeWidth={1.5} aria-hidden />
-          {chooser.multiple ? "Choose files" : "Choose file"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * A page dialog (alert, confirm, prompt or beforeunload) that the page is waiting on. The page is
- * frozen until someone answers, so this is shown whoever holds control.
- */
-function PageDialog({
-  dialog,
-  onAnswer,
-}: {
-  dialog: BrowserDialog;
-  onAnswer: (reply: { accept: boolean; promptText?: string }) => void;
-}) {
-  const [text, setText] = useState(dialog.defaultValue);
-  const isPrompt = dialog.type === "prompt";
-  const isAlert = dialog.type === "alert";
-  return (
-    <div
-      role="dialog"
-      aria-label="Page dialog"
-      className="absolute top-1/2 left-1/2 z-[7] grid w-[min(20rem,calc(100%-1.5rem))] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-xl bg-panel p-3 text-xs text-ink shadow-lg ring-1 ring-line ring-inset"
-    >
-      <p className="m-0 break-words">{dialog.message || "The page is asking for a response."}</p>
-      {isPrompt ? (
-        <input
-          aria-label="Dialog response"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          className="h-7 w-full min-w-0 rounded-md bg-paper px-2 ring-1 ring-line ring-inset outline-none focus-visible:outline-2 focus-visible:outline-amber"
-        />
-      ) : null}
-      <div className="flex justify-end gap-2">
-        {isAlert ? null : (
-          <button
-            type="button"
-            onClick={() => onAnswer({ accept: false })}
-            className="btn-quiet px-3 py-1.5 text-xs"
-          >
-            Dismiss
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => onAnswer({ accept: true, ...(isPrompt ? { promptText: text } : {}) })}
-          className="btn-amber px-3 py-1.5 text-xs"
-        >
-          {isAlert ? "OK" : "Accept"}
-        </button>
-      </div>
     </div>
   );
 }

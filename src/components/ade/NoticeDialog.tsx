@@ -5,87 +5,39 @@ import {
   AlertDialogDescription,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
-type ConfirmRequest = {
-  kind: "confirm";
-  title: string;
-  description: string;
-  confirmLabel: string;
-  cancelLabel: string;
-  resolve: (value: boolean) => void;
-};
-
-type AlertRequest = {
-  kind: "alert";
-  title: string;
-  description: string;
-  resolve: () => void;
-};
-
-type Request = ConfirmRequest | AlertRequest;
-
-let enqueue: ((request: Request) => void) | null = null;
-
-/** Design-system confirmation. Resolves false when the host is not mounted. */
-export function askConfirm(options: {
-  title: string;
-  description?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-}): Promise<boolean> {
-  if (!enqueue) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    enqueue!({
-      kind: "confirm",
-      title: options.title,
-      description: options.description ?? "",
-      confirmLabel: options.confirmLabel ?? "Continue",
-      cancelLabel: options.cancelLabel ?? "Cancel",
-      resolve,
-    });
-  });
-}
-
-/** Design-system warning. The message is the dialog body. */
-export function warnUser(message: string, title = "Something went wrong"): Promise<void> {
-  if (!enqueue) return Promise.resolve();
-  return new Promise((resolve) => {
-    enqueue!({ kind: "alert", title, description: message, resolve });
-  });
-}
-
-function settle(request: Request, confirmed: boolean) {
-  if (request.kind === "confirm") request.resolve(confirmed);
-  else request.resolve();
-}
+import {
+  bindNoticeEnqueue,
+  settleNotice,
+  type NoticeRequest,
+} from "@/lib/ade/userNotices";
 
 /**
  * One alert-dialog host for confirms and warnings.
  * Visual treatment matches the sign-in and harness dialogs: raised surface, amber action, quiet cancel.
  */
 export function NoticeDialogHost() {
-  const queue = useRef<Request[]>([]);
-  const currentRef = useRef<Request | null>(null);
-  const [current, setCurrent] = useState<Request | null>(null);
+  const queue = useRef<NoticeRequest[]>([]);
+  const currentRef = useRef<NoticeRequest | null>(null);
+  const [current, setCurrent] = useState<NoticeRequest | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    enqueue = (request) => {
+    bindNoticeEnqueue((request) => {
       if (currentRef.current) queue.current.push(request);
       else {
         currentRef.current = request;
         setCurrent(request);
         setOpen(true);
       }
-    };
+    });
     return () => {
-      enqueue = null;
+      bindNoticeEnqueue(null);
       const pending = [currentRef.current, ...queue.current].filter(
-        (item): item is Request => item !== null,
+        (item): item is NoticeRequest => item !== null,
       );
       currentRef.current = null;
       queue.current = [];
-      for (const item of pending) settle(item, false);
+      for (const item of pending) settleNotice(item, false);
     };
   }, []);
 
@@ -93,7 +45,7 @@ export function NoticeDialogHost() {
     const item = currentRef.current;
     if (!item) return;
     currentRef.current = null;
-    settle(item, confirmed);
+    settleNotice(item, confirmed);
     const next = queue.current.shift() ?? null;
     if (next) {
       currentRef.current = next;

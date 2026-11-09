@@ -12,6 +12,7 @@ export function isUnread(
 export function needsAttention(session: {
   status: string;
   pendingPermissions?: unknown[];
+  pendingDevCommand?: unknown;
 }): boolean;
 
 export function filterSessions<
@@ -24,6 +25,7 @@ export function filterSessions<
     summary?: string;
     messages?: Array<{ text?: string }>;
     pendingPermissions?: unknown[];
+    pendingDevCommand?: unknown;
   },
 >(
   sessions: S[],
@@ -32,5 +34,6 @@ export function filterSessions<
     query: string;
     showCompleted: boolean;
     viewed: Record<string, number>;
+    searchMatches?: Set<string> | undefined;
   },
 ): S[];

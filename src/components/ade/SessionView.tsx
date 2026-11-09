@@ -7,6 +7,7 @@ import { DiffPanel } from "@/components/ade/DiffPanel";
 import { RightPanePortal } from "@/components/ade/RightPanePortal";
 import { SessionMessage } from "@/components/ade/SessionMessage";
 import { MotionItem } from "@/components/ade/motion";
+import { DevCommandRequestCard } from "@/components/ade/DevCommandRequestCard";
 import { PermissionRequestCard } from "@/components/ade/PermissionRequestCard";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { AnimatePresence } from "motion/react";
@@ -15,9 +16,11 @@ import { useShell } from "@/components/ade/shellContext";
 import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
 import { currentActivity } from "@/lib/ade/formatLogs.mjs";
 import { sessionTitle } from "@/lib/ade/sessionTitle";
-import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
+import { askConfirm, warnUser } from "@/lib/ade/userNotices";
+import { sessionPairKey } from "@/shared/session-scope.mjs";
 import {
   agentModels,
+  answerDevCommand,
   needsYou,
   timeAgo,
   uploadAttachment,
@@ -55,7 +58,8 @@ function selectionFromSession(session: {
 }
 
 export function SessionView({ sessionId }: { sessionId: string }) {
-  const { steer, complete, reopen, stop, switchAgent, setSessionOptions, runChecks } = useAde();
+  const { steer, complete, reopen, stop, switchAgent, setSessionOptions, runChecks, refresh } =
+    useAde();
   const state = useAdeState((state) => ({
     sessions: state.sessions,
     projects: state.projects,
@@ -91,7 +95,10 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   const stickToBottomRef = useRef(true);
   const lastMessageRole = session?.messages[session.messages.length - 1]?.role;
   const lastMessageLength = session?.messages[session.messages.length - 1]?.text.length;
-  const pendingCount = session?.pendingPermissions?.length ?? 0;
+  const agentPermissions = (session?.pendingPermissions ?? []).filter(
+    (request) => request.kind !== "dev_command",
+  );
+  const pendingCount = agentPermissions.length + (session?.pendingDevCommand ? 1 : 0);
 
   const onMessagesScroll = () => {
     const el = scrollRef.current;
@@ -139,7 +146,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             agentId,
             catalogIds,
             "",
-            result.available && result.source === "acp",
+            result.available && !!result.completeCatalog,
           );
           if (!resolved) return prev;
           return { ...base, model: resolved, effort: "", speed: "" };
@@ -415,7 +422,17 @@ export function SessionView({ sessionId }: { sessionId: string }) {
               </MotionItem>
             ))}
           </AnimatePresence>
-          {(session.pendingPermissions ?? []).map((request) => (
+          {session.pendingDevCommand && (
+            <DevCommandRequestCard
+              key={session.pendingDevCommand.id}
+              request={session.pendingDevCommand}
+              onAnswer={async (allow) => {
+                await answerDevCommand(project.id, session.pendingDevCommand!.id, allow);
+                await refresh();
+              }}
+            />
+          )}
+          {agentPermissions.map((request) => (
             <PermissionRequestCard
               key={request.id}
               sessionId={session.id}
@@ -557,7 +574,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           )}
           <Composer
             key={`${project.id}:${session.id}`}
-            draftStorageKey={JSON.stringify([project.id, session.id])}
+            draftStorageKey={sessionPairKey(project.id, session.id)}
             sessionId={session.id}
             mode="follow-up"
             selection={activeSelection}

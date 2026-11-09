@@ -2,6 +2,11 @@ import { opencodeComputerEnv } from "./computer-tools.mjs";
 import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
+/** @param {import("./kit.mjs").ComputerContext | null} computer */
+function wireComputer(computer) {
+  return { env: opencodeComputerEnv(computer) };
+}
+
 /**
  * Parse `opencode auth list --format json` (OpenCode 2.x): the integrations
  * configured in its store, each with its connections. Returns null when the
@@ -146,6 +151,7 @@ export const opencode = defineCliAgent({
     "OpenCode stores provider credentials in its own user-level credential store. OAuth options depend on the provider; OpenCode Go may require its provider credential.",
   installHint: "Install from https://opencode.ai/download",
   tools: "OpenCode built-in tools; permission prompts are auto-rejected in non-interactive runs",
+  wireComputer,
   async detectAuth(run) {
     // 2.x offers a machine-readable listing; 1.x rejects the flag, so fall
     // back to its table. Both are the CLI's own supported read-only flow, and
@@ -240,6 +246,7 @@ export const opencode = defineCliAgent({
   }) {
     // Third element: extra environment (the agent computer's MCP server).
     const fileArgs = (attachments ?? []).flatMap((a) => ["--file", a.path]);
+    const { env: computerEnv = {} } = wireComputer(computer);
     return [
       "opencode",
       [
@@ -259,7 +266,7 @@ export const opencode = defineCliAgent({
         ...fileArgs,
         prompt,
       ],
-      opencodeComputerEnv(computer),
+      computerEnv,
     ];
   },
   parse(line) {

@@ -2,6 +2,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import type { ILink, Terminal } from "@xterm/xterm";
 import { useXTerm } from "react-xtermjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { request } from "@/lib/ade/api";
 import { requestPreviewOpen } from "@/lib/ade/browser/openInPreview.mjs";
 
 type Props = {
@@ -78,28 +79,6 @@ const options = {
   },
 };
 
-async function api<T>(url: string, data?: object, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, {
-    ...(data === undefined
-      ? {}
-      : {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(data),
-        }),
-    ...(signal ? { signal } : {}),
-  });
-  const result = await response.json();
-  if (!response.ok) {
-    const error = new Error(result.error || "Terminal request failed.") as Error & {
-      status: number;
-    };
-    error.status = response.status;
-    throw error;
-  }
-  return result as T;
-}
-
 export function HostTerminalPane({
   projectId,
   projectName,
@@ -134,7 +113,7 @@ export function HostTerminalPane({
       pendingInput.current = pendingInput.current.slice(8192);
       sendChain.current = sendChain.current
         .catch(() => undefined)
-        .then(() => api(`/api/terminal/${id}/input`, { data }))
+        .then(() => request(`/api/terminal/${id}/input`, "POST", { data }))
         .catch((error) => {
           setMessage(error instanceof Error ? error.message : String(error));
         });
@@ -172,7 +151,7 @@ export function HostTerminalPane({
       const id = sessionRef.current;
       if (!id) return;
       try {
-        await api(`/api/terminal/${id}/close`, {});
+        await request(`/api/terminal/${id}/close`, "POST", {});
       } catch (error) {
         if ((error as Error & { status?: number }).status !== 404) throw error;
       }
@@ -199,7 +178,7 @@ export function HostTerminalPane({
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
           if (!cancelled && currentId)
-            void api(`/api/terminal/${currentId}/resize`, {
+            void request(`/api/terminal/${currentId}/resize`, "POST", {
               cols: instance.cols,
               rows: instance.rows,
             }).catch(() => undefined);
@@ -232,10 +211,11 @@ export function HostTerminalPane({
       try {
         // The shell echoes each key. Hold this read until that echo arrives
         // instead of sampling on a timer, which is what made typing lag.
-        output = await api<Output>(
+        output = await request<Output>(
           `/api/terminal/${currentId}?cursor=${cursor}&wait=1000`,
+          "GET",
           undefined,
-          pollAbort.signal,
+          { signal: pollAbort.signal },
         );
       } catch (error) {
         if (cancelled || (error instanceof Error && error.name === "AbortError")) return;
@@ -251,7 +231,8 @@ export function HostTerminalPane({
         const finishedId = currentId;
         currentId = null;
         sessionRef.current = null;
-        if (finishedId) void api(`/api/terminal/${finishedId}/close`, {}).catch(() => undefined);
+        if (finishedId)
+          void request(`/api/terminal/${finishedId}/close`, "POST", {}).catch(() => undefined);
         setStatus("exited");
         setMessage(`Shell exited with code ${output.exitCode ?? "unknown"}.`);
         return;
@@ -259,7 +240,7 @@ export function HostTerminalPane({
       pollTimer = setTimeout(poll, nextPollDelay(output, performance.now() - started));
     };
 
-    const opening = api<Session>("/api/terminal", {
+    const opening = request<Session>("/api/terminal", "POST", {
       projectId,
       cols: Math.max(20, instance.cols),
       rows: Math.max(5, instance.rows),
@@ -268,7 +249,7 @@ export function HostTerminalPane({
     void opening
       .then((session) => {
         if (cancelled) {
-          void api(`/api/terminal/${session.id}/close`, {}).catch(() => undefined);
+          void request(`/api/terminal/${session.id}/close`, "POST", {}).catch(() => undefined);
           return;
         }
         currentId = session.id;

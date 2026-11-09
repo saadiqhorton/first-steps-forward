@@ -14,7 +14,7 @@ import {
   type WorkflowFilter,
 } from "@/components/ade/workflows/workflowFilters.mjs";
 import { workflowsQuery } from "@/lib/ade/queries";
-import { askConfirm } from "@/components/ade/NoticeDialog";
+import { askConfirm } from "@/lib/ade/userNotices";
 import { deleteWorkflow } from "@/lib/ade/store";
 import type { Workflow } from "@/lib/ade/types";
 

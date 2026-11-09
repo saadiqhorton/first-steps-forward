@@ -3,6 +3,8 @@
  * Re-exported from `viewed.ts` for the React UI.
  */
 
+import { hasPendingUserRequest } from "./sessionAttention.mjs";
+
 /**
  * @typedef {"all" | "needs" | "working" | "unread"} ConversationFilter
  */
@@ -18,15 +20,11 @@ export function isUnread(session, viewed) {
 
 /**
  * Whether a session is waiting on the user: ready to review, blocked, or
- * paused on a permission request while its turn runs.
- * @param {{ status: string, pendingPermissions?: unknown[] }} session
+ * paused on a permission / dev-command request while its turn runs.
+ * @param {{ status: string, pendingPermissions?: unknown[], pendingDevCommand?: unknown }} session
  */
 export function needsAttention(session) {
-  return (
-    session.status === "ready" ||
-    session.status === "blocked" ||
-    (session.pendingPermissions?.length ?? 0) > 0
-  );
+  return session.status === "ready" || session.status === "blocked" || hasPendingUserRequest(session);
 }
 
 /**
@@ -39,7 +37,7 @@ function passesCompleted(session, showCompleted) {
 }
 
 /**
- * @param {{ status: string, id: string, updatedAt: number, createdAt: number, pendingPermissions?: unknown[] }} session
+ * @param {{ status: string, id: string, updatedAt: number, createdAt: number, pendingPermissions?: unknown[], pendingDevCommand?: unknown }} session
  * @param {ConversationFilter} filter
  * @param {Record<string, number>} viewed
  */

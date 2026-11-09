@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createComputerManager, SCREEN } from "./computer.mjs";
+import { createComputerManager } from "./computer.mjs";
+import { DEFAULT_VIEWPORT } from "../shared/browser-contract.mjs";
 
 const coded = (code, message, extra = {}) => Object.assign(new Error(message), { code, ...extra });
 
@@ -57,7 +58,7 @@ function fakeHub({ get } = {}) {
 test("status reads stopped, then running once the browser is open, then stopped again", async () => {
   const hub = fakeHub();
   const computers = createComputerManager({ installer: fakeInstaller(), hub });
-  assert.deepEqual(computers.status("p"), { projectId: "p", screen: SCREEN, status: "stopped" });
+  assert.deepEqual(computers.status("p"), { projectId: "p", screen: DEFAULT_VIEWPORT, status: "stopped" });
   await computers.start("p");
   assert.equal(computers.status("p").status, "running");
   await computers.stop("p");
@@ -128,7 +129,7 @@ test("a failed start shows its words and setup command until the next start", as
   await assert.rejects(computers.start("p"), { code: "browser_libraries_missing" });
   assert.deepEqual(computers.status("p"), {
     projectId: "p",
-    screen: SCREEN,
+    screen: DEFAULT_VIEWPORT,
     status: "error",
     detail: "Missing libnss3.so.",
     setupCommand: "npm run browser:setup",
@@ -145,7 +146,7 @@ test("unsupported hosts read as unavailable", () => {
   });
   assert.deepEqual(computers.status("p"), {
     projectId: "p",
-    screen: SCREEN,
+    screen: DEFAULT_VIEWPORT,
     status: "unavailable",
     detail: "Not on freebsd-x64.",
   });

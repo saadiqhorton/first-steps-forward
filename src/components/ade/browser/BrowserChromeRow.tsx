@@ -38,6 +38,11 @@ import {
   resolveSearchUrlTemplate,
   isValidSearchUrlTemplate,
 } from "@/shared/browser-address.mjs";
+import {
+  RECORDING_STORAGE_KEYS,
+  VIEWPORT_LIMITS,
+  viewportAcceptable,
+} from "@/shared/browser-contract.mjs";
 import { openExternally } from "./browserActions";
 import { BROWSER_ZOOM_EVENT } from "@/lib/ade/browser/openInPreview.mjs";
 import {
@@ -178,21 +183,21 @@ export function BrowserChromeRow({
   const [devicePreset, setDevicePreset] = useState("responsive");
   const [recordingFrameRate, setRecordingFrameRate] = useState(() => {
     try {
-      return window.localStorage.getItem("ade.browser.recordingFrameRate") === "60" ? "60" : "30";
+      return window.localStorage.getItem(RECORDING_STORAGE_KEYS.frameRate) === "60" ? "60" : "30";
     } catch {
       return "30";
     }
   });
   const [recordingMousePresses, setRecordingMousePresses] = useState(() => {
     try {
-      return window.localStorage.getItem("ade.browser.recordingShowMousePresses") === "1";
+      return window.localStorage.getItem(RECORDING_STORAGE_KEYS.showMousePresses) === "1";
     } catch {
       return false;
     }
   });
   const [recordingKeyPresses, setRecordingKeyPresses] = useState(() => {
     try {
-      return window.localStorage.getItem("ade.browser.recordingShowKeyPresses") === "1";
+      return window.localStorage.getItem(RECORDING_STORAGE_KEYS.showKeyPresses) === "1";
     } catch {
       return false;
     }
@@ -329,15 +334,7 @@ export function BrowserChromeRow({
     setFillViewport(false);
     const width = Number(deviceWidth);
     const height = Number(deviceHeight);
-    if (
-      !Number.isInteger(width) ||
-      !Number.isInteger(height) ||
-      width < 240 ||
-      width > 3840 ||
-      height < 240 ||
-      height > 3840 ||
-      width * height > 3840 * 2160
-    ) {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || !viewportAcceptable({ width, height })) {
       setDeviceWidth(String(settings.viewport.width));
       setDeviceHeight(String(settings.viewport.height));
       return;
@@ -780,7 +777,7 @@ export function BrowserChromeRow({
                   const value = event.target.value;
                   setRecordingFrameRate(value);
                   try {
-                    window.localStorage.setItem("ade.browser.recordingFrameRate", value);
+                    window.localStorage.setItem(RECORDING_STORAGE_KEYS.frameRate, value);
                   } catch {
                     /* Storage is optional. */
                   }
@@ -800,7 +797,7 @@ export function BrowserChromeRow({
                   setRecordingMousePresses(value);
                   try {
                     window.localStorage.setItem(
-                      "ade.browser.recordingShowMousePresses",
+                      RECORDING_STORAGE_KEYS.showMousePresses,
                       value ? "1" : "0",
                     );
                   } catch {
@@ -822,7 +819,7 @@ export function BrowserChromeRow({
                   setRecordingKeyPresses(value);
                   try {
                     window.localStorage.setItem(
-                      "ade.browser.recordingShowKeyPresses",
+                      RECORDING_STORAGE_KEYS.showKeyPresses,
                       value ? "1" : "0",
                     );
                   } catch {
@@ -953,8 +950,8 @@ export function BrowserChromeRow({
           <input
             aria-label="Viewport width"
             type="number"
-            min="240"
-            max="3840"
+            min={VIEWPORT_LIMITS.minWidth}
+            max={VIEWPORT_LIMITS.maxWidth}
             value={deviceWidth}
             onChange={(event) => {
               const value = event.target.value;
@@ -970,8 +967,8 @@ export function BrowserChromeRow({
           <input
             aria-label="Viewport height"
             type="number"
-            min="240"
-            max="3840"
+            min={VIEWPORT_LIMITS.minHeight}
+            max={VIEWPORT_LIMITS.maxHeight}
             value={deviceHeight}
             onChange={(event) => {
               const value = event.target.value;

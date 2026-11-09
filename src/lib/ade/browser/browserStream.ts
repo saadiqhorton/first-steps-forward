@@ -4,7 +4,12 @@
 // WebSocket client for the agent browser's stream. Binary frames are JPEG bytes that are acked
 // immediately; JSON frames carry viewport, control, pointer, nav, clipboard and error messages.
 
-import { STREAM_CLOSE_CODES } from "@/shared/browser-contract.mjs";
+import {
+  CLIENT_STREAM_MESSAGE_TYPES,
+  SERVER_STREAM_MESSAGE_TYPES,
+  STREAM_CLOSE_CODES,
+  STREAM_QUERY_PARAMS,
+} from "@/shared/browser-contract.mjs";
 
 export type BrowserButton = "none" | "left" | "middle" | "right";
 
@@ -253,6 +258,11 @@ export function parseServerMessage(text: string): ServerMessage | null {
   if (typeof value !== "object" || value === null) return null;
   const message = value as Record<string, unknown>;
   const { type } = message;
+  if (
+    typeof type !== "string" ||
+    !(SERVER_STREAM_MESSAGE_TYPES as readonly string[]).includes(type)
+  )
+    return null;
   if (type === "tabs") {
     const { activeId, tabs } = message;
     if (!(activeId === null || isString(activeId)) || !Array.isArray(tabs)) return null;
@@ -408,10 +418,19 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
   target.searchParams.set("viewer", options.viewer);
   if (options.tabId) target.searchParams.set("tab", options.tabId);
   if (options.recordingFrameRate)
-    target.searchParams.set("recordingFrameRate", String(options.recordingFrameRate));
-  if (options.showRecordingKeys) target.searchParams.set("recordingKeys", "1");
-  target.searchParams.set("maxWidth", String(Math.max(1, Math.round(options.maxWidth))));
-  target.searchParams.set("maxHeight", String(Math.max(1, Math.round(options.maxHeight))));
+    target.searchParams.set(
+      STREAM_QUERY_PARAMS.recordingFrameRate,
+      String(options.recordingFrameRate),
+    );
+  if (options.showRecordingKeys) target.searchParams.set(STREAM_QUERY_PARAMS.recordingKeys, "1");
+  target.searchParams.set(
+    STREAM_QUERY_PARAMS.maxWidth,
+    String(Math.max(1, Math.round(options.maxWidth))),
+  );
+  target.searchParams.set(
+    STREAM_QUERY_PARAMS.maxHeight,
+    String(Math.max(1, Math.round(options.maxHeight))),
+  );
 
   let stopped = false;
   let socket: WebSocket | null = null;
@@ -551,6 +570,8 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
       const ws = socket;
       if (!ws || ws.readyState !== WebSocket.OPEN) return false;
       if (control?.controller !== "you") return false;
+      if (!(CLIENT_STREAM_MESSAGE_TYPES as readonly string[]).includes(message.type))
+        return false;
       ws.send(JSON.stringify(message));
       return true;
     },

@@ -2,6 +2,11 @@ import { codexComputerArgs } from "./computer-tools.mjs";
 import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
+/** @param {import("./kit.mjs").ComputerContext | null} computer */
+function wireComputer(computer) {
+  return { args: codexComputerArgs(computer) };
+}
+
 /** Parse `codex debug models` JSON. Only visibility === "list" is offered. */
 export function parseCodexModels(stdout) {
   let payload;
@@ -58,6 +63,7 @@ export const codex = defineCliAgent({
     "Codex CLI supports ChatGPT sign-in, including a device flow. Credentials remain in Codex's user-level auth store.",
   installHint: "Install Codex CLI from https://developers.openai.com/codex/cli/",
   tools: "Codex CLI tools under its workspace-write sandbox",
+  wireComputer,
   async detectAuth(run) {
     const result = await run("codex", ["login", "status"], { timeout: 5000 });
     const signedIn =
@@ -102,7 +108,7 @@ export const codex = defineCliAgent({
       ...(speed ? ["-c", `service_tier="${speed}"`] : []),
     ];
     // The agent computer's MCP server, configured per turn (resume too).
-    const computerArgs = codexComputerArgs(computer);
+    const { args: computerArgs = [] } = wireComputer(computer);
     const plan = permission === "plan";
     const imageArgs = (attachments ?? [])
       .filter((a) => a.kind === "image")

@@ -32,7 +32,6 @@ import { listAcpModels, runAcpTurn } from "../acp.mjs";
 import { acpBridge } from "../acp-bridge.mjs";
 import { acpModelListing, cliModelListing, MANUAL_HINT, rememberAcpModels } from "../models.mjs";
 import { findOnPath, runCommand, spawnCommand, stopProcess } from "../spawn.mjs";
-import { acpComputerServers } from "./computer-tools.mjs";
 
 /**
  * One thing that happened during a turn.
@@ -51,7 +50,10 @@ import { acpComputerServers } from "./computer-tools.mjs";
  *   | { ok: false, reason: "exit", exit: { code: number | null, signal: string | null } }} TurnEnd
  *
  * @typedef {{ kind: string, path: string, mime: string, name?: string }} Attachment
- * @typedef {{ node: string, mcpScript: string, piExtension: string, env: Record<string, string> }} ComputerContext
+ * Shared turn context for the agent computer. Script paths (MCP vs Pi) are
+ * resolved inside each adapter's `wireComputer`, not carried here.
+ * @typedef {{ node: string, env: Record<string, string> }} ComputerContext
+ * @typedef {import("./computer-tools.mjs").ComputerWiring} ComputerWiring
  *
  * Everything an agent needs for one turn.
  * @typedef {object} TurnInput
@@ -157,11 +159,13 @@ function exited(child) {
  * An agent CLI that runs one turn per process and prints JSON lines.
  *
  * - `command(input)` → `[bin, args, env?]` for the turn.
+ * - `wireComputer(computer)` (optional) → spawn extras (`args`, `env`, …) the
+ *   agent's `command` merges in; harness-specific shape stays at the leaf.
  * - `parse(line)` → the session events one stdout line carries.
  * - `stderr(line)` (optional) → session events a stderr line carries.
  * - `prepare(input)` (optional) runs before the process starts.
  * - `probeModels(run)` (optional) → the CLI's own model listing.
- * @template {{ command: (input: TurnInput) => any[], parse: (line: string) => SessionEvent[], stderr?: (line: string) => SessionEvent[], prepare?: (input: TurnInput) => Promise<void> }} T
+ * @template {{ command: (input: TurnInput) => any[], wireComputer?: (computer: ComputerContext | null) => ComputerWiring, parse: (line: string) => SessionEvent[], stderr?: (line: string) => SessionEvent[], prepare?: (input: TurnInput) => Promise<void> }} T
  * @param {T} spec
  */
 export function defineCliAgent(spec) {
@@ -244,8 +248,9 @@ export async function acpLaunch(spec, { dataDir, onInstall }) {
  * - `command({ bridge, executable })` → `[bin, args, env?]`.
  * - `modes`: ADE permission → the agent's mode ids, first one offered wins.
  * - `bridge` (optional): an npm package that adapts the user's CLI to ACP.
+ * - `wireComputer(computer)` (optional): spawn extras (`mcpServers`, …) for the turn.
  * - `sessionMeta({ computer, ephemeral })` (optional): `_meta` for session/new.
- * @template {{ id: string, name: string, bin: string, installHint: string, modes: { build: string[], plan: string[] }, command: (launch: any) => any[], bridge?: { pkg: string, version: string, bin: string, entry: string }, sessionMeta?: (options: { computer: boolean, ephemeral?: boolean }) => object }} T
+ * @template {{ id: string, name: string, bin: string, installHint: string, modes: { build: string[], plan: string[] }, command: (launch: any) => any[], bridge?: { pkg: string, version: string, bin: string, entry: string }, wireComputer?: (computer: ComputerContext | null) => ComputerWiring, sessionMeta?: (options: { computer: boolean, ephemeral?: boolean }) => object }} T
  * @param {T} spec
  */
 export function defineAcpAgent(spec) {
@@ -321,7 +326,7 @@ export function defineAcpAgent(spec) {
           modes: spec.modes,
           model: input.model,
           defaultModel: input.defaultModel,
-          mcpServers: acpComputerServers(input.computer),
+          mcpServers: spec.wireComputer?.(input.computer)?.mcpServers ?? [],
           sessionMeta: spec.sessionMeta?.({ computer: !!input.computer }),
           on: {
             sessionId: (id) => io.emit({ type: "conversation", id }),

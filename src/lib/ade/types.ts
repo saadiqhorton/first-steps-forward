@@ -184,6 +184,11 @@ export interface AgentModelsResult {
   models?: AgentModel[];
   /** Listing provenance: "live" (CLI's own cached catalog), "bundled", or "acp" (reported by the agent in its last session). */
   source?: string;
+  /**
+   * True when this listing is the agent's full accepted set (no free-form "Other" id).
+   * Omit/false for partial live CLI catalogs.
+   */
+  completeCatalog?: boolean;
   /** The quota-free CLI command the list came from, for honest disclosure. */
   command?: string;
   reason?: string;
@@ -245,8 +250,13 @@ export interface Session {
   queuedMessages?: string[];
   /** Prompt to run as soon as the current CLI process exits. */
   steerNow?: string;
-  /** Questions waiting on the user: an ACP agent's permission requests, and dev command proposals. */
-  pendingPermissions?: (PendingPermission | DevCommandRequest)[];
+  /** ACP agent permission asks waiting on the user; the turn pauses until answered. */
+  pendingPermissions?: PendingPermission[];
+  /**
+   * ADE's "Run this dev command?" when this session's agent proposed it.
+   * Unattached proposals live on `project.pendingDevCommand` instead.
+   */
+  pendingDevCommand?: DevCommandRequest;
 }
 
 export type SessionSummary = Pick<
@@ -265,6 +275,7 @@ export type SessionSummary = Pick<
   | "model"
   | "failureKind"
   | "pendingPermissions"
+  | "pendingDevCommand"
 > & { lastUserMessageAt?: number };
 
 export interface AdeState {

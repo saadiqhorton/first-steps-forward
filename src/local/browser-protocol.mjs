@@ -1,48 +1,8 @@
-import { INPUT_BUTTONS, MAX_MODIFIER_MASK, VIEWPORT_LIMITS } from "../shared/browser-contract.mjs";
-
-const LOOPBACK_PREFIX = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::|\/|$)/i;
+import { INPUT_BUTTONS, MAX_MODIFIER_MASK, MODIFIER_BITS } from "../shared/browser-contract.mjs";
 
 export const numberOr = (value, fallback = 0) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 export const coded = (code, message) => Object.assign(new Error(message), { code });
-
-/** Normalizes user or agent input to an http(s) URL. Bare loopback hosts use http. */
-export function normalizeBrowserUrl(rawUrl) {
-  const trimmed = String(rawUrl ?? "").trim();
-  if (trimmed.length === 0) throw coded("invalid_url", "Enter a URL to open.");
-  if (
-    /^(?:about|blob|chrome|data|file|ftp|javascript|mailto|sms|ssh|tel|view-source|ws|wss):/i.test(
-      trimmed,
-    )
-  )
-    throw coded("invalid_url", "Only http and https URLs can be opened.");
-  const useHttp = LOOPBACK_PREFIX.test(trimmed);
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
-    ? trimmed
-    : `${useHttp ? "http" : "https"}://${trimmed}`;
-  let parsed;
-  try {
-    parsed = new URL(candidate);
-  } catch {
-    throw coded("invalid_url", `"${trimmed}" is not a valid URL.`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw coded("invalid_url", `Only http and https URLs can be opened, not ${parsed.protocol}`);
-  }
-  return parsed.href;
-}
-
-/** Clamps a CSS viewport to the limits accepted by the browser stream. */
-export function clampViewport({ width, height }) {
-  if (!Number.isFinite(width) || !Number.isFinite(height)) {
-    throw new TypeError("Viewport width and height must be numbers.");
-  }
-  const clamp = (value, min, max) => Math.min(max, Math.max(min, Math.round(value)));
-  return {
-    width: clamp(width, VIEWPORT_LIMITS.minWidth, VIEWPORT_LIMITS.maxWidth),
-    height: clamp(height, VIEWPORT_LIMITS.minHeight, VIEWPORT_LIMITS.maxHeight),
-  };
-}
 
 /** Protocol modifier bits: alt 1, ctrl 2, meta 4, shift 8. Anything out of 0..15 is 0. */
 export function modifiersOf(message) {
@@ -52,19 +12,19 @@ export function modifiersOf(message) {
 
 export function editingCommand(key, modifiers) {
   const modifier = modifiers & 0b0111;
-  if (modifier !== 2 && modifier !== 4) return null;
+  if (modifier !== MODIFIER_BITS.ctrl && modifier !== MODIFIER_BITS.meta) return null;
   const lower = key.toLowerCase();
   const command =
     lower === "c"
       ? "copy"
       : lower === "x"
         ? "cut"
-        : modifier !== 4
+        : modifier !== MODIFIER_BITS.meta
           ? null
           : lower === "a"
             ? "selectAll"
             : lower === "z"
-              ? modifiers & 8
+              ? modifiers & MODIFIER_BITS.shift
                 ? "redo"
                 : "undo"
               : null;

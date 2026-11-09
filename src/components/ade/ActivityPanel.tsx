@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ActivityLogs } from "@/components/ade/ActivityLogs";
 import { ChecksList } from "@/components/ade/ChecksList";
 import type { Session } from "@/lib/ade/types";
-import { askConfirm, warnUser } from "@/components/ade/NoticeDialog";
+import { askConfirm, warnUser } from "@/lib/ade/userNotices";
 import { useAde } from "@/lib/ade/store";
 
 export function ActivityPanel({ session }: { session: Session }) {

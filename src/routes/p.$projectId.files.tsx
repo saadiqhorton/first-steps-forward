@@ -14,7 +14,7 @@ import { FilesHome } from "@/components/ade/files/FilesHome";
 import { clearEditorDraft, listDirtyDraftPaths } from "@/components/ade/files/editorDrafts";
 import { createEditorFile, deleteEditorFile } from "@/lib/ade/editorApi";
 import { editorFileIcon } from "@/components/ade/files/editorIcons";
-import { askConfirm } from "@/components/ade/NoticeDialog";
+import { askConfirm } from "@/lib/ade/userNotices";
 import { usePersistedLayout } from "@/components/ade/persistLayout";
 
 const FileTab = lazy(() =>

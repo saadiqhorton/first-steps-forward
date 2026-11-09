@@ -6,6 +6,7 @@ const SCHEME = /^[a-z][a-z\d+.-]*:/i;
 const AUTHORITY_SCHEME = /^[a-z][a-z\d+.-]*:\/\//i;
 const NON_WEB_SCHEMES =
   /^(?:about|blob|chrome|data|file|ftp|javascript|mailto|sms|ssh|tel|view-source|ws|wss):/i;
+const LOOPBACK_PREFIX = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::|\/|$)/i;
 const SEARCH_ENGINES = {
   duckduckgo: "https://duckduckgo.com/?q=%s",
   google: "https://www.google.com/search?q=%s",
@@ -14,6 +15,30 @@ const SEARCH_ENGINES = {
   kagi: "https://kagi.com/search?q=%s",
   ecosia: "https://www.ecosia.org/search?q=%s",
 };
+
+const coded = (code, message) => Object.assign(new Error(message), { code });
+
+/** Normalizes user or agent input to an http(s) URL. Bare loopback hosts use http. */
+export function normalizeBrowserUrl(rawUrl) {
+  const trimmed = String(rawUrl ?? "").trim();
+  if (trimmed.length === 0) throw coded("invalid_url", "Enter a URL to open.");
+  if (NON_WEB_SCHEMES.test(trimmed))
+    throw coded("invalid_url", "Only http and https URLs can be opened.");
+  const useHttp = LOOPBACK_PREFIX.test(trimmed);
+  const candidate = AUTHORITY_SCHEME.test(trimmed)
+    ? trimmed
+    : `${useHttp ? "http" : "https"}://${trimmed}`;
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw coded("invalid_url", `"${trimmed}" is not a valid URL.`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw coded("invalid_url", `Only http and https URLs can be opened, not ${parsed.protocol}`);
+  }
+  return parsed.href;
+}
 
 export function isValidSearchUrlTemplate(template) {
   if (!template.includes("%s")) return false;

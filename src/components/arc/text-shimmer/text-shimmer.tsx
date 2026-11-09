@@ -3,7 +3,7 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { AnimatePresence, animate, motion, useInView, useMotionValue, usePageInView, useReducedMotion, useTransform } from "motion/react";
 import type { AnimationPlaybackControls } from "motion/react";
-import { motionTokens } from "../lib/motion-tokens";
+import { motionTokens } from "../motion-tokens";
 import styles from "./text-shimmer.module.css";
 const subscribeHydration = () => () => {};
 const clientSnapshot = () => true;
