@@ -374,23 +374,36 @@
   }
 }
 
-/* The theme switch runs a view transition; the new appearance rises over the old one. */
-:root[data-theme-transition]::view-transition-old(root) {
-  animation: none;
+/* A theme flip applies instantly; this flat veil of the outgoing background washes
+ * over the new theme so the change reads as a settle rather than a flash. It is a
+ * single colour layer, never a document snapshot — see src/lib/theme.ts. Attached
+ * as a manual popover, so it also covers dialogs and scrims. */
+.theme-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
 }
-:root[data-theme-transition]::view-transition-new(root) {
-  animation: theme-rise var(--duration-considered) var(--ease-enter);
-}
-@keyframes theme-rise {
-  from {
-    opacity: 0;
-    transform: translateY(24px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  :root[data-theme-transition]::view-transition-new(root) {
-    animation: none;
-  }
+
+/* For the two frames of a flip, per-element colour transitions must not run: they
+ * would keep painting the old palette and make the theme look like it is still
+ * catching up. Duration 0 (not `transition: none`) keeps each element's property
+ * list and easing intact, so nothing re-animates when the attribute comes off.
+ * `::details-content` is a pseudo-element, which `*` alone would miss. */
+:root[data-theme-switching] *,
+:root[data-theme-switching] *::before,
+:root[data-theme-switching] *::after,
+:root[data-theme-switching] ::details-content {
+  transition-duration: 0s !important;
 }
 
 /* react-resizable-panels forces overflow:visible on panel roots, which lets

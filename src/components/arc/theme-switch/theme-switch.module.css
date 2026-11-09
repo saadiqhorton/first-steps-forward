@@ -17,15 +17,11 @@
   flex: 0 0 20px;
   place-items: center;
 }
-/* The nudge only eases once the switch has settled, so a theme that arrives during hydration lands without motion. */
-.settled .iconWrap { transition: transform var(--duration-spring) var(--ease-spring); }
-.icon { position: absolute; display: grid; width: 18px; height: 18px; place-items: center; }
+.icon { position: absolute; display: grid; width: 18px; height: 18px; place-items: center; opacity: 0; }
+/* A theme that arrives during hydration lands instantly; only later toggles crossfade. */
+.settled .icon { transition: opacity var(--duration-instant) var(--ease-standard); }
+.icon[data-on="true"] { opacity: 1; }
 .label { white-space: nowrap; }
-/* Each variant nudges the icon the way its page transition travels, and eases back when the theme returns. */
-.themeSwitch.reveal[data-theme="dark"] .iconWrap { transform: scale(1.08); }
-.themeSwitch.eclipse[data-theme="dark"] .iconWrap { transform: translateX(-2px); }
-.themeSwitch.split[data-theme="dark"] .iconWrap { transform: translateX(1px); }
-.themeSwitch.rise[data-theme="dark"] .iconWrap { transform: translateY(-2px); }
 @media (prefers-reduced-motion: reduce) {
-  .settled .iconWrap { transition: none; }
+  .settled .icon { transition: none; }
 }

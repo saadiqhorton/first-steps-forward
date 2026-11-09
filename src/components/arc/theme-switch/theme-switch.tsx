@@ -2,14 +2,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Moon, Sun } from "lucide-react";
-import { motionTokens } from "../lib/motion-tokens";
+import type { Theme } from "@/lib/theme";
 import { Button } from "../button/button";
 import styles from "./theme-switch.module.css";
 
 export type ThemeSwitchVariant = "reveal" | "eclipse" | "split" | "rise";
-export type Theme = "light" | "dark";
+export type { Theme };
 
 export interface ThemeSwitchProps {
   theme: Theme;
@@ -18,11 +17,6 @@ export interface ThemeSwitchProps {
   label?: string;
   iconOnly?: boolean;
 }
-
-/** Rotation and scale ride the spring; opacity and blur tween so the blur never overshoots below zero. */
-const iconSpring = { ...motionTokens.spring.snappy, opacity: { duration: motionTokens.duration.fast, ease: [...motionTokens.ease.enter] }, filter: { duration: motionTokens.duration.fast, ease: [...motionTokens.ease.enter] } } as const;
-const iconExit = { duration: motionTokens.duration.fast, ease: [...motionTokens.ease.standard] } as const;
-const blur = `blur(${motionTokens.blur.subtle}px)`;
 
 /** A stored preference usually reaches the theme prop just after hydration. That correction swaps the icon in place;
  *  only changes after the first painted frames animate, so a page that loads in dark mode never spins its switches. */
@@ -36,32 +30,22 @@ function useSettled() {
   return settled;
 }
 
-/** Both icons turn the same way (clockwise into dark, back out of it), so the swap reads as one rotation rather than two fades. */
-function ThemeIcon({ theme, reduced, settled }: { theme: Theme; reduced: boolean; settled: boolean }) {
-  const Icon = theme === "light" ? Sun : Moon;
-  const angle = theme === "light" ? 30 : -30;
+/** Both icons stay mounted and stacked, and the active one fades in. The swap runs on
+ *  the same short clock as the page's own settle, so one click reads as one event;
+ *  a spring or a blur here would outlive the change it describes. */
+function ThemeIcon({ theme }: { theme: Theme }) {
   return (
-    <AnimatePresence initial={false} mode="popLayout">
-      <motion.span
-        key={theme}
-        className={styles.icon}
-        initial={!settled ? false : reduced ? { opacity: 0 } : { opacity: 0, scale: .7, rotate: angle, filter: blur }}
-        animate={{ opacity: 1, scale: 1, rotate: 0, filter: "blur(0px)" }}
-        exit={!settled ? { opacity: 0, transition: { duration: 0 } } : reduced ? { opacity: 0, transition: { duration: motionTokens.duration.instant } } : { opacity: 0, scale: .7, rotate: angle, filter: blur, transition: iconExit }}
-        transition={reduced ? { duration: motionTokens.duration.instant } : iconSpring}
-        aria-hidden="true"
-      >
-        <Icon size={15} strokeWidth={1.9} />
-      </motion.span>
-    </AnimatePresence>
+    <>
+      <Sun className={styles.icon} data-on={theme === "light"} aria-hidden="true" size={15} strokeWidth={1.9} />
+      <Moon className={styles.icon} data-on={theme === "dark"} aria-hidden="true" size={15} strokeWidth={1.9} />
+    </>
   );
 }
 
-export function ThemeSwitch({ theme, variant = "reveal", onThemeChange, label, iconOnly = false }: ThemeSwitchProps) {
-  const reduced = useReducedMotion() ?? false;
+export function ThemeSwitch({ theme, onThemeChange, label, iconOnly = false, variant = "reveal" }: ThemeSwitchProps) {
   const settled = useSettled();
   const next = theme === "light" ? "dark" : "light";
-  const classes = [styles.themeSwitch, styles[variant], iconOnly ? styles.iconOnly : "", settled ? styles.settled : ""].join(" ");
+  const classes = [styles.themeSwitch, iconOnly ? styles.iconOnly : "", settled ? styles.settled : ""].join(" ");
 
   return (
     <Button
@@ -74,7 +58,7 @@ export function ThemeSwitch({ theme, variant = "reveal", onThemeChange, label, i
       aria-pressed={theme === "dark"}
       onClick={event => onThemeChange(next, variant, event.currentTarget)}
     >
-      <span className={styles.iconWrap}><ThemeIcon theme={theme} reduced={reduced} settled={settled} /></span>
+      <span className={styles.iconWrap}><ThemeIcon theme={theme} /></span>
       {!iconOnly && <span className={styles.label}>Switch theme</span>}
     </Button>
   );
