@@ -11,7 +11,7 @@ import {
 const AGENTS = ["codex", "claude"];
 
 test("built-in workflows use the Enjoy-style starter prompts", () => {
-  assert.equal(BUILT_IN_WORKFLOWS.length, 6);
+  assert.equal(BUILT_IN_WORKFLOWS.length, 9);
   assert.deepEqual(
     BUILT_IN_WORKFLOWS.map((w) => w.id),
     [
@@ -21,6 +21,9 @@ test("built-in workflows use the Enjoy-style starter prompts", () => {
       "builtin-accessibility-pass",
       "builtin-second-opinion-review",
       "builtin-tidy-the-repo",
+      "builtin-project-handoff",
+      "builtin-feature-brief",
+      "builtin-fix-failing-check",
     ],
   );
   assert.equal(BUILT_IN_WORKFLOWS[0].name, "Design Workshop");
@@ -71,6 +74,36 @@ test("built-in workflows use the Enjoy-style starter prompts", () => {
   assert.equal(BUILT_IN_WORKFLOWS[5].permission, "plan");
   assert.match(BUILT_IN_WORKFLOWS[5].prompt, /Select up to five candidates/);
   assert.match(BUILT_IN_WORKFLOWS[5].prompt, /This run is an audit/);
+  assert.equal(BUILT_IN_WORKFLOWS[6].name, "Hand off a project");
+  assert.equal(
+    BUILT_IN_WORKFLOWS[6].description,
+    "Captures the current state, open decisions, and exact next steps so someone else can pick up the work.",
+  );
+  assert.equal(BUILT_IN_WORKFLOWS[6].permission, "plan");
+  assert.match(BUILT_IN_WORKFLOWS[6].prompt, /under 700 words/);
+  assert.match(BUILT_IN_WORKFLOWS[6].prompt, /Keep it in the conversation/);
+  assert.match(BUILT_IN_WORKFLOWS[6].prompt, /Do not clean up, reset, or commit work/);
+  assert.equal(BUILT_IN_WORKFLOWS[7].name, "Write a feature brief");
+  assert.equal(
+    BUILT_IN_WORKFLOWS[7].description,
+    "Turns a rough idea into a clear user problem, bounded scope, and observable acceptance criteria.",
+  );
+  assert.equal(BUILT_IN_WORKFLOWS[7].permission, "plan");
+  assert.match(BUILT_IN_WORKFLOWS[7].prompt, /under 800 words/);
+  assert.match(BUILT_IN_WORKFLOWS[7].prompt, /observable acceptance criteria/);
+  assert.match(BUILT_IN_WORKFLOWS[7].prompt, /implementation sequencing belongs in a separate/);
+  assert.equal(BUILT_IN_WORKFLOWS[8].name, "Fix a failing check");
+  assert.equal(
+    BUILT_IN_WORKFLOWS[8].description,
+    "Follows a CI failure back to its cause, reproduces it locally, and verifies the smallest repair.",
+  );
+  assert.equal(BUILT_IN_WORKFLOWS[8].permission, "build");
+  assert.match(BUILT_IN_WORKFLOWS[8].prompt, /Do not silence the check, weaken assertions/);
+  assert.match(BUILT_IN_WORKFLOWS[8].prompt, /report the number of attempts/);
+  assert.match(
+    BUILT_IN_WORKFLOWS[8].prompt,
+    /specific next diagnostic step instead of a speculative patch/,
+  );
   for (const workflow of BUILT_IN_WORKFLOWS) {
     assert.equal(workflow.builtIn, true);
     assert.ok(workflow.prompt.length <= 8000);
@@ -93,6 +126,9 @@ test("listWorkflows puts built-ins first, then stored workflows sorted by name",
       "builtin-accessibility-pass",
       "builtin-second-opinion-review",
       "builtin-tidy-the-repo",
+      "builtin-project-handoff",
+      "builtin-feature-brief",
+      "builtin-fix-failing-check",
       "wf-a",
       "wf-z",
     ],
@@ -106,6 +142,9 @@ test("listWorkflows puts built-ins first, then stored workflows sorted by name",
       "builtin-accessibility-pass",
       "builtin-second-opinion-review",
       "builtin-tidy-the-repo",
+      "builtin-project-handoff",
+      "builtin-feature-brief",
+      "builtin-fix-failing-check",
     ],
   );
 });

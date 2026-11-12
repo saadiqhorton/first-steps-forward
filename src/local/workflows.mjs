@@ -102,6 +102,57 @@ Return findings ordered by severity, each with file and line, trigger, user impa
 
 Return a ranked cleanup proposal and one recommended first batch. This run is an audit: leave files intact unless I explicitly requested applying a cleanup. When applying an authorized batch, preserve unrelated changes and run the affected tests and build checks.`,
   },
+  {
+    id: "builtin-project-handoff",
+    builtIn: true,
+    name: "Hand off a project",
+    description:
+      "Captures the current state, open decisions, and exact next steps so someone else can pick up the work.",
+    permission: "plan",
+    prompt: `Write a handoff that lets another person or agent resume this work without guessing.
+
+1. Identify the task being handed over from my request and current project context. Inspect the working tree, branch, recent changes, and relevant notes. If several unrelated tasks are active, ask which one to cover.
+2. State the goal, agreed scope, and acceptance criteria. Separate completed work from work in progress, proposed work, and known failures. Link to relevant files, comments, pull requests, and decisions.
+3. Record the current revision, relevant uncommitted changes, required environment, and commands to run or validate the affected area. Do not include secrets. If a check has a recorded result, include when and against which state it ran; otherwise mark it unverified.
+4. Explain important decisions and rejected approaches only where they prevent repeated mistakes. Identify blockers, unresolved questions, and the evidence already gathered for them.
+5. Give the next three concrete actions in order, including how the recipient will know the task is done. Mention active local services or temporary files only if they matter to resuming the work.
+
+Deliver a self-contained handoff under 700 words. Keep it in the conversation unless I named a destination. Do not clean up, reset, or commit work merely to make the handoff look finished.`,
+  },
+  {
+    id: "builtin-feature-brief",
+    builtIn: true,
+    name: "Write a feature brief",
+    description:
+      "Turns a rough idea into a clear user problem, bounded scope, and observable acceptance criteria.",
+    permission: "plan",
+    prompt: `Turn my idea into a feature brief that a teammate can evaluate and build from.
+
+1. Identify the idea from my request or the current conversation. If it is missing, ask for it. Read relevant product notes, existing behavior, and customer evidence before expanding the scope.
+2. Describe the target user, the task they are trying to complete, the current obstacle, and why solving it matters. Separate supporting evidence from assumptions. Do not invent customer demand, market size, or business impact.
+3. Define the smallest useful outcome and explicit non-goals. Describe the main journey, important empty and error states, and what should happen to existing users or data. Reference related behavior the project already supports.
+4. Write observable acceptance criteria, including meaningful failure cases. Avoid vague requirements such as "fast," "intuitive," or "seamless" without a concrete definition. Propose a success signal and how it could be measured, clearly labeling any target as a proposal.
+5. List dependencies and open decisions, separating questions that block development from details that can be resolved during implementation. Avoid choosing architecture or drawing new UI unless the decision requires it.
+
+Deliver a brief under 800 words with problem, scope, behavior, acceptance criteria, and open questions. This describes what to build and why; implementation sequencing belongs in a separate engineering plan.`,
+  },
+  {
+    id: "builtin-fix-failing-check",
+    builtIn: true,
+    name: "Fix a failing check",
+    description:
+      "Follows a CI failure back to its cause, reproduces it locally, and verifies the smallest repair.",
+    permission: "build",
+    prompt: `Diagnose and fix one failing test, build, lint, or type check.
+
+1. Use the failure log or CI run I provided. Otherwise inspect the latest failing run for the current branch if a CI connection is available. If neither exists, ask for the failing command and output; do not run every expensive check hoping to discover the intended failure.
+2. Identify the failing revision, command, runtime, dependency versions, and first meaningful error. Separate the cause from downstream failures, and check whether a newer run already passed.
+3. Reproduce the smallest failing command in the appropriate package with the recorded environment as closely as possible. Distinguish a code regression from infrastructure, missing credentials, stale generated files, or an environment mismatch.
+4. Trace the cause through the relevant changes and callers. Make the smallest repair that preserves intended behavior. Do not silence the check, weaken assertions, skip a test, or update snapshots solely to make the run green.
+5. Run the failing check again, then the affected tests and required dependent-package checks. If the failure is intermittent, repeat the targeted case and report the number of attempts rather than declaring it fixed after one pass.
+
+Return the root cause and evidence, repair, exact validation results, and anything still blocked. If local reproduction is impossible, provide a specific next diagnostic step instead of a speculative patch.`,
+  },
 ];
 
 const builtinIds = new Set(BUILT_IN_WORKFLOWS.map((workflow) => workflow.id));
