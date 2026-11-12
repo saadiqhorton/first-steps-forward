@@ -243,3 +243,16 @@ test("deleteWorkflow removes stored workflows and protects built-ins", () => {
   assert.equal(missing.ok, false);
   assert.equal(missing.status, 404);
 });
+
+// A workflow's prompt is sent as the session request, so it must clear ADE's
+// destructive/external-action gate (UNSUPPORTED_RISK) or every run is 403
+// before any agent starts (builtin-plan-feature shipped with "deployment").
+test("built-in workflow prompts pass the destructive-action gate", async () => {
+  const { UNSUPPORTED_RISK } = await import("./capabilities.mjs");
+  for (const workflow of BUILT_IN_WORKFLOWS) {
+    assert.ok(
+      !UNSUPPORTED_RISK.test(workflow.prompt),
+      `${workflow.id} prompt must not match UNSUPPORTED_RISK (matched: ${workflow.prompt.match(UNSUPPORTED_RISK)?.[0]})`,
+    );
+  }
+});

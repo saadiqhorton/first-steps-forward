@@ -32,6 +32,7 @@ import { body, json, PayloadTooLarge } from "./http.mjs";
 import { createDevServers } from "./dev-server.mjs";
 import { createDevCommandApprovals, DevCommandError } from "./dev-command.mjs";
 import { createAgentStatus } from "./agent-status.mjs";
+import { UNSUPPORTED_RISK } from "./capabilities.mjs";
 import { terminal } from "./routes/terminal.mjs";
 import { editor } from "./routes/editor.mjs";
 import { events } from "./routes/events.mjs";
@@ -148,8 +149,6 @@ const computerFingerprints = new Map();
 const CLIENT_REFRESH_MS = 10_000;
 const id = () => randomUUID();
 const now = () => Date.now();
-const UNSUPPORTED_RISK =
-  /\b(?:deploy(?:ment)?|publish|release (?:to )?prod(?:uction)?|production (?:deployment|database)|git push|push (?:to )?(?:origin|remote|github|gitlab)|open (?:a )?pull request|create (?:a )?pull request|drop database|wipe (?:all )?(?:data|files)|delete all|send (?:an? )?email|charge (?:a )?(?:credit )?card)\b/i;
 // Optional exposure beyond loopback (LAN / Tailscale). Deliberately opt-in and
 // always token-gated: with no ADE_HOST the API stays loopback-only, and
 // scripts/start-local.mjs refuses to bind a non-loopback address without a

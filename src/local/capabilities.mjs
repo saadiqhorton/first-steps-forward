@@ -6,6 +6,14 @@ export const PERMISSIONS = ["build", "plan"];
 export const OPTION_VALUE = /^[a-z][a-z0-9_-]{0,31}$/;
 
 /**
+ * Requests that look destructive or external are refused before any agent
+ * runs. Workflows' prompts are sent as the session request, so a workflow
+ * prompt must not match this (see src/local/workflows.test.mjs).
+ */
+export const UNSUPPORTED_RISK =
+  /\b(?:deploy(?:ment)?|publish|release (?:to )?prod(?:uction)?|production (?:deployment|database)|git push|push (?:to )?(?:origin|remote|github|gitlab)|open (?:a )?pull request|create (?:a )?pull request|drop database|wipe (?:all )?(?:data|files)|delete all|send (?:an? )?email|charge (?:a )?(?:credit )?card)\b/i;
+
+/**
  * What an agent offers for one model: efforts and speeds come from the
  * model's listing row; permissions are always Build and Plan, explained by
  * the agent adapter's own notes.

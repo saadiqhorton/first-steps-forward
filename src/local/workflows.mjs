@@ -49,7 +49,7 @@ Deliver a linked guide under 1,000 words with a recommended reading order. Use d
 2. Trace the nearest existing flow and identify reusable components, state, storage, APIs, permissions, and tests. Link to the actual files or symbols that would change. Do not propose new infrastructure before checking what exists.
 3. Identify decisions that materially change scope or architecture. Use documented conventions for routine choices; separate assumptions from questions that genuinely block implementation.
 4. Break the work into small, ordered steps, each with its user-visible outcome, likely files, dependencies, and acceptance checks. Include failure states, compatibility, and migration work where the existing architecture requires them. Respect any design workshop requirements for new UI.
-5. Propose focused tests for the risky behavior and a validation path through the affected packages. Explain any rollout or rollback requirement using the project's actual deployment model.
+5. Propose focused tests for the risky behavior and a validation path through the affected packages. Explain any rollout or rollback requirement using the project's actual release process.
 
 Deliver a concise plan with acceptance criteria, ordered tasks, open decisions, and the smallest useful first slice. This workflow plans the change; it does not implement it or create tracker issues unless I ask.`,
   },
