@@ -115,6 +115,35 @@ The two modes keep their profiles and logins in separate directories (`~/.ade/br
 
 **On Windows**, npm `.cmd` shims need a shell wrapper to be spawned safely; ADE handles this in its process layer (`src/local/spawn.mjs`) without ever interpolating arguments into a shell, and kills the whole process tree on stop so dev-server ports are actually freed.
 
+## Skills
+
+Each project has a **Skills** tab beside Conversations, Files and Workflows. It lists every
+[Agent Skills](https://agentskills.io/home) folder an agent here can load: the ones ADE keeps
+itself, and the ones it only found elsewhere. ADE's own live in `.ade/skills/` inside the project
+and `~/.ade/skills/` for the whole machine, so nothing depends on `.agents/`, `.claude/` or any
+other client's folder. Skills found there are shown read-only alongside their origin; editing always happens
+in ADE's own copy. **Move or copy** sends a skill between the two folders — into `~/.ade/skills/` to
+use it in every project, or into `.ade/skills/` to keep it with the repository and share it with the
+team. Moving removes the original; a skill ADE only found can be copied but never moved, because ADE
+will not delete another client's files.
+
+A skill can be nothing but a name and a description, or a folder carrying `references/`,
+`scripts/`, `assets/` and more. Both are first-class here: every bundled file is listed by kind and
+can be opened — text files in an editor, markdown with a source/document switch, images previewed.
+Name and description are checked against the format while you type (lowercase and hyphens, a
+description that says when to use the skill), and any other frontmatter a skill already carries —
+a licence, a compatibility note, another client's keys — survives an edit untouched.
+
+Import takes a `.skill` package, a `.zip` holding several skills, or a **GitHub repository**. The
+format defines what is inside a skill, not where it sits in a repo, so GitHub import reads the
+repository tree and finds every folder with a `SKILL.md` — at the root, in `skills/`, in
+`.claude/skills/`, or nested in a monorepo like `plugins/x/skills/y/`. It accepts a repository link,
+a `tree`/`blob` link to one folder, or plain `owner/repo`. Each candidate is checked before you
+choose: a valid name and description, a folder that matches, and a count of what it bundles. Only
+the ones you tick are downloaded, and they land in ADE's own folder with all their files. Public
+repositories work out of the box; set `ADE_GITHUB_TOKEN` to a personal access token for a higher
+rate limit or to read private repositories.
+
 ## Safety and current limitations
 
 - **Uncommitted work is protected, not blocking.** You can start a task on a dirty working tree (with a one-click acknowledgment). ADE records the pre-existing changes as the session's baseline, passes the file list to the agent with explicit instructions to never revert, stash, commit, or overwrite them, and marks those files "yours" in the diff view so you can tell your edits from the agent's. The baseline is refreshed at the start of every turn, so you can keep editing between turns. ADE never auto-stashes, resets, checks out, or restores files. It allows one running task per project.

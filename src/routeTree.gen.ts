@@ -20,6 +20,7 @@ import { Route as TasksNewRouteImport } from './routes/tasks.new'
 import { Route as PProjectIdIndexRouteImport } from './routes/p.$projectId.index'
 import { Route as PProjectIdConversationsRouteImport } from './routes/p.$projectId.conversations'
 import { Route as PProjectIdFilesRouteImport } from './routes/p.$projectId.files'
+import { Route as PProjectIdSkillsRouteImport } from './routes/p.$projectId.skills'
 import { Route as PProjectIdWorkflowsRouteImport } from './routes/p.$projectId.workflows'
 import { Route as PProjectIdConversationsIndexRouteImport } from './routes/p.$projectId.conversations.index'
 import { Route as PProjectIdConversationsSessionIdRouteImport } from './routes/p.$projectId.conversations.$sessionId'
@@ -79,6 +80,11 @@ const PProjectIdFilesRoute = PProjectIdFilesRouteImport.update({
   path: '/files',
   getParentRoute: () => PProjectIdRoute,
 } as any)
+const PProjectIdSkillsRoute = PProjectIdSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
+  getParentRoute: () => PProjectIdRoute,
+} as any)
 const PProjectIdWorkflowsRoute = PProjectIdWorkflowsRouteImport.update({
   id: '/workflows',
   path: '/workflows',
@@ -108,6 +114,7 @@ export interface FileRoutesByFullPath {
   '/tasks/new': typeof TasksNewRoute
   '/p/$projectId/conversations': typeof PProjectIdConversationsRouteWithChildren
   '/p/$projectId/files': typeof PProjectIdFilesRoute
+  '/p/$projectId/skills': typeof PProjectIdSkillsRoute
   '/p/$projectId/workflows': typeof PProjectIdWorkflowsRoute
   '/p/$projectId/': typeof PProjectIdIndexRoute
   '/p/$projectId/conversations/$sessionId': typeof PProjectIdConversationsSessionIdRoute
@@ -122,6 +129,7 @@ export interface FileRoutesByTo {
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/tasks/new': typeof TasksNewRoute
   '/p/$projectId/files': typeof PProjectIdFilesRoute
+  '/p/$projectId/skills': typeof PProjectIdSkillsRoute
   '/p/$projectId/workflows': typeof PProjectIdWorkflowsRoute
   '/p/$projectId': typeof PProjectIdIndexRoute
   '/p/$projectId/conversations/$sessionId': typeof PProjectIdConversationsSessionIdRoute
@@ -139,6 +147,7 @@ export interface FileRoutesById {
   '/tasks/new': typeof TasksNewRoute
   '/p/$projectId/conversations': typeof PProjectIdConversationsRouteWithChildren
   '/p/$projectId/files': typeof PProjectIdFilesRoute
+  '/p/$projectId/skills': typeof PProjectIdSkillsRoute
   '/p/$projectId/workflows': typeof PProjectIdWorkflowsRoute
   '/p/$projectId/': typeof PProjectIdIndexRoute
   '/p/$projectId/conversations/$sessionId': typeof PProjectIdConversationsSessionIdRoute
@@ -157,6 +166,7 @@ export interface FileRouteTypes {
     | '/tasks/new'
     | '/p/$projectId/conversations'
     | '/p/$projectId/files'
+    | '/p/$projectId/skills'
     | '/p/$projectId/workflows'
     | '/p/$projectId/'
     | '/p/$projectId/conversations/$sessionId'
@@ -171,6 +181,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/tasks/new'
     | '/p/$projectId/files'
+    | '/p/$projectId/skills'
     | '/p/$projectId/workflows'
     | '/p/$projectId'
     | '/p/$projectId/conversations/$sessionId'
@@ -187,6 +198,7 @@ export interface FileRouteTypes {
     | '/tasks/new'
     | '/p/$projectId/conversations'
     | '/p/$projectId/files'
+    | '/p/$projectId/skills'
     | '/p/$projectId/workflows'
     | '/p/$projectId/'
     | '/p/$projectId/conversations/$sessionId'
@@ -283,6 +295,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PProjectIdFilesRouteImport
       parentRoute: typeof PProjectIdRoute
     }
+    '/p/$projectId/skills': {
+      id: '/p/$projectId/skills'
+      path: '/skills'
+      fullPath: '/p/$projectId/skills'
+      preLoaderRoute: typeof PProjectIdSkillsRouteImport
+      parentRoute: typeof PProjectIdRoute
+    }
     '/p/$projectId/workflows': {
       id: '/p/$projectId/workflows'
       path: '/workflows'
@@ -327,6 +346,7 @@ const PProjectIdConversationsRouteWithChildren =
 interface PProjectIdRouteChildren {
   PProjectIdConversationsRoute: typeof PProjectIdConversationsRouteWithChildren
   PProjectIdFilesRoute: typeof PProjectIdFilesRoute
+  PProjectIdSkillsRoute: typeof PProjectIdSkillsRoute
   PProjectIdWorkflowsRoute: typeof PProjectIdWorkflowsRoute
   PProjectIdIndexRoute: typeof PProjectIdIndexRoute
 }
@@ -334,6 +354,7 @@ interface PProjectIdRouteChildren {
 const PProjectIdRouteChildren: PProjectIdRouteChildren = {
   PProjectIdConversationsRoute: PProjectIdConversationsRouteWithChildren,
   PProjectIdFilesRoute: PProjectIdFilesRoute,
+  PProjectIdSkillsRoute: PProjectIdSkillsRoute,
   PProjectIdWorkflowsRoute: PProjectIdWorkflowsRoute,
   PProjectIdIndexRoute: PProjectIdIndexRoute,
 }

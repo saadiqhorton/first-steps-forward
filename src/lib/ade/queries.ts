@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { listEditorEntries, loadEditorFile } from "@/lib/ade/editorApi";
 import { listDocuments, listWorkflows } from "@/lib/ade/api";
+import { listSkills, readSkillFile } from "@/lib/ade/skillsApi";
 import type { ProjectDocument } from "@/lib/ade/types";
 
 /**
@@ -60,4 +61,19 @@ export const entriesQuery = (projectId: string, directory = "") =>
     queryKey: ["entries", projectId, directory],
     queryFn: async () => (await listEditorEntries(projectId, directory)).entries,
     staleTime: SECTION_STALE_MS,
+  });
+
+export const skillsQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: ["skills", projectId],
+    queryFn: () => listSkills(projectId),
+    staleTime: SECTION_STALE_MS,
+  });
+
+export const skillFileQuery = (projectId: string, rootId: string, skill: string, path: string) =>
+  queryOptions({
+    queryKey: ["skill-file", projectId, rootId, skill, path],
+    queryFn: () => readSkillFile(projectId, rootId, skill, path),
+    staleTime: SECTION_STALE_MS,
+    enabled: Boolean(path),
   });

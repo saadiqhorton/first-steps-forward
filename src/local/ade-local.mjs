@@ -44,6 +44,7 @@ import { browser } from "./routes/browser.mjs";
 import { devServer } from "./routes/devServer.mjs";
 import { agents } from "./routes/agents.mjs";
 import { workflows } from "./routes/workflows.mjs";
+import { skills } from "./routes/skills.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
@@ -543,6 +544,7 @@ const routes = [
   devServer,
   agents,
   workflows,
+  skills,
 ];
 // This browser's proof of the token: HttpOnly, sent on same-site navigations, kept for a year.
 function setAuthCookie(res) {
@@ -605,7 +607,7 @@ export async function handle(req, res) {
   }
   // Host terminal, file editing, and harness install/update stay on loopback
   // even when ADE_TOKEN exposes other API routes. All can operate directly on
-  // the user's machine.
+  // the user's machine. Skills write files too, so they stay local as well.
   const harnessRoute =
     parts[0] === "agents" &&
     parts.length === 3 &&
@@ -615,7 +617,9 @@ export async function handle(req, res) {
     parts[2] === "computer" &&
     ["import", "import-sources"].includes(parts[3]);
   if (
-    (["terminal", "editor"].includes(parts[0]) || harnessRoute || browserImportRoute) &&
+    (["terminal", "editor", "skills"].includes(parts[0]) ||
+      harnessRoute ||
+      browserImportRoute) &&
     !isLoopbackPeer(req)
   )
     return json(res, 403, { error: "Host tools are available only on this machine." });

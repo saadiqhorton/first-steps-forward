@@ -25,7 +25,12 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { projectIdFromPath, RIGHT_TABS, type RightTab } from "@/lib/ade/navigation";
+import {
+  projectIdFromPath,
+  projectSectionFromPath,
+  RIGHT_TABS,
+  type RightTab,
+} from "@/lib/ade/navigation";
 import { useActiveProjectSelection, useAdeState } from "@/lib/ade/store";
 import type { Project } from "@/lib/ade/types";
 import { AddProjectDialog } from "./AddProjectDialog";
@@ -586,6 +591,10 @@ function ShellInner({
   );
 
   const railOrientation = effectiveDock === "side" ? "vertical" : "horizontal";
+  // Workflows and Skills are read-and-write spaces of their own. The right pane
+  // belongs to a running session, so those sections take the whole window.
+  const focusedSection = projectSectionFromPath(pathname);
+  const fullWidthSection = focusedSection === "workflows" || focusedSection === "skills";
   const rail = (
     <RightRail
       orientation={railOrientation}
@@ -620,7 +629,14 @@ function ShellInner({
         <SectionTabs />
 
         <div className="flex min-h-0 flex-1">
-          {effectiveDock === "side" ? (
+          {fullWidthSection ? (
+            <SectionFade
+              sectionKey={sectionKey}
+              className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+            >
+              {children}
+            </SectionFade>
+          ) : effectiveDock === "side" ? (
             <Group
               key={SHELL_LAYOUT_ID}
               id={SHELL_LAYOUT_ID}

@@ -1,0 +1,209 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skills Workspace Workshop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* Workshop page chrome: the ADE palette (src/styles.css), outside the mock. */
+  :root {
+    --ink: oklch(0.18 0.006 70);
+    --paper: oklch(0.945 0.02 90);
+    --panel: oklch(0.977 0.01 90);
+    --amber: oklch(0.69 0.15 65);
+    --amber-deep: oklch(0.55 0.13 65);
+    --line: oklch(0.86 0.03 85);
+    --dim: oklch(0.52 0.03 85);
+    --stage: oklch(0.9 0.02 88);
+    --on-amber: oklch(0.18 0.006 70);
+    --display: "Geist", system-ui, sans-serif;
+    --sans: "Inter", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ink: oklch(0.95 0.012 90);
+      --paper: oklch(0.17 0.006 75);
+      --panel: oklch(0.215 0.007 75);
+      --amber: oklch(0.77 0.15 70);
+      --amber-deep: oklch(0.85 0.11 78);
+      --line: oklch(0.3 0.012 80);
+      --dim: oklch(0.68 0.022 85);
+      --stage: oklch(0.13 0.005 75);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ink: oklch(0.95 0.012 90);
+    --paper: oklch(0.17 0.006 75);
+    --panel: oklch(0.215 0.007 75);
+    --amber: oklch(0.77 0.15 70);
+    --amber-deep: oklch(0.85 0.11 78);
+    --line: oklch(0.3 0.012 80);
+    --dim: oklch(0.68 0.022 85);
+    --stage: oklch(0.13 0.005 75);
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+    padding-inline: 16px;
+    padding-block: 0 64px;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; }
+  a { color: inherit; }
+  a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  h1, h2, h3 { font-family: var(--display); font-weight: 500; letter-spacing: -0.03em; text-wrap: balance; margin: 0; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+  code { font-family: var(--mono); font-size: 0.92em; }
+
+  .masthead { padding-block: 40px 28px; display: grid; gap: 12px; border-bottom: 1px solid var(--line); }
+  .masthead h1 { font-size: clamp(28px, 4vw, 40px); line-height: 1.05; }
+  .masthead p { margin: 0; max-width: 72ch; color: var(--dim); }
+
+  .brief { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); padding-block: 24px; }
+  .brief div { display: grid; gap: 4px; }
+  .brief p { margin: 0; font-size: 13px; }
+
+  .rec { display: grid; gap: 6px; padding: 16px 18px; border: 1px solid var(--amber); border-radius: 14px; background: color-mix(in oklab, var(--amber) 9%, var(--panel)); }
+  .rec p { margin: 0; max-width: 84ch; }
+
+  #overview-grid { display: grid; gap: 20px; margin-top: 24px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); }
+  .ov-card { display: grid; gap: 12px; align-content: start; }
+  .ov-thumb { display: block; border-radius: 12px; border: 1px solid var(--line); overflow: hidden; background: var(--stage); }
+  .ov-thumb:hover { border-color: var(--amber); }
+  .ov-thumb-frame { position: relative; overflow: hidden; pointer-events: none; }
+  .ov-thumb-mount { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+  .ov-meta { display: grid; gap: 4px; }
+  .ov-num { font-family: var(--mono); font-size: 11px; color: var(--amber-deep); }
+  .ov-meta h3 { font-size: 18px; }
+  .ov-meta h3 a { text-decoration: none; }
+  .ov-meta h3 a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .ov-meta p { margin: 0; font-size: 13px; color: var(--dim); }
+
+  /* Option view */
+  .optnav { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-block: 12px; background: var(--paper); border-bottom: 1px solid var(--line); }
+  .optnav a { text-decoration: none; font-size: 13px; color: var(--dim); }
+  .optnav a:hover { color: var(--ink); }
+  #opt-jump { display: flex; gap: 4px; margin-left: auto; }
+  #opt-jump a { display: grid; place-items: center; min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; font-family: var(--mono); font-size: 12px; }
+  #opt-jump a[aria-current="page"] { background: var(--amber); border-color: var(--amber); color: var(--on-amber); }
+  .opt-head { display: grid; gap: 6px; padding-block: 24px 16px; }
+  .opt-head h2 { font-size: clamp(24px, 3vw, 32px); }
+  .opt-head p { margin: 0; max-width: 76ch; color: var(--dim); }
+
+  .controls { display: flex; flex-wrap: wrap; align-items: end; gap: 14px 22px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+  .ctl { display: grid; gap: 6px; }
+  .ctl > span, .ctl > label { font-family: var(--mono); font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg button { font: inherit; font-size: 12px; padding: 6px 10px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--amber); color: var(--on-amber); }
+  #ctl-reset { font: inherit; font-size: 12px; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+  #ctl-reset:hover { border-color: var(--amber); }
+  .ctl-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--dim); }
+
+  .stage-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 16px; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  #readout { color: var(--amber-deep); }
+  #stage { margin-top: 8px; padding: 0; border-radius: 12px; background: var(--stage); overflow: hidden; }
+  #stage-frame { position: relative; margin: 0 auto; overflow: hidden; }
+  #stage-frame > div { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+
+  .split { display: grid; gap: 28px; margin-top: 28px; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 900px) { .split { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); } }
+  .split h3 { font-size: 16px; margin-bottom: 10px; }
+  .closeups-scroll { overflow-x: auto; padding-bottom: 6px; }
+  #closeups { display: flex; gap: 16px; align-items: start; width: max-content; }
+  .closeup { margin: 0; display: grid; gap: 6px; }
+  .closeup figcaption { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .closeup-box { width: 360px; height: 460px; border-radius: 12px; border: 1px solid var(--line); overflow: hidden; background: var(--stage); }
+  /* The close-up box is the mock root, so it has to keep its own size and the
+   * app's own background, not the workshop stage colour. */
+  .closeup-box.mock { width: 360px; height: 460px; background: var(--paper); }
+  #opt-notes { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 13px; max-width: 80ch; }
+  .mocknote { margin-top: 10px; font-size: 12px; color: var(--dim); }
+</style>
+
+<div class="wrap">
+  <section id="view-overview">
+    <header class="masthead">
+      <div class="eyebrow">ADE · design workshop · project sections → Skills</div>
+      <h1>How should the Skills workspace hold packaged skills?</h1>
+      <p>ADE gets a fourth project section, <b>Skills</b>, beside Conversations, Files, and Workflows. It has to carry the <a href="https://agentskills.io/home" target="_blank" rel="noreferrer">Agent Skills</a> format as it is written down: a skill folder with a <code>SKILL.md</code> whose frontmatter holds a <code>name</code> and a <code>description</code>, and optionally <code>scripts/</code>, <code>references/</code>, <code>assets/</code> and more. A skill can be just a name and a description, or a package that carries extra folders — and every one of those files has to be editable in place, not just listed. You can import a <code>.skill</code> file, import a <code>.zip</code> that holds several skills, or write one in place. Each option below is a different answer to where that content lives and how you edit it, using the same sample library and the same import.</p>    </header>
+    <div class="brief">
+      <div><span class="eyebrow">Same in every option</span><p>Project <code>first-steps-forward</code>. ADE owns two folders — <code>.ade/skills</code> in the project and <code>~/.ade/skills</code> on the machine — so it never depends on another client. Skills found in <code>.agents/skills</code> or <code>.claude/skills</code> stay out of the way until you ask for them, and an import can hand over a <code>.skill</code> package, a zip with three skills, or a file that is not a skill.</p></div>
+      <div><span class="eyebrow">What varies</span><p>The shape of the workspace: gallery, explorer split, table, import console, or a single-skill studio — and how much room each one gives to bundled files.</p></div>
+      <div><span class="eyebrow">Mock only</span><p>Sample data only. Nothing is written to disk, no agent is called, and no account is touched. Imports land in the preview only.</p></div>
+    </div>
+    <div class="rec" id="recommendation">
+      <span class="eyebrow">Recommendation</span>
+      <p><b>Option 1, Gallery + drawer — chosen, and now built.</b> It is the closest to the Workflows section that already exists, so the Skills tab reads as part of ADE rather than a new app. Cards show the one thing that varies between skills — whether the package carries extra folders — and the drawer keeps the full file list and the SKILL.md body out of the way until you ask for them. It grew two things during the workshop: a files view where every reference, script and asset is edited in place, and ADE's own folders (<code>.ade/skills</code> in the project, <code>~/.ade/skills</code> on the machine) so the workspace never depends on <code>.agents</code> or <code>.claude</code>. Skills found in those folders are read-only until they are copied in. Option 4's per-skill import review is the next thing worth borrowing if packaged skills turn out to be the common case.</p>
+    </div>
+    <div id="overview-grid"></div>
+  </section>
+
+  <section id="view-option" hidden>
+    <nav class="optnav" aria-label="Workshop navigation">
+      <a href="#overview">← Overview</a>
+      <a id="opt-prev" href="#"></a>
+      <a id="opt-next" href="#"></a>
+      <div id="opt-jump"></div>
+    </nav>
+    <header class="opt-head">
+      <div class="eyebrow" id="opt-eyebrow"></div>
+      <h2 id="opt-title"></h2>
+      <p id="opt-tradeoff"></p>
+    </header>
+
+    <div class="controls" role="group" aria-label="Preview controls">
+      <div class="ctl"><span id="lbl-pkg">Package handed to Import</span>
+        <div class="seg" id="ctl-package" aria-labelledby="lbl-pkg">
+          <button type="button" data-v="packaged">.skill package</button><button type="button" data-v="zip">.zip · 3 skills</button><button type="button" data-v="invalid">.zip · not a skill</button>
+        </div>
+      </div>
+      <div class="ctl"><span id="lbl-th">App theme</span>
+        <div class="seg" id="ctl-theme" aria-labelledby="lbl-th">
+          <button type="button" data-v="dark">Dark</button><button type="button" data-v="light">Light</button>
+        </div>
+      </div>
+      <div class="ctl"><span id="lbl-detect">Skills found elsewhere</span>
+        <div class="seg" id="ctl-detect" aria-labelledby="lbl-detect">
+          <button type="button" data-v="hidden">Hidden</button><button type="button" data-v="shown">Shown</button>
+        </div>
+      </div>
+      <button type="button" id="ctl-reset">Reset</button>
+      <p class="ctl-hint">The package control decides which file the mock's Import picks up. The last control decides whether skills found in <code>.agents/skills/</code> or <code>.claude/skills/</code> join ADE's own set. Open an option, then use Import, New skill, and Remove to try the whole loop. Reset clears drafts, imports, and timers.</p>
+    </div>
+
+    <div class="stage-meta"><span id="scale-note"></span><span id="readout" aria-live="polite"></span></div>
+    <div id="stage"><div id="stage-frame"></div></div>
+
+    <div class="split">
+      <section>
+        <h3>Controls close up</h3>
+        <div class="closeups-scroll"><div id="closeups"></div></div>
+      </section>
+      <section>
+        <h3>How it behaves</h3>
+        <ul id="opt-notes"></ul>
+        <p class="mocknote">Import, create, edit, and remove in the preview are simulated. Nothing is written to disk and no agent runs.</p>
+      </section>
+    </div>
+  </section>
+</div>
+
+<script src="workshop.js"></script>
+<script src="options/option-1.js"></script>
+<script src="options/option-2.js"></script>
+<script src="options/option-3.js"></script>
+<script src="options/option-4.js"></script>
+<script src="options/option-5.js"></script>
+<script>
+  WS.start();
+</script>

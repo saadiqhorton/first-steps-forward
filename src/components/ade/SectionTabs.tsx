@@ -36,6 +36,7 @@ export function SectionTabs() {
     void router.preloadRoute({ to: "/p/$projectId/files", params: { projectId } });
     void router.preloadRoute({ to: "/p/$projectId/workflows", params: { projectId } });
     void router.preloadRoute({ to: "/p/$projectId/conversations", params: { projectId } });
+    void router.preloadRoute({ to: "/p/$projectId/skills", params: { projectId } });
     void queryClient.prefetchQuery(workflowsQuery());
     void queryClient.prefetchQuery(documentsQuery(projectId));
     void queryClient.prefetchQuery(entriesQuery(projectId));
@@ -99,6 +100,17 @@ export function SectionTabs() {
       >
         {activeSection === "workflows" && highlight}
         Workflows
+      </Link>
+      <Link
+        to="/p/$projectId/skills"
+        params={{ projectId }}
+        preload="intent"
+        aria-current={activeSection === "skills" ? "page" : undefined}
+        onClick={() => setPendingSection("skills")}
+        className={linkClass(activeSection === "skills")}
+      >
+        {activeSection === "skills" && highlight}
+        Skills
       </Link>
     </nav>
   );
