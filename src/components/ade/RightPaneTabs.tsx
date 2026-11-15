@@ -10,9 +10,18 @@ export function RightPaneTabs(props: {
   terminalOpened: boolean;
   terminalClosing: boolean;
   onCloseTerminal: () => void;
+  processCount?: number;
   activityTabRef?: Ref<HTMLButtonElement>;
 }): ReactNode {
-  const { tab, onSelect, terminalOpened, terminalClosing, onCloseTerminal, activityTabRef } = props;
+  const {
+    tab,
+    onSelect,
+    terminalOpened,
+    terminalClosing,
+    onCloseTerminal,
+    processCount = 0,
+    activityTabRef,
+  } = props;
 
   return (
     <div
@@ -28,7 +37,9 @@ export function RightPaneTabs(props: {
             ? "right-computer-panel"
             : id === "terminal"
               ? "right-terminal-panel"
-              : "right-session-panel";
+              : id === "processes"
+                ? "right-processes-panel"
+                : "right-session-panel";
 
         return (
           <div key={id} className="relative flex shrink-0 items-center">
@@ -54,6 +65,11 @@ export function RightPaneTabs(props: {
               >
                 {label}
               </span>
+              {id === "processes" && processCount > 0 ? (
+                <span className="font-mono text-[10.5px] tabular-nums text-amber-deep">
+                  {processCount}
+                </span>
+              ) : null}
               {isActive && (
                 <GlideIndicator
                   id="right-pane-tab"

@@ -24,7 +24,9 @@ export function isUnread(session, viewed) {
  * @param {{ status: string, pendingPermissions?: unknown[], pendingDevCommand?: unknown }} session
  */
 export function needsAttention(session) {
-  return session.status === "ready" || session.status === "blocked" || hasPendingUserRequest(session);
+  return (
+    session.status === "ready" || session.status === "blocked" || hasPendingUserRequest(session)
+  );
 }
 
 /**

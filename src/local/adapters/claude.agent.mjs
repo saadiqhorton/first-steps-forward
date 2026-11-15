@@ -30,10 +30,27 @@ export const claude = defineAcpAgent({
     install: ["npm", ["install", "-g", "@anthropic-ai/claude-code"]],
     update: ["npm", ["install", "-g", "@anthropic-ai/claude-code@latest"]],
     selfUpdates: true,
+    brews: [{ kind: "cask", name: "claude-code" }],
+  },
+  // `build` is the persisted ADE ID for Claude's Accept edits mode.
+  permissions: ["manual", "build", "plan", "auto", "dont-ask", "bypass"],
+  permissionLabels: {
+    manual: "Manual",
+    build: "Accept edits",
+    plan: "Plan",
+    auto: "Auto",
+    "dont-ask": "Don't ask",
+    bypass: "Bypass permissions",
   },
   permissionNotes: {
+    manual: "Claude Code asks you in ADE before actions that need permission.",
     build: "Claude Code accepts file edits; shell commands and other actions ask you in ADE first.",
     plan: "Claude Code plan mode: reads and plans, no edits. ADE declines any request to edit, run commands, or leave plan mode.",
+    auto: "Claude Code handles permission decisions automatically; availability depends on your account and organization.",
+    "dont-ask":
+      "Claude Code asks nothing: ADE declines actions that would need permission, and pre-approved reads still run.",
+    bypass:
+      "Claude Code accepts every permission request without asking. Only choose this in a project you trust.",
   },
   // ADE installs this pinned version under ~/.ade the first time Claude runs.
   bridge: {
@@ -49,7 +66,16 @@ export const claude = defineAcpAgent({
   tools:
     "Claude Code tools: Build accepts file edits and asks you in ADE before shell commands and other actions; Plan is read-only. Plus ADE's agent computer tools",
   // ADE permission → Claude Code permission modes, first one offered wins.
-  modes: { build: ["acceptEdits"], plan: ["plan"] },
+  // "Don't ask" runs Claude in its Manual mode and ADE declines every request
+  // that would prompt; the bridge does not advertise the CLI's dontAsk mode.
+  modes: {
+    manual: ["default", "manual"],
+    build: ["acceptEdits"],
+    plan: ["plan"],
+    auto: ["auto"],
+    "dont-ask": ["default", "manual"],
+    bypass: ["bypassPermissions"],
+  },
   async detectAuth(run) {
     const result = await run("claude", ["auth", "status", "--json"], { timeout: 10000 });
     let status;
@@ -79,12 +105,13 @@ export const claude = defineAcpAgent({
    * options. `ephemeral` is the model-list session, which is never prompted:
    * it leaves no transcript or memory folder under ~/.claude/projects.
    */
-  sessionMeta({ computer, ephemeral = false }) {
+  sessionMeta({ computer, permission, ephemeral = false }) {
     return {
       claudeCode: {
         options: {
-          // Never offer the mode that skips every approval.
-          allowDangerouslySkipPermissions: false,
+          // The bridge only advertises Bypass permissions when this is true,
+          // and it has no effect unless the user selects that mode.
+          allowDangerouslySkipPermissions: permission === "bypass",
           // ADE's own browser tools run without a prompt, like Codex's
           // default_tools_approval_mode="approve" for that one server.
           ...(computer ? { allowedTools: ["mcp__ade_computer"] } : {}),

@@ -4,6 +4,7 @@ import { addMessage } from "../session-turns.mjs";
 import { MODEL_ID } from "../models.mjs";
 import { resolveAttachments } from "../attachments.mjs";
 import { body } from "../http.mjs";
+import { readMessagePresentation } from "../message-presentation.mjs";
 
 /** `/api/sessions/:id/*`: logs, follow-ups and actions, the diff, and model or option changes. */
 export async function sessionActions(ctx) {
@@ -56,6 +57,12 @@ export async function sessionActions(ctx) {
       if (data.when === "drop") return json(res, 200, await turns.drop(s));
       if (data.when === "release") return json(res, 200, await turns.release(s));
       const text = String(data.text ?? "").trim();
+      let presentation;
+      try {
+        presentation = readMessagePresentation(data.presentation);
+      } catch {
+        return json(res, 400, { error: "Invalid message presentation." });
+      }
       if (!text) return json(res, 400, { error: "Message cannot be empty." });
       if (UNSUPPORTED_RISK.test(text))
         return json(res, 403, {
@@ -77,7 +84,7 @@ export async function sessionActions(ctx) {
       // "now" stops the current turn (or checks) and runs this message as
       // soon as it has stopped; otherwise it waits for the turn to end.
       const when = data.when === "now" ? "now" : "later";
-      return json(res, 200, await turns.send(s, { text, files }, when));
+      return json(res, 200, await turns.send(s, { text, files, presentation }, when));
     } else if (parts[2] === "switch-agent") {
       const data = await body(req);
       if (s.status === "complete")

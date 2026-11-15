@@ -39,8 +39,9 @@ export async function listEditorEntries(projectId: string, directory = "") {
   return editorApi<{ entries: EditorEntry[] }>(`/api/editor/${projectId}/entries?${params}`);
 }
 
-export async function searchEditorFiles(projectId: string, query: string) {
+export async function searchEditorFiles(projectId: string, query: string, includeFolders = false) {
   const params = new URLSearchParams({ q: query });
+  if (includeFolders) params.set("folders", "1");
   return editorApi<{ entries: EditorEntry[] }>(`/api/editor/${projectId}/search?${params}`);
 }
 

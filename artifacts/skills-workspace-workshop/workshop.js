@@ -179,10 +179,18 @@ Describe what this skill does, in one line.
 
   /** The optional folders and files a skill folder can carry. */
   const FILE_KINDS = {
-    instructions: { id: "instructions", label: "Instructions", hint: "SKILL.md — the body the agent reads when the skill turns on." },
+    instructions: {
+      id: "instructions",
+      label: "Instructions",
+      hint: "SKILL.md — the body the agent reads when the skill turns on.",
+    },
     reference: { id: "reference", label: "Reference", hint: "Read on demand, one level deep." },
     script: { id: "script", label: "Script", hint: "Executable code the agent can run." },
-    asset: { id: "asset", label: "Asset", hint: "Templates, images, schemas — resources, not prose." },
+    asset: {
+      id: "asset",
+      label: "Asset",
+      hint: "Templates, images, schemas — resources, not prose.",
+    },
     agent: { id: "agent", label: "Agent config", hint: "Client-specific settings for this skill." },
     other: { id: "other", label: "Other", hint: "Anything else in the skill folder." },
   };
@@ -427,7 +435,7 @@ Describe what this skill does, in one line.
         return "# Reference\n\nDetail the agent loads only when it needs it.\n";
       if (kind === "script") return "#!/usr/bin/env node\nconsole.log('hello');\n";
       if (kind === "asset") return "Template the skill copies when it writes a file.\n";
-      if (kind === "agent") return "interface:\n  display_name: \"Skill name\"\n";
+      if (kind === "agent") return 'interface:\n  display_name: "Skill name"\n';
       return "Notes kept with the skill.\n";
     },
 
@@ -480,7 +488,12 @@ Describe what this skill does, in one line.
     fileIcon(path) {
       if (path.endsWith(".md")) return icons.book;
       if (path.endsWith(".yaml") || path.endsWith(".yml")) return icons.code;
-      if (path.endsWith(".mjs") || path.endsWith(".js") || path.endsWith(".py") || path.endsWith(".sh"))
+      if (
+        path.endsWith(".mjs") ||
+        path.endsWith(".js") ||
+        path.endsWith(".py") ||
+        path.endsWith(".sh")
+      )
         return icons.code;
       if (path.endsWith(".sql")) return icons.archive;
       if (path.endsWith(".pdf") || path.endsWith(".png") || path.endsWith(".svg"))

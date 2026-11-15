@@ -20,11 +20,7 @@
   ];
 
   const scopeLabel = (scope) =>
-    scope === "ade-project"
-      ? "This project"
-      : scope === "ade-user"
-        ? "My ADE"
-        : "Found";
+    scope === "ade-project" ? "This project" : scope === "ade-user" ? "My ADE" : "Found";
 
   function rowHtml(skill, state, compact = false) {
     const kinds = mock.bundledKinds(skill);
@@ -36,7 +32,9 @@
     const desc = `<div class="t-desc">${esc(skill.description)}</div>`;
     const files = `<div class="t-cell-files">${
       kinds.length
-        ? kinds.map((k) => `<span class="m-pill">${k.count} ${esc(k.label.toLowerCase())}</span>`).join("")
+        ? kinds
+            .map((k) => `<span class="m-pill">${k.count} ${esc(k.label.toLowerCase())}</span>`)
+            .join("")
         : `<span class="m-label-mono">SKILL.md</span>`
     }</div>`;
     return `<tr class="t-row${state.selected === skill.id ? " is-on" : ""}" data-act="select" data-id="${esc(skill.id)}" data-focus="row-${esc(skill.id)}" data-scope="${esc(skill.scope)}" data-name="${esc(skill.name.toLowerCase())}" tabindex="0" role="button" aria-pressed="${state.selected === skill.id}">
@@ -227,14 +225,12 @@
   function tableHtml(ctx) {
     const state = ctx.getState();
     const hidden = mock.hiddenFoundSkills(state.library, state.detectFound);
-    const shown = mock
-      .visibleSkills(state.library, state.detectFound)
-      .filter((s) => {
-        if (!mock.matchesFilter(s, state.filter)) return false;
-        const term = state.query.trim().toLowerCase();
-        if (!term) return true;
-        return s.name.toLowerCase().includes(term) || s.description.toLowerCase().includes(term);
-      });
+    const shown = mock.visibleSkills(state.library, state.detectFound).filter((s) => {
+      if (!mock.matchesFilter(s, state.filter)) return false;
+      const term = state.query.trim().toLowerCase();
+      if (!term) return true;
+      return s.name.toLowerCase().includes(term) || s.description.toLowerCase().includes(term);
+    });
 
     return `<div class="t-wrap">
       <div class="t-head">
@@ -328,7 +324,9 @@
         importPhase: "closed",
         staged: null,
         selected: `imported-${pkg.skills[0].folder}`,
-        notice: { text: `Imported ${pkg.skills.length} skill${pkg.skills.length === 1 ? "" : "s"}` },
+        notice: {
+          text: `Imported ${pkg.skills.length} skill${pkg.skills.length === 1 ? "" : "s"}`,
+        },
       });
       return;
     }
@@ -604,7 +602,9 @@
               : ""
           }`,
         );
-        ctx.report(`${state.library.length} skills · ${state.selected ? "1 selected" : "none selected"}`);
+        ctx.report(
+          `${state.library.length} skills · ${state.selected ? "1 selected" : "none selected"}`,
+        );
       };
       const onClick = (e) => handleClick(e, ctx);
       const onInput = (e) => handleInput(e, ctx);

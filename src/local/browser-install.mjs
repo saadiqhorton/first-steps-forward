@@ -125,12 +125,19 @@ export function createBrowserInstaller({
   let gate = Promise.resolve();
 
   async function systemExecutable() {
-    const help = "Set ADE_BROWSER_EXECUTABLE to the absolute path of a full Chrome or Chromium executable.";
+    const help =
+      "Set ADE_BROWSER_EXECUTABLE to the absolute path of a full Chrome or Chromium executable.";
     if (!configuredExecutable || !path.isAbsolute(configuredExecutable)) {
-      throw coded("browser_unsupported", `ADE's visible browser needs a local browser executable. ${help}`);
+      throw coded(
+        "browser_unsupported",
+        `ADE's visible browser needs a local browser executable. ${help}`,
+      );
     }
     if (/chrome-headless-shell(?:\.exe)?$/i.test(path.basename(configuredExecutable))) {
-      throw coded("browser_unsupported", `Chrome's headless shell cannot show passkey dialogs. ${help}`);
+      throw coded(
+        "browser_unsupported",
+        `Chrome's headless shell cannot show passkey dialogs. ${help}`,
+      );
     }
     let info;
     try {
@@ -438,7 +445,7 @@ export function createBrowserInstaller({
     },
 
     /** The installed executable, without starting an install. */
-    installed: () => headed ? systemExecutable().catch(() => null) : installedExecutable(),
+    installed: () => (headed ? systemExecutable().catch(() => null) : installedExecutable()),
 
     /** Install state for status displays; never starts an install. */
     status() {

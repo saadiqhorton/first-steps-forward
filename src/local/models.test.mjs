@@ -462,3 +462,26 @@ test("with no list yet, ACP agents are asked once and the answer is kept", async
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("ACP turn updates preserve probed capabilities and old caches trigger discovery", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(path.join(tmpdir(), "ade-acp-models-"));
+  try {
+    await rememberAcpModels(dir, "claude", "v", [{ id: "opus", efforts: ["high"] }]);
+    await rememberAcpModels(dir, "claude", "v", [{ id: "opus", label: "Opus" }], {
+      complete: false,
+    });
+    const listing = await acpModelListing("claude", "Claude", { version: "v", cacheDir: dir });
+    assert.deepEqual(listing.models[0], { id: "opus", label: "Opus", efforts: ["high"] });
+    await rememberAcpModels(dir, "claude", "new", [{ id: "opus" }], { complete: false });
+    const fresh = await acpModelListing("claude", "Claude", {
+      version: "new",
+      cacheDir: dir,
+      probe: async () => [{ id: "opus", efforts: ["low"] }],
+    });
+    assert.deepEqual(fresh.models[0].efforts, ["low"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

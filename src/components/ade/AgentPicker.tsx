@@ -6,12 +6,15 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { Check, Search } from "lucide-react";
+import { Check, RefreshCw, Search } from "lucide-react";
 import { REASON_TEXT } from "@/components/ade/ModelPicker";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import { HarnessDialog } from "@/components/ade/HarnessDialog";
+import { AgentLogo } from "@/components/ade/AgentLogo";
+import { AgentPresets } from "@/components/ade/AgentPresets";
 import { agentModels, optionCapabilities, useAdeState } from "@/lib/ade/store";
 import { readLastModel, resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
+import { request } from "@/lib/ade/api";
 import type {
   Agent,
   AgentId,
@@ -49,10 +52,6 @@ function writeCloseAfter(value: boolean) {
   }
 }
 
-function permissionLabel(p: Permission) {
-  return p === "plan" ? "Plan" : "Build";
-}
-
 function agentStatus(agent: Agent): {
   kind: "ready" | "signin" | "install" | "update" | "other-update";
   label: string;
@@ -60,14 +59,22 @@ function agentStatus(agent: Agent): {
   if (!agent.installed || agent.installMethod === "missing") {
     return { kind: "install", label: "Install" };
   }
-  if (agent.updateAvailable && agent.installMethod === "npm") {
+  if (
+    agent.updateAvailable &&
+    (agent.installMethod === "npm" ||
+      agent.installMethod === "brew" ||
+      agent.installMethod === "mise")
+  ) {
     return {
       kind: "update",
       label: agent.latestVersion ? `Update to ${agent.latestVersion}` : "Update",
     };
   }
   if (agent.updateAvailable && agent.installMethod === "other") {
-    return { kind: "other-update", label: "Installed outside npm" };
+    return {
+      kind: "other-update",
+      label: `Update${agent.latestVersion ? ` ${agent.latestVersion}` : ""} available · managed outside npm`,
+    };
   }
   if (!agent.signedIn) {
     return { kind: "signin", label: "Sign in" };
@@ -82,7 +89,7 @@ export function agentChipLabel(
 ): { title: string; subtitle: string } {
   const agent = agents.find((a) => a.id === sel.agentId);
   const title = agent?.name ?? sel.agentId;
-  const modelPart = sel.model.trim() || "Pick a model";
+  const modelPart = sel.model.trim() || "Default model";
   const effortPart = sel.effort.trim() || "Default";
   return { title, subtitle: `${modelPart} · ${effortPart}` };
 }
@@ -110,24 +117,22 @@ function RowButton({
       ref={rowRef}
       {...(title ? { title } : {})}
       disabled={disabled}
+      aria-pressed={selected}
       onClick={onClick}
       onFocus={onFocus}
-      className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] leading-snug ${
+      className={`flex w-full items-start gap-2 rounded-md px-2 py-[5px] text-left text-[12.5px] leading-snug ${
         selected ? "bg-amber/10" : "hover:bg-ink/5"
       } ${disabled ? "cursor-not-allowed text-dim opacity-60" : ""}`}
     >
-      <span className="mt-0.5 grid size-3.5 shrink-0 place-items-center">
-        {selected ? <Check className="size-3.5 text-amber-deep" aria-hidden /> : null}
-      </span>
       <span className="min-w-0 flex-1">{children}</span>
+      {selected && <Check className="mt-0.5 size-3.5 shrink-0 text-amber-deep" aria-hidden />}
     </button>
   );
 }
 
 /**
  * Multi-column agent / model / effort / speed / permission picker. Parent
- * owns selection state; this panel only calls onChange / onClose. Not wired
- * into Composer yet (Task 9).
+ * owns selection state; this panel calls onChange / onClose.
  */
 export function AgentPicker({
   value,
@@ -141,18 +146,24 @@ export function AgentPicker({
   agentLocked?: string;
 }) {
   const agents = useAdeState((state) => state.agents);
+  const agentVersion = agents.find((agent) => agent.id === value.agentId)?.version;
   const panelRef = useRef<HTMLDivElement>(null);
   // Tagged with its agent: right after a switch, the previous agent's list
   // must never be read as the new agent's.
-  const [loaded, setLoaded] = useState<{ agentId: AgentId; result: AgentModelsResult } | null>(
-    null,
-  );
-  const models = loaded?.agentId === value.agentId ? loaded.result : null;
+  const [loaded, setLoaded] = useState<{
+    agentId: AgentId;
+    version: string | undefined;
+    result: AgentModelsResult;
+  } | null>(null);
+  const models =
+    loaded?.agentId === value.agentId && loaded.version === agentVersion ? loaded.result : null;
   const modelsLoading = !models;
   const [caps, setCaps] = useState<OptionCapabilities | null>(null);
   const [showOther, setShowOther] = useState(false);
   const [otherText, setOtherText] = useState("");
   const [modelQuery, setModelQuery] = useState("");
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updateError, setUpdateError] = useState("");
   const [closeAfter, setCloseAfter] = useState(readCloseAfter);
   const [focusCol, setFocusCol] = useState<Column>("agent");
   const [focusRow, setFocusRow] = useState(0);
@@ -166,16 +177,18 @@ export function AgentPicker({
   useEffect(() => {
     let cancelled = false;
     const agentId = value.agentId;
+    const version = agentVersion;
     setShowOther(false);
     setOtherText("");
     setModelQuery("");
     agentModels(agentId)
-      .then((result) => !cancelled && setLoaded({ agentId, result }))
+      .then((result) => !cancelled && setLoaded({ agentId, version, result }))
       .catch(
         (e) =>
           !cancelled &&
           setLoaded({
             agentId,
+            version,
             result: {
               available: false,
               reason: "cli-failed",
@@ -186,7 +199,7 @@ export function AgentPicker({
     return () => {
       cancelled = true;
     };
-  }, [value.agentId]);
+  }, [value.agentId, agentVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,10 +210,14 @@ export function AgentPicker({
     return () => {
       cancelled = true;
     };
-  }, [value.agentId, value.model]);
+  }, [value.agentId, value.model, agentVersion]);
 
   useEffect(() => {
-    if (!value.model || !models?.available) return;
+    if (!models?.available) {
+      setOtherText(value.model);
+      return;
+    }
+    if (!value.model) return;
     const ids = (models.models ?? []).map((m) => m.id);
     if (ids.includes(value.model)) return;
     if (models.completeCatalog) {
@@ -214,43 +231,23 @@ export function AgentPicker({
     setOtherText(value.model);
   }, [models, onChange, value]);
 
-  // Prefer last model for this agent/provider; fall back to first catalog entry.
-  useEffect(() => {
-    if (value.model.trim() || modelsLoading) return;
-    const catalogIds = models?.available ? (models.models ?? []).map((m) => m.id) : [];
-    const resolved = resolveModelForAgent(
-      value.agentId,
-      catalogIds,
-      "",
-      !!models?.available && !!models.completeCatalog,
-    );
-    if (!resolved) return;
-    onChange({
-      agentId: value.agentId,
-      model: resolved,
-      effort: "",
-      speed: "",
-      permission: value.permission,
-    });
-  }, [models, modelsLoading, onChange, value.agentId, value.model, value.permission]);
-
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || signing || harness) return;
       event.stopPropagation();
       onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, signing, harness]);
 
   const listedModels = useMemo(() => models?.models ?? [], [models]);
   const modelRows = useMemo(() => {
-    const rows: { id: string; label: string }[] = [];
+    const rows: { id: string; label: string }[] = [{ id: "", label: "Default (recommended)" }];
     for (const m of listedModels) {
       rows.push({
         id: m.id,
-        label: m.label && m.label !== m.id ? `${m.label} — ${m.id}` : m.id,
+        label: m.label || m.id,
       });
     }
     // A complete catalog is all the agent accepts; free-form ids would only fail the turn.
@@ -275,11 +272,16 @@ export function AgentPicker({
     return [
       {
         id: "",
-        label: "Default",
-        disabled: efforts.length === 0,
+        label: "Model default",
+        disabled: false,
         note: caps?.effortNote ?? "",
       },
-      ...efforts.map((id) => ({ id, label: id, disabled: false, note: "" })),
+      ...efforts.map((id) => ({
+        id,
+        label: id === "xhigh" ? "Extra high" : id.charAt(0).toUpperCase() + id.slice(1),
+        disabled: false,
+        note: "",
+      })),
     ];
   }, [caps]);
 
@@ -289,10 +291,15 @@ export function AgentPicker({
       {
         id: "",
         label: "Standard",
-        disabled: speeds.length === 0,
+        disabled: false,
         note: caps?.speedNote ?? "",
       },
-      ...speeds.map((id) => ({ id, label: id, disabled: false, note: "" })),
+      ...speeds.map((id) => ({
+        id,
+        label: id.charAt(0).toUpperCase() + id.slice(1),
+        disabled: false,
+        note: "",
+      })),
     ];
   }, [caps]);
 
@@ -300,7 +307,21 @@ export function AgentPicker({
     const permissions = caps?.permissions ?? (["build", "plan"] as Permission[]);
     return permissions.map((id) => ({
       id,
-      label: permissionLabel(id),
+      label:
+        caps?.permissionLabels?.[id] ??
+        (
+          {
+            build: "Build",
+            plan: "Plan",
+            manual: "Manual",
+            auto: "Auto",
+            deny: "Deny",
+            approve: "Approve for me",
+            full: "Full access",
+            "dont-ask": "Don't ask",
+            bypass: "Bypass permissions",
+          } as const
+        )[id],
       disabled: false,
     }));
   }, [caps]);
@@ -315,12 +336,13 @@ export function AgentPicker({
       speed: "",
       permission: "build",
     });
+    if (closeAfter) onClose();
   };
 
   const selectModel = (model: string) => {
     if (model === OTHER) {
       setShowOther(true);
-      const next = (otherText || value.model).trim();
+      const next = otherText.trim();
       if (next) writeLastModel(value.agentId, next);
       onChange({
         ...value,
@@ -333,14 +355,17 @@ export function AgentPicker({
     writeLastModel(value.agentId, model);
     setShowOther(false);
     onChange({ ...value, model, effort: "", speed: "" });
+    if (closeAfter) onClose();
   };
 
   const selectEffort = (effort: string) => {
     onChange({ ...value, effort });
+    if (closeAfter) onClose();
   };
 
   const selectSpeed = (speed: string) => {
     onChange({ ...value, speed });
+    if (closeAfter) onClose();
   };
 
   const selectPermission = (permission: Permission) => {
@@ -354,17 +379,6 @@ export function AgentPicker({
     if (col === "effort") return effortRows.map((r) => r.id);
     if (col === "speed") return speedRows.map((r) => r.id);
     return permissionRows.map((r) => r.id);
-  };
-
-  const selectedId = (col: Column): string => {
-    if (col === "agent") return value.agentId;
-    if (col === "model")
-      return showOther || (value.model && !listedModels.some((m) => m.id === value.model))
-        ? OTHER
-        : value.model;
-    if (col === "effort") return value.effort;
-    if (col === "speed") return value.speed;
-    return value.permission;
   };
 
   const activate = (col: Column, id: string) => {
@@ -382,34 +396,9 @@ export function AgentPicker({
     return false;
   };
 
-  const focusColumnRow = (col: Column, preferredId?: string) => {
-    const items = columnItems(col);
-    if (!items.length) {
-      setFocusCol(col);
-      setFocusRow(0);
-      return;
-    }
-    let idx = preferredId !== undefined ? items.indexOf(preferredId) : -1;
-    if (idx < 0) idx = Math.max(0, items.indexOf(selectedId(col)));
-    if (idx < 0) idx = 0;
-    setFocusCol(col);
-    setFocusRow(idx);
-    queueMicrotask(() => rowRefs.current[col]?.[idx]?.focus());
-  };
-
   const onPanelKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const tag = (event.target as HTMLElement)?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    if (event.key === "Tab") {
-      event.preventDefault();
-      const idx = COLUMNS.indexOf(focusCol);
-      const nextIdx = event.shiftKey
-        ? (idx - 1 + COLUMNS.length) % COLUMNS.length
-        : (idx + 1) % COLUMNS.length;
-      const next = COLUMNS[nextIdx] ?? "agent";
-      focusColumnRow(next);
-      return;
-    }
+    const target = event.target as HTMLElement;
+    if (!rowRefs.current[focusCol]?.includes(target as HTMLButtonElement)) return;
     if (event.key === "Enter" || event.key === " ") {
       const items = columnItems(focusCol);
       const id = items[focusRow];
@@ -445,7 +434,8 @@ export function AgentPicker({
   const note = caps?.permissionNotes?.[value.permission] ?? "";
   const modelManual =
     showOther || (!!value.model && !listedModels.some((m) => m.id === value.model));
-  const pickerGrid = "grid grid-cols-[8.5rem_minmax(0,1fr)_7rem_6.5rem_7.5rem] gap-px bg-line";
+  const pickerGrid =
+    "grid min-w-[720px] grid-cols-[minmax(10rem,1.3fr)_minmax(14rem,1.3fr)_minmax(7rem,.7fr)_minmax(6rem,.7fr)_minmax(8rem,1fr)] gap-px bg-line";
 
   return (
     <>
@@ -455,7 +445,7 @@ export function AgentPicker({
         aria-label="Agent picker"
         tabIndex={-1}
         onKeyDown={onPanelKeyDown}
-        className="card-panel w-[min(1080px,100%)] shadow-lg outline-none"
+        className="card-panel w-[min(1080px,100%)] overflow-x-auto shadow-lg outline-none"
       >
         <div className={`${pickerGrid} border-b border-line`}>
           {(["Agent", "Model", "Effort", "Speed", "Permissions"] as const).map((heading, i) => (
@@ -466,10 +456,10 @@ export function AgentPicker({
           ))}
         </div>
 
-        <div className={pickerGrid}>
+        <div className={`${pickerGrid} max-h-[min(24rem,calc(100vh-7rem))] overflow-hidden`}>
           {/* Agent */}
           <div
-            className="max-h-96 overflow-y-auto bg-panel p-1.5"
+            className="min-h-0 overflow-y-auto bg-panel p-1.5"
             onFocusCapture={() => setFocusCol("agent")}
           >
             {agentLocked && (
@@ -492,6 +482,7 @@ export function AgentPicker({
                     type="button"
                     ref={setRowRef("agent", i)}
                     disabled={locked}
+                    aria-pressed={selected}
                     onFocus={() => {
                       setFocusCol("agent");
                       setFocusRow(i);
@@ -501,40 +492,53 @@ export function AgentPicker({
                       locked ? "cursor-not-allowed" : ""
                     }`}
                   >
-                    <span className="mt-0.5 grid size-3.5 shrink-0 place-items-center">
-                      {selected ? <Check className="size-3.5 text-amber-deep" aria-hidden /> : null}
-                    </span>
+                    <AgentLogo agent={agent} />
                     <span className="min-w-0 flex-1 font-medium">{agent.name}</span>
-                  </button>
-                  <div className="ml-[22px] mt-0.5 font-mono text-[10px] text-dim">
-                    {status.kind === "signin" ? (
-                      <button
-                        type="button"
-                        className="text-teal underline"
-                        onClick={() => setSigning(agent)}
-                      >
-                        {status.label}
-                      </button>
-                    ) : status.kind === "install" ? (
-                      <button
-                        type="button"
-                        className="text-teal underline"
-                        onClick={() => setHarness({ agentId: agent.id, kind: "install" })}
-                      >
-                        {status.label}
-                      </button>
-                    ) : status.kind === "update" ? (
-                      <button
-                        type="button"
-                        className="text-teal underline"
-                        onClick={() => setHarness({ agentId: agent.id, kind: "update" })}
-                      >
-                        {status.label}
-                      </button>
-                    ) : (
-                      status.label
+                    {agent.version && <span className="text-[10px] text-dim">{agent.version}</span>}
+                    {selected && (
+                      <Check className="size-3.5 shrink-0 text-amber-deep" aria-hidden />
                     )}
-                  </div>
+                  </button>
+                  {status.kind !== "ready" && (
+                    <div className="ml-[22px] mt-0.5 font-mono text-[10px] text-dim">
+                      {status.kind === "signin" ? (
+                        <button
+                          type="button"
+                          className="text-teal underline"
+                          onClick={() => setSigning(agent)}
+                        >
+                          {status.label}
+                        </button>
+                      ) : status.kind === "install" ? (
+                        <button
+                          type="button"
+                          className="text-teal underline"
+                          onClick={() => setHarness({ agentId: agent.id, kind: "install" })}
+                        >
+                          {status.label}
+                        </button>
+                      ) : status.kind === "update" ? (
+                        <button
+                          type="button"
+                          className="text-teal underline"
+                          onClick={() => setHarness({ agentId: agent.id, kind: "update" })}
+                        >
+                          {status.label}
+                        </button>
+                      ) : (
+                        status.label
+                      )}
+                      {agent.installed && !agent.signedIn && status.kind !== "signin" && (
+                        <button
+                          type="button"
+                          className="ml-2 text-teal underline"
+                          onClick={() => setSigning(agent)}
+                        >
+                          Sign in
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -542,7 +546,7 @@ export function AgentPicker({
 
           {/* Model */}
           <div
-            className="flex max-h-96 flex-col bg-panel"
+            className="flex min-h-0 flex-col bg-panel"
             onFocusCapture={() => setFocusCol("model")}
           >
             {modelsLoading ? (
@@ -576,6 +580,7 @@ export function AgentPicker({
                       selected={
                         row.id === OTHER ? modelManual : !modelManual && value.model === row.id
                       }
+                      title={row.id && row.id !== OTHER ? row.id : undefined}
                       rowRef={setRowRef("model", i)}
                       onFocus={() => {
                         setFocusCol("model");
@@ -589,7 +594,8 @@ export function AgentPicker({
                   {modelManual && (
                     <input
                       id={otherId}
-                      value={otherText || value.model}
+                      aria-label="Custom model ID"
+                      value={otherText}
                       onChange={(e) => {
                         const next = e.target.value;
                         setOtherText(next);
@@ -623,7 +629,8 @@ export function AgentPicker({
               <div className="overflow-y-auto p-1.5">
                 <input
                   id={otherId}
-                  value={otherText || value.model}
+                  aria-label="Custom model ID"
+                  value={otherText}
                   onChange={(e) => {
                     const next = e.target.value;
                     setOtherText(next);
@@ -653,7 +660,7 @@ export function AgentPicker({
 
           {/* Effort */}
           <div
-            className="max-h-96 overflow-y-auto bg-panel p-1.5"
+            className="min-h-0 overflow-y-auto bg-panel p-1.5"
             onFocusCapture={() => setFocusCol("effort")}
           >
             {effortRows.map((row, i) => (
@@ -683,7 +690,7 @@ export function AgentPicker({
 
           {/* Speed */}
           <div
-            className="max-h-96 overflow-y-auto bg-panel p-1.5"
+            className="min-h-0 overflow-y-auto bg-panel p-1.5"
             onFocusCapture={() => setFocusCol("speed")}
           >
             {speedRows.map((row, i) => (
@@ -713,7 +720,7 @@ export function AgentPicker({
 
           {/* Permissions */}
           <div
-            className="max-h-96 overflow-y-auto bg-panel p-1.5"
+            className="min-h-0 overflow-y-auto bg-panel p-1.5"
             onFocusCapture={() => setFocusCol("permission")}
           >
             {permissionRows.map((row, i) => (
@@ -734,8 +741,44 @@ export function AgentPicker({
           </div>
         </div>
 
-        <div className="flex items-start gap-4 border-t border-line px-3 py-2.5">
-          <p className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-dim">{note}</p>
+        <AgentPresets
+          value={value}
+          agents={agents}
+          {...(agentLocked ? { agentLocked } : {})}
+          onApply={(selection) => {
+            writeLastModel(selection.agentId, selection.model);
+            setShowOther(false);
+            onChange(selection);
+            if (closeAfter) onClose();
+          }}
+        />
+        <div className="flex min-w-[720px] items-start gap-4 border-t border-line px-3 py-2.5">
+          <p className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-dim">
+            {updateError || note}
+          </p>
+          <button
+            type="button"
+            disabled={checkingUpdates}
+            onClick={() => {
+              setCheckingUpdates(true);
+              setUpdateError("");
+              void request<{ failed: string[] }>("/api/agents/check-updates", "POST")
+                .then((result) => {
+                  if (result.failed.length)
+                    setUpdateError(
+                      `Could not check updates for ${result.failed.join(", ")}. Try again.`,
+                    );
+                })
+                .catch((error) =>
+                  setUpdateError(error instanceof Error ? error.message : String(error)),
+                )
+                .finally(() => setCheckingUpdates(false));
+            }}
+            className="flex shrink-0 items-center gap-1 text-[11.5px] text-dim hover:text-ink disabled:opacity-50"
+          >
+            <RefreshCw className={`size-3 ${checkingUpdates ? "animate-spin" : ""}`} aria-hidden />
+            {checkingUpdates ? "Checking…" : "Check for updates"}
+          </button>
           <label className="flex shrink-0 items-center gap-2 text-[11.5px] text-dim">
             <input
               type="checkbox"

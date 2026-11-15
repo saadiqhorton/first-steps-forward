@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useRouter, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { GlideIndicator } from "@/components/ade/motion";
 import { documentsQuery, entriesQuery, workflowsQuery } from "@/lib/ade/queries";
 import {
@@ -17,7 +17,6 @@ export function SectionTabs() {
     projects: state.projects,
     sessions: state.sessions,
   }));
-  const router = useRouter();
   const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const projectId = projectIdFromPath(pathname) ?? activeProjectId;
@@ -31,16 +30,14 @@ export function SectionTabs() {
   }, [pendingSection, routeSection]);
 
   useEffect(() => {
-    if (!projectId) return;
+    // Only warm sections from a real project URL; redirect pages (/processes, /)
+    // have no project path yet and preloading during the redirect races the router.
+    if (!projectId || !projectIdFromPath(pathname)) return;
     // Warm sibling section code and data so the first click renders without a loading flash.
-    void router.preloadRoute({ to: "/p/$projectId/files", params: { projectId } });
-    void router.preloadRoute({ to: "/p/$projectId/workflows", params: { projectId } });
-    void router.preloadRoute({ to: "/p/$projectId/conversations", params: { projectId } });
-    void router.preloadRoute({ to: "/p/$projectId/skills", params: { projectId } });
     void queryClient.prefetchQuery(workflowsQuery());
     void queryClient.prefetchQuery(documentsQuery(projectId));
     void queryClient.prefetchQuery(entriesQuery(projectId));
-  }, [projectId, router, queryClient]);
+  }, [projectId, pathname, queryClient]);
 
   if (!projectId || !projects.some((p) => p.id === projectId)) return null;
 
@@ -111,6 +108,17 @@ export function SectionTabs() {
       >
         {activeSection === "skills" && highlight}
         Skills
+      </Link>
+      <Link
+        to="/p/$projectId/processes"
+        params={{ projectId }}
+        preload="intent"
+        aria-current={activeSection === "processes" ? "page" : undefined}
+        onClick={() => setPendingSection("processes")}
+        className={linkClass(activeSection === "processes")}
+      >
+        {activeSection === "processes" && highlight}
+        Processes
       </Link>
     </nav>
   );

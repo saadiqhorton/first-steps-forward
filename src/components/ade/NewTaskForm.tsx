@@ -6,10 +6,10 @@ import { type AgentSelection } from "@/components/ade/AgentPicker";
 import { Composer } from "@/components/ade/Composer";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import { WorkflowCards } from "@/components/ade/workflows/WorkflowCards";
-import type { Agent, Workflow } from "@/lib/ade/types";
+import type { Agent, MessagePresentation, Workflow } from "@/lib/ade/types";
 import { workflowsQuery } from "@/lib/ade/queries";
-import { agentModels, uploadAttachment, useAde, useAdeState } from "@/lib/ade/store";
-import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
+import { uploadAttachment, useAde, useAdeState } from "@/lib/ade/store";
+import { readLastModel, writeLastModel } from "@/lib/ade/lastModels";
 
 const NO_WORKFLOWS: Workflow[] = [];
 
@@ -33,18 +33,21 @@ export function NewTaskForm({
   const sessions = useAdeState((state) => state.sessions);
   const navigate = useNavigate();
   const project = projects.find((p) => p.id === projectId);
-  const [selection, setSelection] = useState<AgentSelection>(() => ({
-    // The project's default agent, else the first ready one — never a hardcoded id.
-    agentId:
+  const [selection, setSelection] = useState<AgentSelection>(() => {
+    // The project's default agent, else the first ready one.
+    const agentId =
       initialSelection?.agentId ??
       (project?.defaultAgent || agents.find((a) => a.installed && a.signedIn)?.id) ??
       agents[0]?.id ??
-      "",
-    model: "",
-    effort: "",
-    speed: "",
-    permission: initialSelection?.permission ?? "build",
-  }));
+      "";
+    return {
+      agentId,
+      model: readLastModel(agentId) ?? "",
+      effort: "",
+      speed: "",
+      permission: initialSelection?.permission ?? "build",
+    };
+  });
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
   const [criteria, setCriteria] = useState("");
   const [criteriaOpen, setCriteriaOpen] = useState(false);
@@ -73,40 +76,6 @@ export function NewTaskForm({
     }));
   }, []);
 
-  // Last model for this agent/provider, else first catalog entry.
-  useEffect(() => {
-    let cancelled = false;
-    const agentId = selection.agentId;
-    void agentModels(agentId)
-      .then((result) => {
-        if (cancelled) return;
-        const catalogIds = result.available ? (result.models ?? []).map((m) => m.id) : [];
-        setSelection((prev) => {
-          if (prev.agentId !== agentId || prev.model.trim()) return prev;
-          const resolved = resolveModelForAgent(
-            agentId,
-            catalogIds,
-            "",
-            result.available && !!result.completeCatalog,
-          );
-          if (!resolved) return prev;
-          return { ...prev, model: resolved, effort: "", speed: "" };
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setSelection((prev) => {
-          if (prev.agentId !== agentId || prev.model.trim()) return prev;
-          const resolved = resolveModelForAgent(agentId, [], "");
-          if (!resolved) return prev;
-          return { ...prev, model: resolved, effort: "", speed: "" };
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selection.agentId]);
-
   useEffect(() => {
     if (selection.model.trim()) writeLastModel(selection.agentId, selection.model);
   }, [selection.agentId, selection.model]);
@@ -118,7 +87,13 @@ export function NewTaskForm({
     if (agents.some((a) => a.id === selection.agentId)) return;
     const fallback = agents.find((a) => a.installed && a.signedIn)?.id ?? agents[0]?.id;
     if (!fallback) return;
-    setSelection((prev) => ({ ...prev, agentId: fallback, model: "", effort: "", speed: "" }));
+    setSelection((prev) => ({
+      ...prev,
+      agentId: fallback,
+      model: readLastModel(fallback) ?? "",
+      effort: "",
+      speed: "",
+    }));
   }, [agents, selection.agentId]);
 
   useEffect(() => {
@@ -141,7 +116,12 @@ export function NewTaskForm({
     });
   }, [prefillWorkflowId, workflows, projectId, applyWorkflow, navigate]);
 
-  const onSend = async (text: string, files: File[]) => {
+  const onSend = async (
+    text: string,
+    files: File[],
+    _delivery?: "now" | "later",
+    presentation?: MessagePresentation,
+  ) => {
     if (!project || busy) return false;
     if (!usable) {
       setError(
@@ -187,6 +167,7 @@ export function NewTaskForm({
         ...(selection.speed.trim() ? { speed: selection.speed.trim() } : {}),
         permission: selection.permission,
         ...(attachmentIds.length ? { attachmentIds } : {}),
+        ...(presentation ? { presentation } : {}),
       });
       void navigate({
         to: "/p/$projectId/conversations/$sessionId",
@@ -340,6 +321,7 @@ export function NewTaskForm({
         )}
         <div className="mt-8">
           <Composer
+            projectId={project.id}
             mode="new"
             selection={selection}
             onSelectionChange={setSelection}
@@ -350,6 +332,7 @@ export function NewTaskForm({
             onSend={onSend}
             {...(initialText !== undefined ? { initialText } : {})}
             workflow={selectedWorkflow}
+            onWorkflowSelect={applyWorkflow}
             onWorkflowRemove={() => setSelectedWorkflow(null)}
             extra={extra}
           />

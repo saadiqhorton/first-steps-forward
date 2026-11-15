@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Composer references · ADE design workshop</title>
+<link rel="stylesheet" href="workshop.css">
+<script defer src="icons.js"></script><script defer src="workshop.js"></script>
+</head>
+<body>
+<header class="workshop-header"><div class="wrap"><a href="#overview" class="brand">ADE <span>/</span> DESIGN WORKSHOP</a><button id="theme" class="quiet" type="button" aria-label="Switch to dark theme">Dark theme</button></div></header>
+<main class="wrap">
+  <div id="overview" class="view">
+    <div class="hero"><div><div class="eyebrow">COMPOSER / EXPLORATION 01</div><h1>Make context feel<br><em>part of the message.</em></h1><p>Four ways to make workflows, skills, files, and folders visible as components in the composer. Explore each direction with the same sample draft.</p></div><div class="hero-aside"><span class="small-number">04</span><span>DIRECTIONS<br>TO EXPLORE</span></div></div>
+    <div class="overview-intro"><div><div class="eyebrow">THE QUESTION</div><h2>Where should context live?</h2></div><p>Each option can add, search, remove and send mock items. Nothing here changes the project or contacts an agent.</p></div>
+    <div id="cards" class="cards"></div>
+  </div>
+  <div id="detail" class="view" hidden>
+    <nav class="detail-nav" aria-label="Workshop navigation"><a href="#overview" class="back">← All directions</a><div class="detail-links"><a id="previous" class="nav-link" href="#">← Previous</a><a id="next" class="nav-link" href="#">Next →</a></div></nav>
+    <div class="detail-heading"><div><div class="eyebrow">DIRECTION <span id="detail-number"></span> / 04</div><h1 id="detail-title"></h1><p id="detail-tradeoff"></p></div><button id="reset" class="outline" type="button">Reset draft</button></div>
+    <div class="guide"><strong>Try it</strong><span>Type <kbd>/</kbd> for workflows &amp; skills or <kbd>@</kbd> for files &amp; folders. Choose a result, remove a pill, or send a mock message.</span><span class="mock-label">LOCAL SAMPLE · NO REAL MESSAGE</span></div>
+    <section class="stage" aria-label="Interactive ADE composer preview"><div id="mock"></div></section>
+    <div class="closeup-head"><div><div class="eyebrow">UP CLOSE</div><h2>How the pieces fit</h2></div><p id="closeup-note"></p></div>
+    <div id="closeups" class="closeups"></div>
+    <div class="bottom-nav"><a href="#overview">← Back to all directions</a><div><a id="previous-bottom" href="#">← Previous</a><a id="next-bottom" href="#">Next →</a></div></div>
+  </div>
+</main>
+</body></html>

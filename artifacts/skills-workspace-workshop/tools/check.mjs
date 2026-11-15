@@ -44,7 +44,10 @@ const problems = [];
  * chromium is on the machine instead. */
 async function findChromium() {
   const candidates = [
-    join(homedir(), ".cache/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-linux64/chrome-headless-shell"),
+    join(
+      homedir(),
+      ".cache/ms-playwright/chromium_headless_shell-1254/chrome-headless-shell-linux64/chrome-headless-shell",
+    ),
     join(homedir(), ".cache/ms-playwright/chromium-1254/chrome-linux64/chrome"),
     "/usr/bin/chromium",
   ];
@@ -218,9 +221,7 @@ for (const id of [1, 2, 3, 4, 5]) {
   const mock = page.locator("#stage-frame .mock");
   await mock.locator('[data-act="open-import"]').click();
   await page.waitForTimeout(250);
-  await page.evaluate(() =>
-    document.querySelector("#ctl-package button[data-v='zip']").focus(),
-  );
+  await page.evaluate(() => document.querySelector("#ctl-package button[data-v='zip']").focus());
   await page.locator("#ctl-package button[data-v='zip']").click();
   await page.waitForTimeout(250);
   const controlFocus = await page.evaluate(() => document.activeElement?.textContent?.trim());

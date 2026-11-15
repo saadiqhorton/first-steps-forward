@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRpc, runAcpTurn, selectValues, toolNameOf } from "./acp.mjs";
+import { createRpc, listAcpModels, runAcpTurn, selectValues, toolNameOf } from "./acp.mjs";
 import { classifyFailure } from "./classify.mjs";
 import { currentActivity, formatSessionLogs } from "../lib/ade/formatLogs.mjs";
 import { groupActivityTurns } from "../lib/ade/activityTurns.mjs";
@@ -78,6 +78,66 @@ async function turn(env = {}, options = {}, on = {}) {
   }
 }
 const methods = (received) => received.filter((m) => m.method).map((m) => m.method);
+
+test("ACP discovery reports each model's own effort levels", async () => {
+  const child = spawn(process.execPath, [FAKE], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, FAKE_ACP_EFFORT: "1" },
+  });
+  try {
+    const rows = await listAcpModels({ child, name: "Fake", cwd: os.tmpdir() });
+    assert.deepEqual(
+      rows.map(({ id, efforts }) => ({ id, efforts })),
+      [
+        { id: "default", efforts: ["low"] },
+        { id: "opus", efforts: ["high"] },
+      ],
+    );
+  } finally {
+    child.stdin.end();
+    await new Promise((resolve) => child.once("close", resolve));
+  }
+});
+
+test("ACP applies effort after model switch and rejects unavailable effort", async () => {
+  const { received } = await turn({ FAKE_ACP_EFFORT: "1" }, { model: "opus", effort: "high" });
+  const options = received
+    .filter((m) => m.method === "session/set_config_option")
+    .map((m) => m.params);
+  assert.deepEqual(
+    options.map(({ configId, value }) => [configId, value]),
+    [
+      ["model", "opus"],
+      ["effort", "high"],
+    ],
+  );
+  await assert.rejects(
+    () => turn({ FAKE_ACP_EFFORT: "1" }, { model: "opus", effort: "low" }),
+    /selected effort.*not available/,
+  );
+});
+
+test("ACP applies selected advertised permission mode and fails closed when unavailable", async () => {
+  const modes = { manual: ["default"], build: ["acceptEdits"], plan: ["plan"], auto: ["auto"] };
+  const { received } = await turn({ FAKE_ACP_AUTO: "1" }, { permission: "auto", modes });
+  assert.equal(received.find((m) => m.method === "session/set_mode").params.modeId, "auto");
+  await assert.rejects(
+    () => turn({}, { permission: "auto", modes }),
+    /does not currently offer.*auto/,
+  );
+});
+
+test("opt-in ACP authentication runs before the session and never selects an unoffered method", async () => {
+  const acpAuth = {
+    methods: ["xai.api_key", "cached_token"],
+    meta: { headless: true },
+    missingMessage: "Sign in first",
+  };
+  const { received } = await turn({ FAKE_ACP_HEADLESS_AUTH: "1" }, { acpAuth });
+  assert.deepEqual(methods(received).slice(0, 3), ["initialize", "authenticate", "session/new"]);
+  assert.deepEqual(received[1].params, { methodId: "cached_token", _meta: { headless: true } });
+  await assert.rejects(() => turn({}, { acpAuth }), /Sign in first/);
+});
 
 test("a fresh turn: handshake, Build mode, streamed text, compact tool logs", async () => {
   const { result, out, received } = await turn();
@@ -219,6 +279,16 @@ test("Plan declines shell commands too", async () => {
   const declined = await turn({ FAKE_ACP_SCENARIO: "permission" }, { permission: "plan" });
   assert.equal(declined.out.asked.length, 0);
   assert.match(declined.out.notices[0], /asked to run a command \(rm -rf build\)/);
+});
+
+test("Don't ask declines every request instead of showing it", async () => {
+  const declined = await turn(
+    { FAKE_ACP_SCENARIO: "permission" },
+    { permission: "dont-ask", modes: { "dont-ask": ["default"] } },
+  );
+  assert.equal(declined.out.asked.length, 0);
+  assert.deepEqual(declined.out.texts, ['answer:{"outcome":"selected","optionId":"r1"}']);
+  assert.match(declined.out.notices[0], /set to Don't ask/);
 });
 
 test("a chosen model is applied through the agent's model option", async () => {

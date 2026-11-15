@@ -48,7 +48,9 @@
         </div>
         ${skills
           .map(
-            (s) => `<button type="button" class="x-row${state.selected === s.id ? " is-on" : ""}" data-act="select" data-id="${esc(s.id)}" data-focus="row-${esc(s.id)}" data-name="${esc(s.name.toLowerCase())}">
+            (
+              s,
+            ) => `<button type="button" class="x-row${state.selected === s.id ? " is-on" : ""}" data-act="select" data-id="${esc(s.id)}" data-focus="row-${esc(s.id)}" data-name="${esc(s.name.toLowerCase())}">
               <span class="x-row-icon" aria-hidden="true">${icons.sparkles}</span>
               <span class="x-row-text">
                 <span class="x-row-name m-truncate">${esc(s.name)}</span>
@@ -176,7 +178,12 @@
              <dl class="x-meta">
                <div><dt class="m-label-mono">Scope</dt><dd>${esc(scope.label)}</dd></div>
                <div><dt class="m-label-mono">Path</dt><dd class="m-mono">${esc(skill.path)}</dd></div>
-               <div><dt class="m-label-mono">Bundles</dt><dd>${mock.bundledKinds(skill).map((k) => `${k.count} ${k.label.toLowerCase()}`).join(", ") || "SKILL.md only"}</dd></div>
+               <div><dt class="m-label-mono">Bundles</dt><dd>${
+                 mock
+                   .bundledKinds(skill)
+                   .map((k) => `${k.count} ${k.label.toLowerCase()}`)
+                   .join(", ") || "SKILL.md only"
+               }</dd></div>
                <div><dt class="m-label-mono">Updated</dt><dd>${esc(skill.updated)}</dd></div>
              </dl>
            </div>`
@@ -253,7 +260,9 @@
         importPhase: "pick",
         staged: null,
         selected: `imported-${pkg.skills[0].folder}`,
-        notice: { text: `Imported ${pkg.skills.length} skill${pkg.skills.length === 1 ? "" : "s"}` },
+        notice: {
+          text: `Imported ${pkg.skills.length} skill${pkg.skills.length === 1 ? "" : "s"}`,
+        },
       });
       return;
     }

@@ -7,10 +7,13 @@
  * always argv-only (no shell); stdin is closed so interactive prompts get EOF.
  */
 import path from "node:path";
+import { checkBrewUpdate, detectBrewInstall } from "./harness-brew.mjs";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_OUTPUT_LINES = 400;
-const LATEST_TTL_MS = 60 * 60 * 1000;
+const LATEST_TTL_MS = 15 * 60 * 1000;
+const LATEST_FAILURE_TTL_MS = 60 * 1000;
+const LATEST_TIMEOUT_MS = 5000;
 
 const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 
@@ -27,88 +30,204 @@ export function commandLine([bin, args]) {
   return [bin, ...args.map(quoteArg)].join(" ");
 }
 
-/** Pull the first dotted numeric version token out of a free-form version string. */
+/** Extract the first dotted version, including an optional prerelease. */
 function versionParts(raw) {
-  const s = String(raw ?? "").trim();
-  const match = s.match(/v?(\d+(?:\.\d+)*)/i);
-  if (!match) return [0];
-  return match[1].split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const match = String(raw ?? "").match(/v?(\d+(?:\.\d+)+)(?:-([0-9a-z.-]+))?/i);
+  if (!match) return null;
+  return { numbers: match[1].split(".").map(Number), prerelease: match[2]?.split(".") ?? [] };
 }
 
-/**
- * Numeric dotted compare. Ignores a leading "v" and any non-numeric prefix
- * (e.g. "codex-cli 0.158.0"). Missing trailing segments are treated as 0
- * so "v1.2" equals "1.2.0".
- * @returns {-1|0|1}
- */
+/** Compare dotted versions using semver prerelease ordering. Unknown versions compare equal. */
 export function compareVersions(a, b) {
   const pa = versionParts(a);
   const pb = versionParts(b);
-  const len = Math.max(pa.length, pb.length);
+  if (!pa || !pb) return 0;
+  const len = Math.max(pa.numbers.length, pb.numbers.length);
   for (let i = 0; i < len; i++) {
-    const da = pa[i] ?? 0;
-    const db = pb[i] ?? 0;
+    const da = pa.numbers[i] ?? 0;
+    const db = pb.numbers[i] ?? 0;
     if (da < db) return -1;
     if (da > db) return 1;
+  }
+  if (!pa.prerelease.length || !pb.prerelease.length)
+    return pa.prerelease.length ? -1 : pb.prerelease.length ? 1 : 0;
+  for (let i = 0; i < Math.max(pa.prerelease.length, pb.prerelease.length); i++) {
+    const da = pa.prerelease[i];
+    const db = pb.prerelease[i];
+    if (da === undefined) return -1;
+    if (db === undefined) return 1;
+    if (da === db) continue;
+    const aNumeric = /^\d+$/.test(da);
+    const bNumeric = /^\d+$/.test(db);
+    if (aNumeric && bNumeric) return Number(da) < Number(db) ? -1 : 1;
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    return da < db ? -1 : 1;
   }
   return 0;
 }
 
-/**
- * Detect whether an agent CLI is missing, installed via npm, or installed
- * some other way. "npm" when the resolved binary path sits under
- * `${npmRoot}/${pkg}`.
- */
+/** Detect the manager of the exact binary ADE will launch. */
 export async function detectInstallMethod(agent, deps) {
   const bin = agent?.bin;
   if (!bin) return { method: "missing" };
   const whichPath = await deps.which(bin);
   if (!whichPath) return { method: "missing" };
-  const npmRoot = await deps.npmRoot();
-  if (!npmRoot) return { method: "other", path: whichPath };
-  const pkg = agent.harness?.pkg;
-  if (!pkg) return { method: "other", path: whichPath };
   let resolved;
   try {
-    resolved = await deps.realpath(whichPath);
+    resolved = path.resolve(await deps.realpath(whichPath));
   } catch {
     return { method: "other", path: whichPath };
   }
-  const pkgDir = path.resolve(npmRoot, pkg);
-  const normalized = path.resolve(resolved);
-  const inside =
-    normalized === pkgDir ||
-    normalized.startsWith(pkgDir + path.sep) ||
-    // Also accept forward-slash prefix checks for mixed path styles in tests.
-    normalized.replaceAll("\\", "/").startsWith(pkgDir.replaceAll("\\", "/") + "/");
-  if (inside) return { method: "npm", path: whichPath };
+  const inside = (root) => {
+    const dir = path.resolve(root);
+    return resolved === dir || resolved.startsWith(dir + path.sep);
+  };
+  const npmRoot = await deps.npmRoot();
+  if (npmRoot && agent.harness?.pkg && inside(path.resolve(npmRoot, agent.harness.pkg)))
+    return { method: "npm", path: whichPath };
+
+  // npm on Windows creates .cmd launchers beside node_modules rather than
+  // symlinks into the package. Confirm both the global prefix and the shim's
+  // package target before allowing an npm-managed update.
+  if (
+    (deps.platform ?? process.platform) === "win32" &&
+    npmRoot &&
+    agent.harness?.pkg &&
+    deps.readFile
+  ) {
+    try {
+      const normalize = (value) => path.resolve(value).toLowerCase();
+      const pkgDir = path.resolve(npmRoot, agent.harness.pkg);
+      const samePrefix = normalize(path.dirname(whichPath)) === normalize(path.dirname(npmRoot));
+      const sameName = path.basename(whichPath).toLowerCase() === `${bin.toLowerCase()}.cmd`;
+      const shim = await deps.readFile(whichPath);
+      const escape = (part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pkgPattern = agent.harness.pkg.split("/").map(escape).join("[\\\\/]");
+      const targetsPackage = new RegExp(`node_modules[\\\\/]${pkgPattern}[\\\\/]`, "i").test(
+        String(shim),
+      );
+      if (samePrefix && sameName && targetsPackage && (await deps.realpath(pkgDir)))
+        return { method: "npm", path: whichPath };
+    } catch {
+      /* A missing or unrecognized shim is not safe to update. */
+    }
+  }
+
+  // Homebrew owns the executable only when its installed formula or cask
+  // lists the resolved path. The adapter's allowlist keeps this to the
+  // package the user installed, never a Homebrew Node keg that happens to
+  // contain a global npm package.
+  if (deps.run && agent.harness?.brews?.length) {
+    const brew = await detectBrewInstall(whichPath, agent.harness.brews, deps);
+    if (brew) return brew;
+  }
+
+  // Only use mise's global upgrade when the active binary and globally
+  // configured installation agree. A tool provided by Node (e.g. a globally
+  // installed npm package) must never cause ADE to upgrade Node itself.
+  if (deps.run && (await deps.which("mise"))) {
+    try {
+      const [whichResult, pluginResult] = await Promise.all([
+        deps.run("mise", ["which", bin], { timeout: 5000 }),
+        deps.run("mise", ["which", "--plugin", bin], { timeout: 5000 }),
+      ]);
+      const tool = String(pluginResult.stdout ?? "").trim();
+      if (
+        whichResult.code === 0 &&
+        pluginResult.code === 0 &&
+        /^[a-zA-Z0-9._-]+$/.test(tool) &&
+        (tool === agent.id || tool === bin) &&
+        path.resolve(await deps.realpath(String(whichResult.stdout ?? "").trim())) === resolved
+      ) {
+        const list = await deps.run("mise", ["ls", "--json", "--global", "--current", tool], {
+          timeout: 5000,
+        });
+        const rows = list.code === 0 ? JSON.parse(list.stdout) : [];
+        if (Array.isArray(rows)) {
+          for (const row of rows) {
+            if (!row?.installed || !row?.active || typeof row.install_path !== "string") continue;
+            if (inside(await deps.realpath(row.install_path)))
+              return { method: "mise", path: whichPath, miseTool: tool };
+          }
+        }
+      }
+    } catch {
+      /* Unknown managers are never modified by ADE. */
+    }
+  }
   return { method: "other", path: whichPath };
+}
+
+/** Build a manager-specific update only for a validated agent/tool pair. */
+export function miseUpdateCommand(agent, tool) {
+  if (
+    typeof tool !== "string" ||
+    !/^[a-zA-Z0-9._-]+$/.test(tool) ||
+    (tool !== agent?.id && tool !== agent?.bin)
+  )
+    return null;
+  return ["mise", ["upgrade", "--global", "--no-prune", tool]];
 }
 
 /** @type {Map<string, { at: number, version: string|null }>} */
 const latestCache = new Map();
 
 /**
- * Registry check via `npm view <pkg> version`. 1-hour in-memory cache.
+ * Registry check via `npm view <pkg> version`. Successful checks are cached for 15 minutes; failures are retried after one minute.
  * Returns null on any failure (non-zero exit, missing agent, thrown run).
  */
-export async function latestVersion(agent, run, { now = Date.now() } = {}) {
+export async function latestVersion(
+  agent,
+  run,
+  { now = Date.now(), force = false, miseTool, brewItem, installedVersion } = {},
+) {
   const entry = agent?.harness;
   if (!entry) return null;
-  const agentId = agent.id;
+  const agentId = brewItem
+    ? `${agent.id}|brew|${String(brewItem?.kind)}|${String(brewItem?.name)}`
+    : miseTool
+      ? `${agent.id}|mise|${miseTool}`
+      : agent.id;
   const cached = latestCache.get(agentId);
-  if (cached && now - cached.at < LATEST_TTL_MS) return cached.version;
+  if (
+    !force &&
+    cached &&
+    now - cached.at < (cached.version ? LATEST_TTL_MS : LATEST_FAILURE_TTL_MS)
+  )
+    return cached.version;
   try {
-    const result = await run("npm", ["view", entry.pkg, "version"]);
-    if (result?.code !== 0) {
-      latestCache.set(agentId, { at: now, version: null });
-      return null;
+    let version;
+    if (brewItem) {
+      const result = await checkBrewUpdate(brewItem, run);
+      if (!result) throw new Error("Homebrew update check failed");
+      // A pinned package is outdated by Homebrew's count but `brew upgrade`
+      // will refuse it, so ADE must not offer an update it cannot apply.
+      version = result.outdated && !result.pinned ? result.latestVersion : installedVersion;
+    } else if (miseTool) {
+      if (!miseUpdateCommand(agent, miseTool)) return null;
+      const result = await run("mise", ["outdated", "--json", "--global", miseTool], {
+        timeout: 15000,
+      });
+      if (result?.code !== 0) throw new Error("mise update check failed");
+      const data = JSON.parse(String(result.stdout ?? ""));
+      if (!data || typeof data !== "object" || Array.isArray(data))
+        throw new Error("invalid mise update result");
+      version =
+        data[miseTool]?.latest ?? (Object.keys(data).length === 0 ? installedVersion : null);
+    } else {
+      const result = await run("npm", ["view", entry.pkg, "version", "--prefer-online"], {
+        timeout: LATEST_TIMEOUT_MS,
+      });
+      if (result?.code !== 0) throw new Error("registry check failed");
+      version = String(result.stdout ?? "")
+        .trim()
+        .split(/\r?\n/)[0]
+        ?.trim();
     }
-    const version = String(result.stdout ?? "")
-      .trim()
-      .split(/\r?\n/)[0]
-      ?.trim();
-    if (!version) {
+    if (
+      typeof version !== "string" ||
+      !/^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)
+    ) {
       latestCache.set(agentId, { at: now, version: null });
       return null;
     }

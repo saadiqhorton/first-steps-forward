@@ -60,7 +60,9 @@ test(
     );
     const screenshot = await session.captureScreenshot();
     assert.equal(screenshot.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
-    await page.setContent('<button id="one" style="position:absolute;left:20px;top:20px;width:80px;height:40px">One</button><button id="two" style="position:absolute;left:140px;top:20px;width:80px;height:40px">Two</button>');
+    await page.setContent(
+      '<button id="one" style="position:absolute;left:20px;top:20px;width:80px;height:40px">One</button><button id="two" style="position:absolute;left:140px;top:20px;width:80px;height:40px">Two</button>',
+    );
     const region = await session.inspectRegion({ x: 0, y: 0, width: 250, height: 100 });
     assert.deepEqual(region.map((element) => element.selector).sort(), ["#one", "#two"]);
 
@@ -91,8 +93,16 @@ test(
     const second = session.tabs().activeId;
     assert.notEqual(second, first);
     assert.equal(session.tabs().tabs.length, 2);
-    assert.deepEqual(session.browserSettings(second), { viewport: { width: 1280, height: 800 }, zoomFactor: 1, colorScheme: "system" });
-    await session.adjustBrowser({ tabId: second, viewport: { width: 768, height: 1024 }, colorScheme: "dark" });
+    assert.deepEqual(session.browserSettings(second), {
+      viewport: { width: 1280, height: 800 },
+      zoomFactor: 1,
+      colorScheme: "system",
+    });
+    await session.adjustBrowser({
+      tabId: second,
+      viewport: { width: 768, height: 1024 },
+      colorScheme: "dark",
+    });
     assert.equal(session.browserSettings(first).colorScheme, "light");
     assert.deepEqual(session.browserSettings(first).viewport, { width: 390, height: 844 });
     await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -145,8 +155,12 @@ test(
     const shotGreen = await page.evaluate(async (base64) => {
       const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
       const image = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
-      const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
-      const context = canvas.getContext("2d"); context.drawImage(image, 0, 0); image.close();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0);
+      image.close();
       const pixel = context.getImageData(10, 10, 1, 1).data;
       return pixel[1] > 180 && pixel[0] < 80;
     }, pinnedShot.toString("base64"));

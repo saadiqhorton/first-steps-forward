@@ -90,7 +90,9 @@ export async function saveWorkspace(file, current, options = {}) {
       JSON.stringify(
         {
           projects: current.projects,
-          sessions: current.sessions.map(({ logs, pendingDevCommand: _pending, ...session }) => session),
+          sessions: current.sessions.map(
+            ({ logs, pendingDevCommand: _pending, ...session }) => session,
+          ),
           processes: current.processes,
           workflows: current.workflows ?? [],
         },

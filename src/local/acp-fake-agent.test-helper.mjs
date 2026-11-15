@@ -60,6 +60,7 @@ const modes = (currentModeId) => ({
     { id: "default", name: "Default" },
     { id: "acceptEdits", name: "Accept edits" },
     { id: "plan", name: "Plan" },
+    ...(env.FAKE_ACP_AUTO === "1" ? [{ id: "auto", name: "Auto" }] : []),
   ],
 });
 const models = (currentValue) => [
@@ -72,6 +73,21 @@ const models = (currentValue) => [
     options: [
       { value: "default", name: "Default" },
       { value: "opus", name: "Opus", description: "Most capable" },
+    ],
+  },
+];
+const modelOptions = (currentValue) => [
+  ...models(currentValue),
+  {
+    id: "effort",
+    category: "thought_level",
+    type: "select",
+    currentValue: "default",
+    options: [
+      { value: "default", name: "Default" },
+      ...(currentValue === "opus"
+        ? [{ value: "high", name: "High" }]
+        : [{ value: "low", name: "Low" }]),
     ],
   },
 ];
@@ -547,14 +563,16 @@ async function handle(message) {
           promptCapabilities: { image: true },
           sessionCapabilities: env.FAKE_ACP_RESUME === "1" ? { resume: {} } : {},
         },
-        authMethods: [],
+        authMethods: env.FAKE_ACP_HEADLESS_AUTH === "1" ? [{ id: "cached_token" }] : [],
       });
+    case "authenticate":
+      return reply({});
     case "session/new":
       if (env.FAKE_ACP_AUTH === "1") return fail(-32000, "Authentication required");
       return reply({
         sessionId: "s-new",
         modes: modes("default"),
-        configOptions: models("default"),
+        configOptions: env.FAKE_ACP_EFFORT === "1" ? modelOptions("default") : models("default"),
       });
     case "session/resume":
       if (params.sessionId === "gone") return fail(-32002, "Resource not found");
@@ -566,8 +584,11 @@ async function handle(message) {
       });
       chunk(params.sessionId, "OLD REPLY");
       return reply({ modes: modes("default"), configOptions: models("default") });
-    case "session/set_mode":
     case "session/set_config_option":
+      if (env.FAKE_ACP_EFFORT === "1" && params.configId === "model")
+        return reply({ configOptions: modelOptions(params.value) });
+      return reply({});
+    case "session/set_mode":
       return reply({});
     case "session/prompt":
       return reply(await prompt(params.sessionId, params));

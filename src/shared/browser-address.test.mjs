@@ -49,7 +49,10 @@ test("the address bar searches text and keeps typed addresses and unsupported sc
 });
 
 test("search engines and custom templates keep queries out of URL authorities", () => {
-  assert.equal(resolveAddressBarInput("hello there", resolveSearchUrlTemplate("google")), "https://www.google.com/search?q=hello%20there");
+  assert.equal(
+    resolveAddressBarInput("hello there", resolveSearchUrlTemplate("google")),
+    "https://www.google.com/search?q=hello%20there",
+  );
   assert.equal(isValidSearchUrlTemplate("https://%s.example.com/"), false);
   assert.equal(isValidSearchUrlTemplate("https://search.example/?q=%s"), true);
   assert.equal(resolveSearchUrlTemplate("custom", "javascript:%s"), "https://duckduckgo.com/?q=%s");

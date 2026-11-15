@@ -7,11 +7,7 @@ import { claude } from "./claude.agent.mjs";
 import { codex } from "./codex.agent.mjs";
 import { opencode, parseOpencodeAuthJson, parseOpencodeAuthText } from "./opencode.agent.mjs";
 import { pi } from "./pi.agent.mjs";
-import {
-  acpComputerServers,
-  computerMcpScript,
-  computerPiExtension,
-} from "./computer-tools.mjs";
+import { acpComputerServers, computerMcpScript, computerPiExtension } from "./computer-tools.mjs";
 
 const session = { id: "session-id", agentSessionId: undefined };
 
@@ -37,6 +33,7 @@ test("Codex adapter uses its workspace-write sandbox and resumes the same thread
   })[1];
   assert.ok(resumed.includes("thread-1"));
   assert.ok(resumed.includes("Continue"));
+  assert.ok(resumed.includes('sandbox_mode="workspace-write"'));
 });
 
 test("Codex runs in project folders that are not Git repositories, first turn and follow-ups", () => {
@@ -480,6 +477,19 @@ test("adapters omit effort/speed/permission flags when options are absent (byte-
   ]);
 });
 
+test("permission choices match the reference surfaces", () => {
+  assert.deepEqual(claude.permissions, ["manual", "build", "plan", "auto", "dont-ask", "bypass"]);
+  assert.deepEqual(
+    claude.permissions.map((id) => claude.permissionLabels[id]),
+    ["Manual", "Accept edits", "Plan", "Auto", "Don't ask", "Bypass permissions"],
+  );
+  assert.deepEqual(codex.permissions, ["plan", "build", "approve", "full"]);
+  assert.deepEqual(
+    codex.permissions.map((id) => codex.permissionLabels[id]),
+    ["Read-only", "Ask for approval", "Approve for me", "Full access"],
+  );
+});
+
 test("Codex maps effort, speed, and plan permission onto argv", () => {
   const newPlan = codex.command({
     projectPath: "/tmp/project",
@@ -527,6 +537,61 @@ test("Codex maps effort, speed, and plan permission onto argv", () => {
   ]);
 });
 
+test("Codex exposes all four permission choices with real argv", () => {
+  const base = {
+    projectPath: "/tmp/project",
+    prompt: "Go",
+    session: { id: "s" },
+    continuing: false,
+  };
+  assert.deepEqual(codex.command({ ...base, permission: "approve" })[1], [
+    "exec",
+    "--json",
+    "--skip-git-repo-check",
+    "--cd",
+    "/tmp/project",
+    "--approve-for-me",
+    "Go",
+  ]);
+  assert.deepEqual(codex.command({ ...base, permission: "full" })[1], [
+    "exec",
+    "--json",
+    "--skip-git-repo-check",
+    "--cd",
+    "/tmp/project",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "Go",
+  ]);
+  const resume = {
+    ...base,
+    session: { id: "s", agentSessionId: "thread-9" },
+    continuing: true,
+  };
+  assert.deepEqual(codex.command({ ...resume, permission: "approve" })[1], [
+    "exec",
+    "resume",
+    "--json",
+    "--skip-git-repo-check",
+    "-c",
+    'approval_policy="on-request"',
+    "-c",
+    'approvals_reviewer="auto_review"',
+    "-c",
+    'sandbox_mode="workspace-write"',
+    "thread-9",
+    "Go",
+  ]);
+  assert.deepEqual(codex.command({ ...resume, permission: "full" })[1], [
+    "exec",
+    "resume",
+    "--json",
+    "--skip-git-repo-check",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "thread-9",
+    "Go",
+  ]);
+});
+
 test("OpenCode maps effort to --variant and plan to --agent plan", () => {
   const args = opencode.command({
     projectPath: "/tmp/project",
@@ -557,6 +622,20 @@ test("OpenCode maps effort to --variant and plan to --agent plan", () => {
     permission: "build",
   })[1];
   assert.ok(!build.includes("--agent"));
+});
+
+test("OpenCode 2 sends model variants in the model argument", () => {
+  const args = opencode.command({
+    projectPath: "/tmp",
+    prompt: "Inspect",
+    session: { id: "s" },
+    continuing: false,
+    version: "2.2.0",
+    model: "opencode/ling",
+    effort: "high",
+  })[1];
+  assert.equal(args[args.indexOf("-m") + 1], "opencode/ling#high");
+  assert.ok(!args.includes("--variant"));
 });
 
 const imageAttachment = {
@@ -748,7 +827,14 @@ test("Claude Code runs over ACP: the bridge drives the user's own claude", async
       { CLAUDE_CODE_EXECUTABLE: "/home/u/.local/bin/claude" },
     ],
   );
-  assert.deepEqual(claude.modes, { build: ["acceptEdits"], plan: ["plan"] });
+  assert.deepEqual(claude.modes, {
+    manual: ["default", "manual"],
+    build: ["acceptEdits"],
+    plan: ["plan"],
+    auto: ["auto"],
+    "dont-ask": ["default", "manual"],
+    bypass: ["bypassPermissions"],
+  });
   const calls = [];
   const runWith = (stdout) => async (bin, args) => {
     calls.push([bin, ...args]);
@@ -774,13 +860,21 @@ test("Claude Code runs over ACP: the bridge drives the user's own claude", async
   );
 });
 
-test("Claude pre-allows only ADE's own MCP server and never offers bypass mode", () => {
+test("Claude pre-allows only ADE's own MCP server and enables bypass only when chosen", () => {
   assert.deepEqual(claude.sessionMeta({ computer: true }), {
     claudeCode: {
       options: { allowDangerouslySkipPermissions: false, allowedTools: ["mcp__ade_computer"] },
     },
   });
   assert.deepEqual(claude.sessionMeta({ computer: false }), {
+    claudeCode: { options: { allowDangerouslySkipPermissions: false } },
+  });
+  // The bridge advertises Bypass permissions only when this flag is set; it
+  // is still inert until the user's mode is bypass.
+  assert.deepEqual(claude.sessionMeta({ computer: false, permission: "bypass" }), {
+    claudeCode: { options: { allowDangerouslySkipPermissions: true } },
+  });
+  assert.deepEqual(claude.sessionMeta({ computer: false, permission: "build" }), {
     claudeCode: { options: { allowDangerouslySkipPermissions: false } },
   });
   // The model-list session saves no transcript and no memory folder.

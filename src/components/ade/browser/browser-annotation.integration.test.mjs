@@ -100,6 +100,7 @@ test(
       `
       import React from "react";
       import {createRoot} from "react-dom/client";
+      import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
       import {Composer} from "@/components/ade/Composer";
       import {addBrowserFeedback} from "@/lib/ade/browser/composerFeedback";
       import {loadFeedbackDraft} from "@/lib/ade/browser/feedbackPersistence";
@@ -112,7 +113,7 @@ test(
         addBrowserFeedback('["project","session"]', { text:"Feedback "+id, files:[video,...images] });
       };
       window.sent = [];
-      createRoot(document.getElementById("root")).render(<Composer mode="follow-up" sessionId="session" draftStorageKey={'["project","session"]'} selection={{agentId:"codex",model:"",effort:"",speed:"",permission:"build"}} onSelectionChange={()=>{}} branch="main" placeholder="Message" sending={false} onSend={async (text,files)=>{window.sent.push({text,files:files.map(file=>({name:file.name,recording:recordingAttachment(file)}))});return true;}} />);
+      createRoot(document.getElementById("root")).render(<QueryClientProvider client={new QueryClient()}><Composer mode="follow-up" sessionId="session" draftStorageKey={'["project","session"]'} selection={{agentId:"codex",model:"",effort:"",speed:"",permission:"build"}} onSelectionChange={()=>{}} branch="main" placeholder="Message" sending={false} onSend={async (text,files)=>{window.sent.push({text,files:files.map(file=>({name:file.name,recording:recordingAttachment(file)}))});return true;}} /></QueryClientProvider>);
     `,
     );
     await writeFile(
@@ -143,13 +144,14 @@ test(
     const server = await createServer({
       configFile: false,
       root,
+      cacheDir: path.join(root, ".vite-cache"),
       logLevel: "silent",
       plugins: [react()],
       resolve: {
         alias: [
           { find: "@/lib/ade/store", replacement: path.join(root, "store.js") },
           { find: "@/components/ade/AgentPicker", replacement: path.join(root, "agent.jsx") },
-          { find: "@/components/ade/NoticeDialog", replacement: path.join(root, "notice.js") },
+          { find: "@/lib/ade/userNotices", replacement: path.join(root, "notice.js") },
           { find: "@", replacement: source },
         ],
         dedupe: ["react", "react-dom"],
@@ -592,6 +594,10 @@ test(
     try {
       await interrupted.goto(new URL("composer.html", server.resolvedUrls.local[0]).href);
       await interrupted.waitForFunction(() => typeof window.enqueue === "function");
+      await interrupted.waitForFunction(() => {
+        const composer = document.querySelector("textarea");
+        return composer && !composer.disabled;
+      });
       await interrupted.evaluate(() => {
         window.failComposerSave = true;
         window.enqueue("interrupted");

@@ -24,7 +24,9 @@
         ${state.library
           .filter((s) => state.detectFound || !String(s.scope).startsWith("detected"))
           .map(
-            (s) => `<button type="button" class="s-rail-item${state.selected === s.id ? " is-on" : ""}" data-act="select" data-id="${esc(s.id)}" data-focus="rail-${esc(s.id)}" data-name="${esc(s.name.toLowerCase())}">
+            (
+              s,
+            ) => `<button type="button" class="s-rail-item${state.selected === s.id ? " is-on" : ""}" data-act="select" data-id="${esc(s.id)}" data-focus="rail-${esc(s.id)}" data-name="${esc(s.name.toLowerCase())}">
               <span class="m-truncate">${esc(s.name)}</span>
               <span class="m-label-mono">${s.files.length}</span>
             </button>`,
@@ -260,7 +262,9 @@
         importPhase: "pick",
         staged: null,
         selected: `imported-${pkg.skills[0].folder}`,
-        notice: { text: `Installed ${pkg.skills.length} skill${pkg.skills.length === 1 ? "" : "s"}` },
+        notice: {
+          text: `Installed ${pkg.skills.length} skill${pkg.skills.length === 1 ? "" : "s"}`,
+        },
       });
       return;
     }
@@ -385,9 +389,7 @@
                 : "NOTES.md";
       ctx.setState({
         library: state.library.map((s) =>
-          s.id === skill.id
-            ? { ...s, files: [...s.files, { path, bytes: "0.2 KB" }] }
-            : s,
+          s.id === skill.id ? { ...s, files: [...s.files, { path, bytes: "0.2 KB" }] } : s,
         ),
         notice: { text: `Added ${path}` },
       });

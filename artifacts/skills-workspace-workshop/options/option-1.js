@@ -51,21 +51,23 @@
     </button>`;
   }
 
-
   /** The file view of the drawer: a list of bundled files beside an editor. */
   function fileEditorHtml(ctx, skill) {
     const state = ctx.getState();
     const bundled = skill.files.filter((file) => file.path !== "SKILL.md");
-    const open = state.openFile && bundled.some((f) => f.path === state.openFile)
-      ? state.openFile
-      : bundled[0]?.path ?? null;
+    const open =
+      state.openFile && bundled.some((f) => f.path === state.openFile)
+        ? state.openFile
+        : (bundled[0]?.path ?? null);
     const file = bundled.find((f) => f.path === open) ?? null;
     const body = file ? mock.sampleFile(file) : "";
     return `<div class="g-files-editor">
         <div class="g-files-list">
           ${bundled
             .map(
-              (f) => `<button type="button" class="g-file${f.path === open ? " is-on" : ""}" data-act="open-file" data-path="${esc(f.path)}" data-focus="file-${esc(f.path)}">
+              (
+                f,
+              ) => `<button type="button" class="g-file${f.path === open ? " is-on" : ""}" data-act="open-file" data-path="${esc(f.path)}" data-focus="file-${esc(f.path)}">
                 <span class="m-truncate">${esc(f.path)}</span>
                 <span class="m-label-mono">${esc(mock.kindLabel(f))}</span>
               </button>`,
@@ -301,9 +303,7 @@
       if (!mock.matchesFilter(s, state.filter)) return false;
       const term = state.query.trim().toLowerCase();
       if (!term) return true;
-      return (
-        s.name.toLowerCase().includes(term) || s.description.toLowerCase().includes(term)
-      );
+      return s.name.toLowerCase().includes(term) || s.description.toLowerCase().includes(term);
     });
 
     return `<div class="g-inner">
@@ -377,7 +377,8 @@
     if (act === "scope") {
       ctx.setState({ importScope: button.dataset.v });
       return;
-    }    if (act === "do-import") {
+    }
+    if (act === "do-import") {
       const pkg = state.staged || mock.packages[state.packageKey];
       if (!pkg || pkg.error) return;
       const library = mock.importInto(state.library, pkg, state.importScope);
@@ -568,8 +569,7 @@
       ctx.root.querySelectorAll(".g-card").forEach((el) => {
         const scope = el.dataset.scope;
         const name = el.dataset.name || "";
-        const ok =
-          mock.matchesFilter({ scope }, state.filter) && (!term || name.includes(term));
+        const ok = mock.matchesFilter({ scope }, state.filter) && (!term || name.includes(term));
         el.style.display = ok ? "" : "none";
       });
       return;
@@ -578,9 +578,7 @@
       const draft = { ...(ctx.getState().draft || { name: "", description: "" }) };
       draft[field] = e.target.value;
       ctx.patch({ draft });
-      const hint = ctx.root.querySelector(
-        field === "name" ? "#g-name-hint" : "#g-desc-hint",
-      );
+      const hint = ctx.root.querySelector(field === "name" ? "#g-name-hint" : "#g-desc-hint");
       if (hint) {
         const error =
           field === "name"

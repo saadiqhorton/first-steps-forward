@@ -52,11 +52,25 @@ export const codex = defineCliAgent({
   harness: {
     pkg: "@openai/codex",
     install: ["npm", ["install", "-g", "@openai/codex"]],
-    update: ["codex", ["update"]],
+    update: ["npm", ["install", "-g", "@openai/codex@latest"]],
+    brews: [{ kind: "cask", name: "codex" }],
+  },
+  // Four permission choices, matching the reference surface. `build` stays
+  // the default so existing sessions and presets keep their meaning.
+  permissions: ["plan", "build", "approve", "full"],
+  permissionLabels: {
+    plan: "Read-only",
+    build: "Ask for approval",
+    approve: "Approve for me",
+    full: "Full access",
   },
   permissionNotes: {
-    build: "Codex workspace-write sandbox: can edit files in this project.",
     plan: "Codex read-only sandbox: reads and answers, cannot edit files.",
+    build:
+      "Codex workspace-write sandbox; approval requests follow Codex's non-interactive policy.",
+    approve:
+      "Codex routes approval requests through automatic review in its workspace-write sandbox.",
+    full: "Codex runs with no sandbox and no approval prompts. Only choose this in a project you trust.",
   },
   authMethod: "ChatGPT sign-in (browser or device code)",
   authNote:
@@ -110,6 +124,27 @@ export const codex = defineCliAgent({
     // The agent computer's MCP server, configured per turn (resume too).
     const { args: computerArgs = [] } = wireComputer(computer);
     const plan = permission === "plan";
+    const fullAccess = permission === "full";
+    const approveForMe = permission === "approve";
+    // exec has one-shot flags; resume takes the same settings as -c values
+    // (it does not accept --sandbox or --approve-for-me after `resume`).
+    const permissionArgs = fullAccess
+      ? ["--dangerously-bypass-approvals-and-sandbox"]
+      : approveForMe
+        ? ["--approve-for-me"]
+        : ["--sandbox", plan ? "read-only" : "workspace-write"];
+    const resumePermissionArgs = fullAccess
+      ? ["--dangerously-bypass-approvals-and-sandbox"]
+      : approveForMe
+        ? [
+            "-c",
+            'approval_policy="on-request"',
+            "-c",
+            'approvals_reviewer="auto_review"',
+            "-c",
+            'sandbox_mode="workspace-write"',
+          ]
+        : ["-c", plan ? 'sandbox_mode="read-only"' : 'sandbox_mode="workspace-write"'];
     const imageArgs = (attachments ?? [])
       .filter((a) => a.kind === "image")
       .flatMap((a) => ["--image", a.path]);
@@ -132,7 +167,7 @@ export const codex = defineCliAgent({
             ...modelArgs,
             ...optionArgs,
             ...computerArgs,
-            ...(plan ? ["-c", 'sandbox_mode="read-only"'] : []),
+            ...resumePermissionArgs,
             session.agentSessionId,
             ...imageArgs,
             ...promptArgs,
@@ -149,8 +184,7 @@ export const codex = defineCliAgent({
             ...computerArgs,
             "--cd",
             projectPath,
-            "--sandbox",
-            plan ? "read-only" : "workspace-write",
+            ...permissionArgs,
             ...imageArgs,
             ...promptArgs,
           ],

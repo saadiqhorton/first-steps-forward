@@ -94,7 +94,10 @@ test(
     assert.ok(status.text.includes(saved.path));
     await session.navigate(`http://127.0.0.1:${server.address().port}/`);
     assert.equal(session.nav().fileNotShown, null);
-    await assert.rejects(session.navigate(`http://127.0.0.1:${server.address().port}/file`), /downloaded/i);
+    await assert.rejects(
+      session.navigate(`http://127.0.0.1:${server.address().port}/file`),
+      /downloaded/i,
+    );
     const directDeadline = Date.now() + 3000;
     while (session.nav().fileNotShown?.status !== "ready" && Date.now() < directDeadline)
       await new Promise((resolve) => setTimeout(resolve, 10));

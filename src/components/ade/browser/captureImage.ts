@@ -47,8 +47,7 @@ export function captureImageFile(blob: Blob, name: string): File {
 
 /** Avoid re-encoding screenshots unless their original PNG exceeds the upload limit. */
 export async function fitCaptureImage(blob: Blob, limit: number): Promise<Blob | null> {
-  if ((blob.type === "image/png" || blob.type === "image/jpeg") && blob.size <= limit)
-    return blob;
+  if ((blob.type === "image/png" || blob.type === "image/jpeg") && blob.size <= limit) return blob;
   const bitmap = await createImageBitmap(blob);
   try {
     const canvas = document.createElement("canvas");

@@ -88,14 +88,38 @@ const acpListed = (agentName, models) => ({
 });
 
 /** Record the model list an ACP agent offered (rows from acp.mjs); returns the rows kept. */
-export async function rememberAcpModels(cacheDir, agentId, version, models) {
-  const rows = models.filter((model) => MODEL_ID.test(model?.id ?? "")).slice(0, 200);
+export async function rememberAcpModels(
+  cacheDir,
+  agentId,
+  version,
+  models,
+  { complete = true } = {},
+) {
+  let previous;
+  try {
+    previous = JSON.parse(await fsp.readFile(acpModelsFile(cacheDir, agentId), "utf8"));
+  } catch {}
+  if (previous?.version !== version) previous = undefined;
+  const oldRows = new Map((previous?.models ?? []).map((model) => [model.id, model]));
+  const rows = models
+    .filter((model) => MODEL_ID.test(model?.id ?? ""))
+    .slice(0, 200)
+    .map((model) => (complete ? model : { ...oldRows.get(model.id), ...model }));
   if (!rows.length) return rows;
   try {
     await fsp.mkdir(cacheDir, { recursive: true, mode: 0o700 });
     await fsp.writeFile(
       acpModelsFile(cacheDir, agentId),
-      JSON.stringify({ version, reportedAt: Date.now(), models: rows }, null, 2),
+      JSON.stringify(
+        {
+          version,
+          capabilitiesProbed: complete || previous?.capabilitiesProbed === true,
+          reportedAt: Date.now(),
+          models: rows,
+        },
+        null,
+        2,
+      ),
       { mode: 0o600 },
     );
   } catch {}
@@ -117,7 +141,12 @@ export async function acpModelListing(
 ) {
   try {
     const raw = JSON.parse(await fsp.readFile(acpModelsFile(cacheDir, agentId), "utf8"));
-    if (raw?.version === version && Array.isArray(raw.models) && raw.models.length)
+    if (
+      raw?.version === version &&
+      raw.capabilitiesProbed === true &&
+      Array.isArray(raw.models) &&
+      raw.models.length
+    )
       return acpListed(agentName, raw.models);
   } catch {}
   if (!probe)

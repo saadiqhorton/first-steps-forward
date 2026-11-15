@@ -259,8 +259,7 @@ export function createDevCommandApprovals({ state, save, emit = () => {}, waitMs
     },
     /** The open request attached to this session, if any. */
     forSession(sessionId) {
-      for (const entry of pending.values())
-        if (entry.sessionId === sessionId) return entry.request;
+      for (const entry of pending.values()) if (entry.sessionId === sessionId) return entry.request;
       return undefined;
     },
     /**

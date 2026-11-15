@@ -81,6 +81,9 @@ test("editor lists project files, searches, and excludes Git internals", async (
     search.body.entries.map((entry) => entry.path),
     ["src/app.ts"],
   );
+  const folders = await call("/api/editor/p1/search?q=src&folders=1");
+  assert.ok(folders.body.entries.some((entry) => entry.path === "src" && entry.kind === "folder"));
+  assert.ok(!folders.body.entries.some((entry) => entry.path.startsWith(".git")));
 });
 
 test("editor reads and saves UTF-8 files without overwriting external changes", async () => {

@@ -16,10 +16,16 @@ export function writeLastProject(projectId: string): void {
   }
 }
 
-export const RIGHT_TABS = ["activity", "diff", "computer", "terminal"] as const;
+export const RIGHT_TABS = ["activity", "diff", "computer", "terminal", "processes"] as const;
 export type RightTab = (typeof RIGHT_TABS)[number];
 
-export const PROJECT_SECTIONS = ["conversations", "files", "workflows", "skills"] as const;
+export const PROJECT_SECTIONS = [
+  "conversations",
+  "files",
+  "workflows",
+  "skills",
+  "processes",
+] as const;
 export type ProjectSection = (typeof PROJECT_SECTIONS)[number];
 
 export function projectIdFromPath(pathname: string): string | null {

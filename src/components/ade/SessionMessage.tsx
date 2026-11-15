@@ -9,6 +9,7 @@ import {
   workspaceFileFromLink,
 } from "@/lib/ade/browser/openInPreview.mjs";
 import type { Message, MessageAttachment } from "@/lib/ade/types";
+import { ContextPills } from "@/components/ade/ContextPills";
 
 function formatAttachmentSize(bytes: number) {
   const n = Number(bytes) || 0;
@@ -83,7 +84,14 @@ export function SessionMessage({
   agentName?: string | undefined;
   projectId?: string | undefined;
 }) {
-  const { role, text, attachments = [] } = message;
+  const { role, attachments = [] } = message;
+  const text = role === "user" && message.presentation ? message.presentation.text : message.text;
+  const contextRow =
+    role === "user" && message.presentation?.references.length ? (
+      <div className="mb-2">
+        <ContextPills items={message.presentation.references} />
+      </div>
+    ) : null;
   const structured = role === "agent" && isStructuredOutput(text);
   const lineCount = text.split("\n").length;
   // Only collapse JSON dumps — normal agent replies stay fully readable.
@@ -140,6 +148,7 @@ export function SessionMessage({
               <span className="show truncate">Your prompt · {lineCount} lines</span>
               <span className="hide">Hide prompt</span>
             </span>
+            {contextRow}
             {attachmentRow}
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2 min-w-0 overflow-hidden rounded-xl data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down bg-surface-muted px-4 py-3 text-sm leading-5.5 text-ink [overflow-wrap:anywhere]">
@@ -181,6 +190,7 @@ export function SessionMessage({
           </Collapsible>
         ) : (
           <>
+            {contextRow}
             {content}
             {attachmentRow}
             <AttachmentVideos attachments={attachments} />

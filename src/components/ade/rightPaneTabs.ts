@@ -1,4 +1,4 @@
-import { Activity, FileDiff, Globe, SquareTerminal, type LucideIcon } from "lucide-react";
+import { Activity, FileDiff, Globe, Server, SquareTerminal, type LucideIcon } from "lucide-react";
 import type { RightTab } from "@/lib/ade/navigation";
 
 export const RIGHT_PANE_TABS: ReadonlyArray<{
@@ -10,4 +10,5 @@ export const RIGHT_PANE_TABS: ReadonlyArray<{
   { id: "diff", label: "Diff", Icon: FileDiff },
   { id: "computer", label: "Browser", Icon: Globe },
   { id: "terminal", label: "Terminal", Icon: SquareTerminal },
+  { id: "processes", label: "Processes", Icon: Server },
 ];

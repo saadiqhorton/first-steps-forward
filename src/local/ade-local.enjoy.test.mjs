@@ -271,7 +271,7 @@ test("agent capabilities endpoint returns optionCapabilities for a model", async
   assert.equal(res.status, 200);
   assert.deepEqual(res.json.efforts, ["low", "medium", "high"]);
   assert.deepEqual(res.json.speeds, ["fast"]);
-  assert.deepEqual(res.json.permissions, ["build", "plan"]);
+  assert.deepEqual(res.json.permissions, ["plan", "build", "approve", "full"]);
   assert.ok(res.json.permissionNotes.build);
   assert.ok(res.json.permissionNotes.plan);
 });
@@ -280,7 +280,55 @@ test("harness update is 409 when the agent was installed outside npm", async () 
   _setAgentsForTest(seedAgents);
   const res = await call("/api/agents/codex/update", {});
   assert.equal(res.status, 409);
-  assert.match(res.json.error, /Installed outside npm at \/opt\/codex\/bin\/codex/);
+  assert.match(
+    res.json.error,
+    /Installed outside npm, mise, and Homebrew at \/opt\/codex\/bin\/codex/,
+  );
+});
+
+test("a Homebrew-managed agent updates with its detected formula or cask", async () => {
+  const brew = path.join(binDir, "brew");
+  writeFileSync(brew, '#!/bin/sh\necho "brew $*"\n');
+  chmodSync(brew, 0o755);
+  try {
+    _setAgentsForTest([
+      {
+        ...seedAgents[0],
+        installMethod: "brew",
+        brewItem: { kind: "cask", name: "codex" },
+        harness: { install: "npm install -g @openai/codex", update: "brew upgrade --cask codex" },
+      },
+    ]);
+    const started = await call("/api/agents/codex/update", {});
+    assert.equal(started.status, 200);
+    assert.equal(started.json.command, "brew upgrade --cask codex");
+    let finished;
+    for (let i = 0; i < 200; i++) {
+      const job = await call("/api/agents/codex/harness");
+      if (job.json.status !== "running") {
+        finished = job.json;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(finished?.status, "succeeded");
+    assert.deepEqual(finished.output, ["brew upgrade --cask codex"]);
+    // A package identity ADE cannot validate never becomes an update command.
+    _setAgentsForTest([
+      {
+        ...seedAgents[0],
+        installMethod: "brew",
+        brewItem: { kind: "cask", name: "codex; whoami" },
+        harness: { install: "npm install -g @openai/codex", update: "brew upgrade --cask codex" },
+      },
+    ]);
+    const rejected = await call("/api/agents/codex/update", {});
+    assert.equal(rejected.status, 409);
+    assert.match(rejected.json.error, /Unable to verify how this agent is managed/);
+  } finally {
+    rmSync(brew, { force: true });
+    _setAgentsForTest(seedAgents);
+  }
 });
 
 test("harness routes refuse non-loopback peers with 403", async () => {
@@ -316,6 +364,64 @@ test("harness update is 409 while that agent has a working session", async () =>
   } finally {
     writeFileSync(gate, "");
     delete process.env.FAKE_CLI_SCENARIO;
+  }
+});
+
+test("an in-app update completes and prevents tasks from launching during installation", async () => {
+  _setAgentsForTest(seedAgents);
+  const created = await call("/api/sessions", {
+    projectId: "p1",
+    agentId: "pi",
+    request: "Prepare the task",
+  });
+  assert.equal(created.status, 201);
+  await waitFor(() => settled(created.json.id), "the initial turn");
+  _setAgentsForTest(seedAgents);
+  const gate = path.join(home, "npm-update-gate");
+  const npm = path.join(binDir, "npm");
+  writeFileSync(
+    npm,
+    '#!/bin/sh\nwhile [ ! -f "$FAKE_NPM_GATE" ]; do sleep 0.05; done\necho updated\n',
+  );
+  chmodSync(npm, 0o755);
+  process.env.FAKE_NPM_GATE = gate;
+  try {
+    const started = await call("/api/agents/pi/update", {});
+    assert.equal(started.status, 200);
+    assert.equal(started.json.status, "running");
+    const followup = await call(`/api/sessions/${created.json.id}/messages`, {
+      text: "Continue work",
+    });
+    assert.equal(followup.status, 409);
+    assert.match(followup.json.error, /update to finish/);
+    const next = await call("/api/sessions", {
+      projectId: "p1",
+      agentId: "pi",
+      request: "Start another task",
+    });
+    assert.equal(next.status, 409);
+    assert.match(next.json.error, /update to finish/);
+    writeFileSync(gate, "");
+    let done;
+    for (let i = 0; i < 200; i++) {
+      const response = await call("/api/agents/pi/harness");
+      if (response.json.status !== "running") {
+        done = response.json;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(done?.status, "succeeded");
+    assert.deepEqual(done.output, ["updated"]);
+    const resumed = await call(`/api/sessions/${created.json.id}/messages`, {
+      text: "Continue work",
+    });
+    assert.equal(resumed.status, 200);
+    await waitFor(() => settled(created.json.id), "the follow-up after updating");
+  } finally {
+    writeFileSync(gate, "");
+    delete process.env.FAKE_NPM_GATE;
+    rmSync(npm, { force: true });
   }
 });
 

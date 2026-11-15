@@ -346,18 +346,24 @@ export function parseServerMessage(text: string): ServerMessage | null {
       (typeof error === "object" &&
         isString((error as Record<string, unknown>)["url"]) &&
         isString((error as Record<string, unknown>)["description"]));
-    const validFile = fileNotShown == null ||
-      (typeof fileNotShown === "object" && isString((fileNotShown as Record<string, unknown>)["url"]) &&
+    const validFile =
+      fileNotShown == null ||
+      (typeof fileNotShown === "object" &&
+        isString((fileNotShown as Record<string, unknown>)["url"]) &&
         isString((fileNotShown as Record<string, unknown>)["fileName"]) &&
-        ((fileNotShown as Record<string, unknown>)["downloadId"] === null || isString((fileNotShown as Record<string, unknown>)["downloadId"])) &&
-        ["saving", "ready", "failed"].includes(String((fileNotShown as Record<string, unknown>)["status"])));
+        ((fileNotShown as Record<string, unknown>)["downloadId"] === null ||
+          isString((fileNotShown as Record<string, unknown>)["downloadId"])) &&
+        ["saving", "ready", "failed"].includes(
+          String((fileNotShown as Record<string, unknown>)["status"]),
+        ));
     return isString(url) &&
       isString(title) &&
       isBoolean(loading) &&
       isBoolean(canGoBack) &&
       isBoolean(canGoForward) &&
       isBoolean(opened) &&
-      validError && validFile
+      validError &&
+      validFile
       ? {
           type,
           url,
@@ -570,8 +576,7 @@ export function connectBrowserStream(options: BrowserStreamOptions): BrowserStre
       const ws = socket;
       if (!ws || ws.readyState !== WebSocket.OPEN) return false;
       if (control?.controller !== "you") return false;
-      if (!(CLIENT_STREAM_MESSAGE_TYPES as readonly string[]).includes(message.type))
-        return false;
+      if (!(CLIENT_STREAM_MESSAGE_TYPES as readonly string[]).includes(message.type)) return false;
       ws.send(JSON.stringify(message));
       return true;
     },

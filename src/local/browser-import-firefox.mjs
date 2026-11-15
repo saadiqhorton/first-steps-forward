@@ -56,7 +56,8 @@ function profileSections(content) {
 function profileDirectory(root, profile) {
   const candidate = profile.path;
   if (!candidate || candidate.includes("\0")) return null;
-  if (profile.isrelative === "0") return path.isAbsolute(candidate) ? path.resolve(candidate) : null;
+  if (profile.isrelative === "0")
+    return path.isAbsolute(candidate) ? path.resolve(candidate) : null;
   if (profile.isrelative !== undefined && profile.isrelative !== "1") return null;
   if (path.isAbsolute(candidate)) return null;
   const directory = path.resolve(root, candidate);

@@ -5,11 +5,7 @@ import {
   AlertDialogDescription,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  bindNoticeEnqueue,
-  settleNotice,
-  type NoticeRequest,
-} from "@/lib/ade/userNotices";
+import { bindNoticeEnqueue, settleNotice, type NoticeRequest } from "@/lib/ade/userNotices";
 
 /**
  * One alert-dialog host for confirms and warnings.

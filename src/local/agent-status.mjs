@@ -11,7 +11,10 @@ import {
   detectInstallMethod,
   latestVersion,
   createHarnessJobs,
+  commandLine,
+  miseUpdateCommand,
 } from "./harness.mjs";
+import { brewUpdateCommand } from "./harness-brew.mjs";
 
 // A probe spawns ~17 processes, so the bootstrap poll only starts one this long after the last.
 // Explicit refreshes (agentStatus called directly) ignore it.
@@ -25,6 +28,10 @@ const AGENT_PROBE_INTERVAL_MS = 60_000;
 export function createAgentStatus({ state, dataDir, emit }) {
   const AGENTS_STATUS_FILE = path.join(dataDir, "agents-status.json");
   let probingAgents = false;
+  let statusGeneration = 0;
+  let cacheLoaded = false;
+  let writeQueue = Promise.resolve();
+  let probeQueue = Promise.resolve();
   let lastProbeStartedAt = 0;
   const now = () => Date.now();
   async function executable(bin) {
@@ -54,6 +61,8 @@ export function createAgentStatus({ state, dataDir, emit }) {
     which,
     npmRoot,
     realpath: (p) => fs.realpath(p),
+    readFile: (p) => fs.readFile(p, "utf8"),
+    run,
   };
   const harnessJobs = createHarnessJobs({
     onChange: (job) => emit(`harness:${job.agentId}`),
@@ -65,7 +74,14 @@ export function createAgentStatus({ state, dataDir, emit }) {
     },
   });
 
-  async function agentStatus() {
+  function agentStatus(options = {}) {
+    const next = probeQueue.then(() => runAgentStatus(options));
+    probeQueue = next.catch(() => {});
+    return next;
+  }
+
+  async function runAgentStatus({ forceLatest = false } = {}) {
+    const generation = ++statusGeneration;
     lastProbeStartedAt = now();
     const results = await Promise.all(
       Object.values(adapters).map(async (adapter) => {
@@ -83,10 +99,41 @@ export function createAgentStatus({ state, dataDir, emit }) {
           carriesConversation: true,
           installMethod: install.method,
           ...(install.path ? { installPath: install.path } : {}),
+          ...(install.miseTool
+            ? {
+                miseTool: install.miseTool,
+                harness: {
+                  ...describeAgent(adapter).harness,
+                  update: commandLine(miseUpdateCommand(adapter, install.miseTool)),
+                },
+              }
+            : {}),
+          ...(install.brewItem
+            ? {
+                brewItem: install.brewItem,
+                harness: {
+                  ...describeAgent(adapter).harness,
+                  update: commandLine(brewUpdateCommand(install.brewItem)),
+                },
+              }
+            : {}),
         };
         return row;
       }),
     );
+    if (generation !== statusGeneration) return state.agents;
+    for (const row of results) {
+      const previous = state.agents.find((agent) => agent.id === row.id);
+      if (
+        previous?.latestVersion &&
+        row.installed &&
+        !(adapters[row.id]?.harness.selfUpdates && row.installMethod === "other")
+      ) {
+        row.latestVersion = previous.latestVersion;
+        if (row.version && compareVersions(row.version, row.latestVersion) < 0)
+          row.updateAvailable = true;
+      }
+    }
     state.agents = results;
     // The cache is stamped with when this probe finished. The latest-version writes below reuse it:
     // stamping them with their own, later time would push the next probe back each time one lands.
@@ -94,31 +141,54 @@ export function createAgentStatus({ state, dataDir, emit }) {
     await writeAgentsStatus(results, fetchedAt);
     emit("agents");
     // Background, non-blocking latest-version checks — next bootstrap poll picks them up.
-    for (const agent of results) {
+    const checks = results.map(async (agent) => {
       // A CLI that updates itself in place is never behind in a way ADE can fix.
-      if (adapters[agent.id]?.harness.selfUpdates && agent.installMethod !== "npm") continue;
-      void (async () => {
-        const latest = await latestVersion(adapters[agent.id], run);
-        if (latest == null) return;
-        const current = state.agents.find((a) => a.id === agent.id);
-        if (!current) return;
-        current.latestVersion = latest;
-        if (current.version && compareVersions(current.version, latest) < 0)
-          current.updateAvailable = true;
-        else delete current.updateAvailable;
+      if (
+        !agent.installed ||
+        (adapters[agent.id]?.harness.selfUpdates && agent.installMethod === "other")
+      )
+        return;
+      const latest = await latestVersion(adapters[agent.id], run, {
+        force: forceLatest,
+        ...(agent.installMethod === "mise"
+          ? { miseTool: agent.miseTool, installedVersion: agent.version }
+          : {}),
+        ...(agent.installMethod === "brew"
+          ? { brewItem: agent.brewItem, installedVersion: agent.version }
+          : {}),
+      });
+      if (generation !== statusGeneration) return;
+      const current = state.agents.find((a) => a.id === agent.id);
+      if (!current) return;
+      if (latest == null) {
+        current.latestCheckFailed = true;
         await writeAgentsStatus(state.agents, fetchedAt);
         emit("agents");
-      })();
-    }
+        return;
+      }
+      delete current.latestCheckFailed;
+      current.latestVersion = latest;
+      if (current.version && compareVersions(current.version, latest) < 0)
+        current.updateAvailable = true;
+      else delete current.updateAvailable;
+      await writeAgentsStatus(state.agents, fetchedAt);
+      emit("agents");
+    });
+    await Promise.all(checks);
     return results;
   }
   // Write-then-rename: a reader (another ADE instance, or this one restarting) must never see a
   // truncated file, which would parse as "no cache" and re-probe every CLI.
   async function writeAgentsStatus(agents, fetchedAt) {
+    const snapshot = JSON.stringify({ fetchedAt, agents });
+    writeQueue = writeQueue.then(() => writeSnapshot(snapshot));
+    return writeQueue;
+  }
+  async function writeSnapshot(snapshot) {
     const tmp = `${AGENTS_STATUS_FILE}.${process.pid}.${randomUUID()}.tmp`;
     try {
       await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
-      await fs.writeFile(tmp, JSON.stringify({ fetchedAt, agents }), { mode: 0o600 });
+      await fs.writeFile(tmp, snapshot, { mode: 0o600 });
       await fs.rename(tmp, AGENTS_STATUS_FILE);
     } catch {
       await fs.rm(tmp, { force: true }).catch(() => {});
@@ -139,14 +209,30 @@ export function createAgentStatus({ state, dataDir, emit }) {
     try {
       cached = JSON.parse(await fs.readFile(AGENTS_STATUS_FILE, "utf8"));
     } catch {}
-    if (cached?.agents) {
+    if (!cacheLoaded && statusGeneration === 0 && cached?.agents) {
       // What an agent is comes from its adapter, never from an older cache;
       // only detection (installed, version, sign-in) is reused until the
       // background probe refreshes it. Agents without an adapter are dropped.
       state.agents = cached.agents
         .filter((agent) => adapters[agent.id])
-        .map((agent) => ({ ...agent, ...describeAgent(adapters[agent.id]) }));
+        .map((agent) => {
+          const description = describeAgent(adapters[agent.id]);
+          const command =
+            agent.installMethod === "mise"
+              ? miseUpdateCommand(adapters[agent.id], agent.miseTool)
+              : agent.installMethod === "brew"
+                ? brewUpdateCommand(agent.brewItem)
+                : null;
+          return {
+            ...agent,
+            ...description,
+            ...(command
+              ? { harness: { ...description.harness, update: commandLine(command) } }
+              : {}),
+          };
+        });
     }
+    cacheLoaded = true;
     // Never make the project list wait on CLI version/auth probes. If there's
     // no cache yet, return the current (possibly empty) agent list; the normal
     // bootstrap poll picks up the probe result when it finishes.

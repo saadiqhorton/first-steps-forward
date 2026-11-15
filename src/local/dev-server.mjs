@@ -27,6 +27,10 @@ export function createDevServers({ state, save }) {
   // Process ids whose dev-server port has been confirmed to accept a
   // connection; a process that dies before that never actually listened.
   const listenedProcs = new Set();
+  // Consecutive failed port probes per process, so one dropped poll does not
+  // turn a healthy server into "Needs checking".
+  const misses = new Map();
+  let monitorTimer = null;
   // Projects whose dev server a start route is starting right now.
   const devStartClaims = new Set();
   const id = () => randomUUID();
@@ -265,6 +269,7 @@ export function createDevServers({ state, save }) {
     });
     child.on("close", (code) => {
       proc.status = "stopped";
+      proc.stoppedAt = now();
       delete proc.pid;
       if (!listenedProcs.has(proc.id)) proc.port = 0;
       proc.exitCode = code;
@@ -419,18 +424,98 @@ export function createDevServers({ state, save }) {
     if (!child && proc.pid && !(await processRunsIn(proc.pid, proc.dir ?? project?.path))) {
       delete proc.pid;
       proc.status = "stopped";
+      proc.stoppedAt = now();
       proc.updatedAt = now();
       await save();
       return { stalePid: true };
     }
+    if (proc.status === "running" || proc.status === "starting") {
+      // Visible while the stop is in flight, as Enjoy shows "Stop requested…".
+      proc.status = "stopping";
+      proc.updatedAt = now();
+      await save();
+    }
     stopChild(child ?? proc.pid);
     if (proc.status !== "stopped" || proc.pid) {
       proc.status = "stopped";
+      proc.stoppedAt = now();
       delete proc.pid;
       proc.updatedAt = now();
       await save();
     }
+    misses.delete(proc.id);
     return { stalePid: false };
+  }
+
+  /**
+   * Confirm what ADE can: a process whose child is gone or whose port no longer answers
+   * twice in a row is "unverified" rather than a stale "running". A process that starts
+   * answering again returns to "running"; marking it good is for when you know better.
+   */
+  async function checkProcesses() {
+    let changed = false;
+    for (const proc of state.processes) {
+      if (proc.status !== "running" && proc.status !== "unverified") continue;
+      const project = state.projects.find((item) => item.id === proc.projectId);
+      if (!project) continue;
+      const child = children.get(proc.id);
+      const alive = child
+        ? true
+        : proc.pid
+          ? await processRunsIn(proc.pid, proc.dir ?? project.path)
+          : false;
+      if (!alive) {
+        proc.status = "stopped";
+        proc.stoppedAt = now();
+        proc.updatedAt = now();
+        delete proc.pid;
+        misses.delete(proc.id);
+        changed = true;
+        continue;
+      }
+      const answers = proc.port ? await probeConnection(proc.port) : true;
+      if (answers) {
+        misses.delete(proc.id);
+        if (proc.status === "unverified") {
+          proc.status = "running";
+          changed = true;
+        }
+        proc.verifiedAt = now();
+        continue;
+      }
+      if (proc.status === "unverified") continue;
+      const count = (misses.get(proc.id) ?? 0) + 1;
+      misses.set(proc.id, count);
+      if (count >= 2) {
+        proc.status = "unverified";
+        proc.updatedAt = now();
+        misses.delete(proc.id);
+        changed = true;
+      }
+    }
+    if (changed) await save();
+    return changed;
+  }
+  function markGood(proc) {
+    if (!proc) return false;
+    if (proc.status === "unverified") proc.status = "running";
+    const changed = proc.status === "running" || !!proc.stopError;
+    delete proc.stopError;
+    proc.verifiedAt = now();
+    proc.updatedAt = now();
+    misses.delete(proc.id);
+    return changed;
+  }
+  function startMonitor() {
+    if (monitorTimer) return;
+    monitorTimer = setInterval(() => {
+      checkProcesses().catch(() => {});
+    }, 15_000);
+    monitorTimer.unref?.();
+  }
+  function stopMonitor() {
+    if (monitorTimer) clearInterval(monitorTimer);
+    monitorTimer = null;
   }
   return {
     claimStart,
@@ -441,6 +526,10 @@ export function createDevServers({ state, save }) {
     devCommandSource,
     refreshDevProcess,
     hasRunning,
+    checkProcesses,
+    markGood,
+    startMonitor,
+    stopMonitor,
   };
 }
 /**

@@ -1,6 +1,8 @@
 import { spawnCommand as spawn } from "../spawn.mjs";
 import { adapters } from "../adapters/index.mjs";
 import { optionCapabilities } from "../capabilities.mjs";
+import { miseUpdateCommand } from "../harness.mjs";
+import { brewUpdateCommand } from "../harness-brew.mjs";
 
 /** `/api/agents/*`: sign-in, install and update jobs, models and option capabilities. */
 export async function agents(ctx) {
@@ -12,6 +14,7 @@ export async function agents(ctx) {
     state,
     authChildren,
     harnessJobs,
+    turns,
     agentStatus,
     listAgentModels,
     json,
@@ -98,7 +101,8 @@ export async function agents(ctx) {
     const kind = parts[2];
     if (
       state.sessions.some(
-        (s) => s.agentId === agentId && ["working", "verifying"].includes(s.status),
+        (s) =>
+          s.agentId === agentId && (turns.isBusy(s) || ["working", "verifying"].includes(s.status)),
       )
     )
       return json(res, 409, {
@@ -110,22 +114,43 @@ export async function agents(ctx) {
       return json(res, 409, {
         error: `${agent?.name ?? agentId} is already installed.`,
       });
-    if (kind === "update" && method !== "npm") {
+    if (kind === "update" && method !== "npm" && method !== "mise" && method !== "brew") {
       if (method === "other")
         return json(res, 409, {
-          error: `Installed outside npm at ${agent?.installPath ?? "unknown path"}; update it where you installed it.`,
+          error: `Installed outside npm, mise, and Homebrew at ${agent?.installPath ?? "unknown path"}; update it where you installed it.`,
         });
       return json(res, 409, {
         error: `${agent?.name ?? agentId} is not installed yet. Install it first.`,
       });
     }
     try {
-      const job = harnessJobs.start(agentId, kind, adapters[agentId].harness[kind]);
+      const command =
+        kind === "update" && method === "mise"
+          ? miseUpdateCommand(adapters[agentId], agent?.miseTool)
+          : kind === "update" && method === "brew"
+            ? brewUpdateCommand(agent?.brewItem)
+            : adapters[agentId].harness[kind];
+      if (!command)
+        return json(res, 409, {
+          error: "Unable to verify how this agent is managed. Refresh agent status and try again.",
+        });
+      const job = harnessJobs.start(agentId, kind, command);
       return json(res, 200, job);
     } catch (error) {
       if (error?.code === "BUSY") return json(res, 409, { error: error.message });
       throw error;
     }
+  }
+  if (
+    req.method === "POST" &&
+    parts[0] === "agents" &&
+    parts[1] === "check-updates" &&
+    parts.length === 2
+  ) {
+    const checked = await agentStatus({ forceLatest: true });
+    return json(res, 200, {
+      failed: checked.filter((agent) => agent.latestCheckFailed).map((agent) => agent.name),
+    });
   }
   if (req.method === "GET" && parts[0] === "agents")
     return json(res, 200, { agents: await agentStatus() });

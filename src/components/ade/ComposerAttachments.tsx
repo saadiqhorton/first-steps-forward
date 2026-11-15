@@ -96,10 +96,12 @@ export function ComposerAttachButton({
   disabled,
   atLimit,
   fileInputRef,
+  className,
 }: {
   disabled?: boolean;
   atLimit: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
+  className?: string;
 }) {
   return (
     <button
@@ -107,9 +109,12 @@ export function ComposerAttachButton({
       onClick={() => fileInputRef.current?.click()}
       disabled={disabled || atLimit}
       aria-label="Attach files"
-      className="btn-quiet grid size-9 shrink-0 place-items-center disabled:opacity-60"
+      title={atLimit ? "Attachment limit reached" : "Attach files"}
+      className={
+        className ?? "btn-quiet grid size-9 shrink-0 place-items-center disabled:opacity-60"
+      }
     >
-      <Paperclip className="size-4" aria-hidden />
+      <Paperclip className="size-4" strokeWidth={1.5} aria-hidden />
     </button>
   );
 }

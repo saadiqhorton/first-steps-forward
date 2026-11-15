@@ -15,9 +15,8 @@ export const UNSUPPORTED_RISK =
 
 /**
  * What an agent offers for one model: efforts and speeds come from the
- * model's listing row; permissions are always Build and Plan, explained by
- * the agent adapter's own notes.
- * @param {{ permissionNotes?: { build: string, plan: string }, notes?: { effort?: string, speed?: string } } | undefined} agent
+ * model's listing row; permission choices come from the adapter.
+ * @param {{ permissions?: string[], permissionLabels?: Record<string, string>, permissionNotes?: Record<string, string>, notes?: { effort?: string, speed?: string } } | undefined} agent
  * @param {{ efforts?: string[], speeds?: string[] } | undefined} model
  */
 export function optionCapabilities(agent, model) {
@@ -34,10 +33,22 @@ export function optionCapabilities(agent, model) {
   return {
     efforts,
     speeds,
-    permissions: [...PERMISSIONS],
+    permissions: [...(agent?.permissions ?? PERMISSIONS)],
     effortNote,
     speedNote,
-    permissionNotes: { build: notes.build, plan: notes.plan },
+    permissionLabels: {
+      build: "Build",
+      plan: "Plan",
+      manual: "Manual",
+      auto: "Auto",
+      deny: "Deny",
+      approve: "Approve for me",
+      full: "Full access",
+      "dont-ask": "Don't ask",
+      bypass: "Bypass permissions",
+      ...agent?.permissionLabels,
+    },
+    permissionNotes: { ...notes },
   };
 }
 

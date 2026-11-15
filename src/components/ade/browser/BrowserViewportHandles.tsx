@@ -30,18 +30,14 @@ const MAX_AREA = maxWidth * maxHeight;
 function resizeAtRatio(desired: number, ratio: number, axis: "width" | "height"): Size {
   if (axis === "width") {
     const minimum = Math.ceil(Math.max(minWidth, minHeight * ratio));
-    const maximum = Math.floor(
-      Math.min(maxWidth, maxHeight * ratio, Math.sqrt(MAX_AREA * ratio)),
-    );
+    const maximum = Math.floor(Math.min(maxWidth, maxHeight * ratio, Math.sqrt(MAX_AREA * ratio)));
     let width = Math.min(maximum, Math.max(minimum, Math.round(desired)));
     let height = Math.round(width / ratio);
     while (width * height > MAX_AREA && width > minimum) height = Math.round(--width / ratio);
     return { width, height };
   }
   const minimum = Math.ceil(Math.max(minHeight, minWidth / ratio));
-  const maximum = Math.floor(
-    Math.min(maxHeight, maxWidth / ratio, Math.sqrt(MAX_AREA / ratio)),
-  );
+  const maximum = Math.floor(Math.min(maxHeight, maxWidth / ratio, Math.sqrt(MAX_AREA / ratio)));
   let height = Math.min(maximum, Math.max(minimum, Math.round(desired)));
   let width = Math.round(height * ratio);
   while (width * height > MAX_AREA && height > minimum) width = Math.round(--height * ratio);

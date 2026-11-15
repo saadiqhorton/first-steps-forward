@@ -98,6 +98,8 @@ export async function devServer(ctx) {
       // turn must be detected without waiting for the next bootstrap poll.
       const { proc, changed } = await devServers.refreshDevProcess(project);
       if (changed) save().catch(() => {});
+      // Remember which conversation started it, without reassigning a server that is already up.
+      if (proc && data.sessionId && proc.status !== "running") proc.sessionId = data.sessionId;
       const script = proc && proc.source !== "approved";
       const ignored =
         script && proposing
@@ -117,6 +119,8 @@ export async function devServer(ctx) {
             : {}),
         });
       if (script) {
+        // The conversation that asked for the server, so Processes can group it there.
+        if (data.sessionId) proc.sessionId = data.sessionId;
         await devServers.startDevServer(proc, project);
         return json(res, 200, { ...startView(proc), ...ignored });
       }
@@ -189,6 +193,7 @@ export async function devServer(ctx) {
       }
       claimed = true;
       const approved = (await devServers.refreshDevProcess(project)).proc;
+      if (approved && data.sessionId) approved.sessionId = data.sessionId;
       if (!approved || approved.source !== "approved")
         return json(res, 409, {
           error:

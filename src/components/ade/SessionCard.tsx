@@ -24,8 +24,11 @@ export function SessionCard({ session, delay = 0 }: { session: SessionSummary; d
           Open →
         </Link>
       </div>
-      <p className="line-clamp-2 text-[14px] leading-snug" title={session.request}>
-        {sessionTitle(session.request, 140)}
+      <p
+        className="line-clamp-2 text-[14px] leading-snug"
+        title={session.displayRequest ?? session.request}
+      >
+        {sessionTitle(session.displayRequest ?? session.request, 140)}
       </p>
       {session.status === "ready" && session.summary && (
         <p className="mt-2 text-[12px] leading-snug text-dim">{session.summary}</p>

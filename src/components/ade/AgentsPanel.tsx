@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { HarnessDialog } from "@/components/ade/HarnessDialog";
+import { AgentLogo } from "@/components/ade/AgentLogo";
+import { request } from "@/lib/ade/api";
 import { SignInDialog } from "@/components/ade/SignInDialog";
 import type { Agent } from "@/lib/ade/types";
 import { useActiveProject, useAde, useAdeState } from "@/lib/ade/store";
@@ -8,6 +11,11 @@ export function AgentsPanel() {
   const agents = useAdeState((state) => state.agents);
   const project = useActiveProject();
   const [signing, setSigning] = useState<Agent | null>(null);
+  const [harness, setHarness] = useState<{ agentId: string; kind: "install" | "update" } | null>(
+    null,
+  );
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState("");
   return (
     <>
       <div className="px-4 @lg:px-7 pt-6 pb-4 @container">
@@ -17,6 +25,31 @@ export function AgentsPanel() {
           and stays in its user-level credential store. ADE never stores provider tokens. Model
           usage may have provider costs.
         </p>
+        <button
+          type="button"
+          disabled={checking}
+          className="btn-quiet mt-3 px-3 py-1.5 text-[12px] disabled:opacity-50"
+          onClick={() => {
+            setChecking(true);
+            setCheckError("");
+            void request<{ failed: string[] }>("/api/agents/check-updates", "POST")
+              .then(({ failed }) => {
+                if (failed.length)
+                  setCheckError(`Could not check updates for ${failed.join(", ")}. Try again.`);
+              })
+              .catch((error) =>
+                setCheckError(error instanceof Error ? error.message : String(error)),
+              )
+              .finally(() => setChecking(false));
+          }}
+        >
+          {checking ? "Checking…" : "Check for updates"}
+        </button>
+        {checkError && (
+          <p role="alert" className="mt-2 text-[12px] text-danger">
+            {checkError}
+          </p>
+        )}
       </div>
       <div className="space-y-3 px-4 @lg:px-7 pb-8">
         {agents.map((a, i) => (
@@ -26,9 +59,7 @@ export function AgentsPanel() {
             style={{ animationDelay: `${i * 60}ms` }}
           >
             <div className="flex items-start gap-4">
-              <div className="grid size-10 shrink-0 place-items-center rounded-md bg-ink text-sm font-medium text-paper">
-                {a.short.slice(0, 2)}
-              </div>
+              <AgentLogo agent={a} className="size-8" />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <strong className="text-[14px]">{a.name}</strong>
@@ -59,6 +90,33 @@ export function AgentsPanel() {
                 )}
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2">
+                {!a.installed && a.harness && (
+                  <button
+                    type="button"
+                    onClick={() => setHarness({ agentId: a.id, kind: "install" })}
+                    className="btn-quiet px-3 py-1.5 text-[12px]"
+                  >
+                    Install
+                  </button>
+                )}
+                {a.updateAvailable &&
+                  (a.installMethod === "npm" ||
+                    a.installMethod === "brew" ||
+                    a.installMethod === "mise") && (
+                    <button
+                      type="button"
+                      onClick={() => setHarness({ agentId: a.id, kind: "update" })}
+                      className="btn-quiet px-3 py-1.5 text-[12px]"
+                    >
+                      Update{a.latestVersion ? ` to ${a.latestVersion}` : ""}
+                    </button>
+                  )}
+                {a.updateAvailable && a.installMethod === "other" && (
+                  <span className="max-w-40 text-right text-[11px] text-dim">
+                    Update available{a.latestVersion ? `: ${a.latestVersion}` : ""}. Update it where
+                    it was installed.
+                  </span>
+                )}
                 {a.installed && !a.signedIn && (
                   <button
                     onClick={() => setSigning(a)}
@@ -83,14 +141,21 @@ export function AgentsPanel() {
         <div className="card-panel p-4 text-[12px] leading-relaxed text-dim">
           <strong className="text-ink">Sign-in limitations are explicit:</strong> Codex offers a
           browser/device sign-in that ADE can start. OpenCode's interactive provider selector and
-          Pi's `/login` require their own terminal UI; ADE does not fake these flows. Claude Code is
-          deferred.
+          Pi's `/login` require their own terminal UI; ADE does not fake these flows. Claude Code
+          signs in through its own CLI.
         </div>
         <p className="font-mono text-[10px] text-dim">
           Loopback only · No ADE account · No hosted service
         </p>
       </div>
       {signing && <SignInDialog agent={signing} onClose={() => setSigning(null)} />}
+      {harness && (
+        <HarnessDialog
+          agentId={harness.agentId}
+          kind={harness.kind}
+          onClose={() => setHarness(null)}
+        />
+      )}
     </>
   );
 }

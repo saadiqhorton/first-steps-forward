@@ -58,7 +58,11 @@ function fakeHub({ get } = {}) {
 test("status reads stopped, then running once the browser is open, then stopped again", async () => {
   const hub = fakeHub();
   const computers = createComputerManager({ installer: fakeInstaller(), hub });
-  assert.deepEqual(computers.status("p"), { projectId: "p", screen: DEFAULT_VIEWPORT, status: "stopped" });
+  assert.deepEqual(computers.status("p"), {
+    projectId: "p",
+    screen: DEFAULT_VIEWPORT,
+    status: "stopped",
+  });
   await computers.start("p");
   assert.equal(computers.status("p").status, "running");
   await computers.stop("p");

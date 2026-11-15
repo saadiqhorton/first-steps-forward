@@ -61,30 +61,33 @@ export function saveFeedbackDraft(key: string, value: unknown | undefined): Prom
 }
 
 /** Commit related draft changes together, ordered with all writes to either key. */
-export function saveFeedbackDrafts(entries: readonly (readonly [string, unknown | undefined])[]): Promise<void> {
+export function saveFeedbackDrafts(
+  entries: readonly (readonly [string, unknown | undefined])[],
+): Promise<void> {
   const keys = [...new Set(entries.map(([key]) => key))];
-  const previous = [...new Set(keys.map((key) => writes.get(key)).filter((work) => work !== undefined))];
-  const work = Promise.all(previous.map((pending) => pending.catch(() => {})))
-    .then(async () => {
-      const db = await openDatabase();
-      await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction("drafts", "readwrite");
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-        transaction.onabort = () =>
-          reject(transaction.error ?? new Error("Draft storage was interrupted."));
-        try {
-          const store = transaction.objectStore("drafts");
-          for (const [key, value] of entries) {
-            if (value === undefined) store.delete(key);
-            else store.put(value, key);
-          }
-        } catch (error) {
-          transaction.abort();
-          reject(error);
+  const previous = [
+    ...new Set(keys.map((key) => writes.get(key)).filter((work) => work !== undefined)),
+  ];
+  const work = Promise.all(previous.map((pending) => pending.catch(() => {}))).then(async () => {
+    const db = await openDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction("drafts", "readwrite");
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Draft storage was interrupted."));
+      try {
+        const store = transaction.objectStore("drafts");
+        for (const [key, value] of entries) {
+          if (value === undefined) store.delete(key);
+          else store.put(value, key);
         }
-      });
+      } catch (error) {
+        transaction.abort();
+        reject(error);
+      }
     });
+  });
   for (const key of keys) writes.set(key, work);
   void work
     .finally(() => {

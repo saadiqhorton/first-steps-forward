@@ -227,7 +227,7 @@ export async function writeEditorFile(projectPath, relative, content, expectedVe
   return { path: relative, version: versionOf(Buffer.from(content, "utf8")) };
 }
 
-export async function searchEditorFiles(projectPath, query) {
+export async function searchEditorFiles(projectPath, query, { includeFolders = false } = {}) {
   if (typeof query !== "string" || query.length > 120)
     throw new EditorError(400, "Invalid search query.");
   const needle = query.trim().toLowerCase();
@@ -248,8 +248,12 @@ export async function searchEditorFiles(projectPath, query) {
       if (++scanned > SEARCH_SCAN_LIMIT || results.length >= SEARCH_LIMIT) break;
       if (entry.isSymbolicLink()) continue;
       const absolute = path.join(folder, entry.name);
-      if (entry.isDirectory() && !HIDDEN_SCAN_DIRS.has(entry.name)) folders.push(absolute);
-      else if (entry.isFile()) {
+      if (entry.isDirectory() && !HIDDEN_SCAN_DIRS.has(entry.name)) {
+        folders.push(absolute);
+        const relative = toPosix(path.relative(root, absolute));
+        if (includeFolders && relative.toLowerCase().includes(needle))
+          results.push({ name: entry.name, path: relative, kind: "folder" });
+      } else if (entry.isFile()) {
         const relative = toPosix(path.relative(root, absolute));
         if (relative.toLowerCase().includes(needle))
           results.push({ name: entry.name, path: relative, kind: "file" });

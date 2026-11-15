@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Processes Workshop — ADE</title>
+<link rel="stylesheet" href="workshop.css">
+<style>
+  @font-face {
+    font-family: "Geist";
+    src: url("./geist-latin.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "Inter";
+    src: url("./inter-latin.woff2") format("woff2");
+    font-weight: 100 900;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: "IBM Plex Mono";
+    src: url("./ibm-plex-mono-latin.woff2") format("woff2");
+    font-weight: 400;
+    font-display: swap;
+  }
+</style>
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Design workshop · ADE</div>
+    <h1>Processes</h1>
+    <p class="lede">
+      Four directions for the screen that keeps track of what an agent left running: a dev server,
+      a watcher, a long job. Same sample project, same controls, same behaviour — only the shape,
+      the hierarchy and the interaction change.
+    </p>
+    <div class="meta">
+      <span>Source: Enjoy's Previews &amp; processes manual</span>
+      <span>Target: ADE project workspace</span>
+      <span>Sample data only</span>
+    </div>
+  </header>
+
+  <section class="brief" aria-label="Brief">
+    <div>
+      <h3>What Enjoy does</h3>
+      <ul>
+        <li>Processes sit in the project's tab row, second to last, with a count.</li>
+        <li>The list groups rows under the conversation that started them.</li>
+        <li>Rows show a name and a status dot; a web server also shows its address and <b>Open</b>.</li>
+        <li>Selecting one opens details and its output beside the list, never over it.</li>
+        <li>Statuses: Running, Stop requested…, Couldn't stop, Needs checking.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>What carries over</h3>
+      <ul>
+        <li>Search across names, conversations and details.</li>
+        <li>Output follows the newest line until you scroll up; <b>Follow latest</b> catches up.</li>
+        <li><b>Wrap lines</b>, copy address, open in the agent browser.</li>
+        <li>Stop one process, or <b>Stop all processes</b> after a confirmation.</li>
+        <li>Processes disappear when they exit; nothing running says so.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>What ADE can honestly show</h3>
+      <ul>
+        <li>ADE owns one dev server per project today, plus any approved command.</li>
+        <li>Owner, folder, command and address come from the real process record.</li>
+        <li>No invented agents, ports, usage or background jobs in the mock.</li>
+        <li>Every control below is a local simulation and never starts or stops a real server.</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="rec">
+    <div class="eyebrow">Chosen</div>
+    <p>
+      <strong>Option 2, Rail.</strong> Processes becomes a tab in the right pane, beside Activity,
+      Diff, Browser and Terminal. It keeps the conversation and its preview in view, expands a row
+      for its log, and has <strong>Follow latest</strong> when you scroll back. A Processes tab
+      beside Skills is the home for ADE itself in every project; the right-pane tab keeps the agent
+      processes.
+    </p>
+  </div>
+
+  <section id="view-overview">
+    <div class="section-head">
+      <h2>Four directions</h2>
+      <p class="hint">Open any option, then use the number row to compare</p>
+    </div>
+    <div id="overview-grid"></div>
+  </section>
+
+  <section id="view-option" hidden>
+    <nav class="optnav" aria-label="Options">
+      <a class="back" href="#">← All options</a>
+      <div id="opt-jump"></div>
+    </nav>
+
+    <header class="opt-head">
+      <div class="eyebrow" id="opt-eyebrow">Option 1</div>
+      <h2 id="opt-title"></h2>
+      <p id="opt-tradeoff"></p>
+    </header>
+
+    <div class="controls" role="group" aria-label="Workshop controls">
+      <div class="ctl" id="ctl-scenario">
+        <span>Scenario</span>
+        <div class="seg">
+          <button type="button" data-v="mixed">Mixed</button>
+          <button type="button" data-v="checking">2 to check</button>
+          <button type="button" data-v="starting">Starting</button>
+          <button type="button" data-v="failing">Stop fails</button>
+          <button type="button" data-v="empty">Nothing running</button>
+        </div>
+      </div>
+      <div class="ctl" id="ctl-theme">
+        <span>Theme</span>
+        <div class="seg">
+          <button type="button" data-v="light">Light</button>
+          <button type="button" data-v="dark">Dark</button>
+        </div>
+      </div>
+      <div class="ctl" id="ctl-lines">
+        <span>Output</span>
+        <div class="seg">
+          <button type="button" data-v="short">Short</button>
+          <button type="button" data-v="long">Long lines</button>
+        </div>
+      </div>
+      <button type="button" id="ctl-reset">Reset</button>
+      <p class="ctl-hint">
+        <b>Try:</b> select a process, search for “storybook”, scroll the output up and press
+        <b>Follow latest</b>, toggle <b>Wrap lines</b>, then stop something. Scenarios, the
+        selection and every draft reset with <b>Reset</b>.
+      </p>
+    </div>
+
+    <div class="stage-meta">
+      <span id="scale-note">Shown at 100%</span>
+      <span id="readout" role="status" aria-live="polite"></span>
+      <span class="mock-label">Mock workspace · 1280 × 720 · sample data only</span>
+    </div>
+    <div id="stage"><div id="stage-frame"></div></div>
+
+    <div class="split">
+      <div>
+        <h3>How this one behaves</h3>
+        <div class="notes-card"><ul id="opt-notes"></ul></div>
+      </div>
+      <div>
+        <h3>Close up</h3>
+        <div id="closeups"></div>
+      </div>
+    </div>
+
+    <div class="optfoot">
+      <a id="opt-prev" href="#"></a>
+      <a id="opt-next" href="#"></a>
+    </div>
+  </section>
+
+  <footer class="page">
+    <span>ADE · Processes workshop · built from Enjoy's process guides and the ADE source</span>
+    <span>Sample data only — nothing here touches a real project</span>
+  </footer>
+</div>
+
+<script src="workshop.js"></script>
+<script src="options/option-1.js"></script>
+<script src="options/option-2.js"></script>
+<script src="options/option-3.js"></script>
+<script src="options/option-4.js"></script>
+<script>WS.start();</script>
+</body>
+</html>

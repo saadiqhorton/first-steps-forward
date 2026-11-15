@@ -36,8 +36,9 @@ export function readLastModel(agentId: AgentId): string | null {
 /** Remember the model used with this agent/provider. */
 export function writeLastModel(agentId: AgentId, model: string) {
   const trimmed = model.trim();
-  if (!trimmed) return;
-  const next = { ...readMap(), [agentId]: trimmed };
+  const next = readMap();
+  if (trimmed) next[agentId] = trimmed;
+  else delete next[agentId];
   writeMap(next);
 }
 

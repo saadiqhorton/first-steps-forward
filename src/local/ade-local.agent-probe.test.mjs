@@ -55,10 +55,11 @@ process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
 const { handle, start } = await import("./ade-local.mjs");
 const { callApi } = await import("./api-request.test-helper.mjs");
 await start();
-const call = async (urlPath) => {
+const call = async (urlPath, method = "GET") => {
   const res = await callApi(handle, {
     url: `http://127.0.0.1:3000${urlPath}`,
     remoteAddress: "::ffff:127.0.0.1",
+    method,
   });
   return { status: res.status, json: await res.json() };
 };
@@ -145,3 +146,26 @@ test("a latest-version check does not move the cache's fetchedAt", { skip }, asy
   await waitFor(() => withLatest() === 3, "this probe's latest-version checks");
   assert.equal(cache().fetchedAt, probedAt, "a later write must not push the next probe back");
 });
+
+test(
+  "manual update check bypasses cached registry results and waits behind an overlapping probe",
+  { skip },
+  async () => {
+    const before = invocations().filter((line) => line.startsWith("npm view ")).length;
+    const [normal, manual] = await Promise.all([
+      call("/api/agents"),
+      call("/api/agents/check-updates", "POST"),
+    ]);
+    assert.equal(normal.status, 200);
+    assert.equal(manual.status, 200);
+    assert.deepEqual(manual.json.failed, []);
+    const after = invocations().filter((line) => line.startsWith("npm view ")).length;
+    assert.ok(after >= before + 3, "manual check must reach the registry for each eligible agent");
+    const state = (await call("/api/bootstrap")).json;
+    for (const id of ["codex", "opencode", "pi"]) {
+      const agent = state.agents.find((row) => row.id === id);
+      assert.equal(agent.latestVersion, "9.9.9");
+      assert.equal(agent.updateAvailable, true);
+    }
+  },
+);

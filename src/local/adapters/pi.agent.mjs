@@ -59,7 +59,11 @@ export const pi = defineCliAgent({
   harness: {
     pkg: "@earendil-works/pi-coding-agent",
     install: ["npm", ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"]],
-    update: ["pi", ["update", "--self"]],
+    update: [
+      "npm",
+      ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent@latest"],
+    ],
+    brews: [{ kind: "formula", name: "pi-coding-agent" }],
   },
   permissionNotes: {
     build: "Pi tools: read, edit, write, grep, find, ls (no shell).",

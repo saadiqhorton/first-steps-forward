@@ -32,7 +32,7 @@ const FILTER_CONTROL =
   "w-full [&>div]:gap-0! [&>div]:p-0.5! [&_button]:min-h-7! [&_button]:grow! [&_button]:px-1! [&_button]:text-xs! [&_button>span]:gap-1!";
 
 function titleOf(session: SessionSummary): string {
-  const request = session.request?.trim() ?? "";
+  const request = (session.displayRequest ?? session.request)?.trim() ?? "";
   const summary = session.summary?.trim() ?? "";
   if (request) return sessionTitle(request);
   return summary || "Untitled";
@@ -188,7 +188,7 @@ export function ConversationList() {
                     <div className="min-w-0 flex-1">
                       <p
                         className="line-clamp-1 text-[13px] leading-5 text-ink"
-                        title={session.request}
+                        title={session.displayRequest ?? session.request}
                       >
                         {titleOf(session)}
                       </p>

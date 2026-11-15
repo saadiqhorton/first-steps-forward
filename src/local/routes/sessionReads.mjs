@@ -2,6 +2,7 @@ import { getDiff, projectInfo } from "../project-git.mjs";
 import { MODEL_ID } from "../models.mjs";
 import { resolveAttachments } from "../attachments.mjs";
 import { body } from "../http.mjs";
+import { readMessagePresentation } from "../message-presentation.mjs";
 
 /** `/api/sessions`: search, read one session, and start a new one. */
 export async function sessionReads(ctx) {
@@ -71,6 +72,12 @@ export async function sessionReads(ctx) {
         error: `${agent.name} must be installed and authenticated using its supported sign-in flow first.`,
       });
     const request = String(data.request ?? "").trim();
+    let presentation;
+    try {
+      presentation = readMessagePresentation(data.presentation);
+    } catch {
+      return json(res, 400, { error: "Invalid message presentation." });
+    }
     if (request.length < 4)
       return json(res, 400, { error: "Describe the task in at least four characters." });
     if (UNSUPPORTED_RISK.test(`${request} ${data.criteria ?? ""}`))
@@ -105,6 +112,16 @@ export async function sessionReads(ctx) {
       request,
       criteria: String(data.criteria ?? ""),
       text,
+      ...(presentation
+        ? {
+            presentation: {
+              ...presentation,
+              text:
+                presentation.text +
+                (data.criteria ? `\n\nAcceptance criteria: ${data.criteria}` : ""),
+            },
+          }
+        : {}),
       files,
       model: model || undefined,
       options: optionCheck.value,

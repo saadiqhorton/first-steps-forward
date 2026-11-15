@@ -1,5 +1,1 @@
-export {
-  browserScope,
-  browserScopeParts,
-  sessionPairKey,
-} from "../shared/session-scope.mjs";
+export { browserScope, browserScopeParts, sessionPairKey } from "../shared/session-scope.mjs";

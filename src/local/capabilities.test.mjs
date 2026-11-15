@@ -14,7 +14,7 @@ test("PERMISSIONS and OPTION_VALUE are fixed shapes", () => {
   assert.ok(!OPTION_VALUE.test(""));
 });
 
-test("optionCapabilities lists efforts/speeds from the model and always offers permissions", () => {
+test("optionCapabilities lists model options and the agent's own permission modes", () => {
   const codexModel = {
     id: "gpt-6-astra",
     efforts: ["low", "medium", "high"],
@@ -24,10 +24,11 @@ test("optionCapabilities lists efforts/speeds from the model and always offers p
   const codex = optionCapabilities(adapters.codex, codexModel);
   assert.deepEqual(codex.efforts, ["low", "medium", "high"]);
   assert.deepEqual(codex.speeds, ["fast"]);
-  assert.deepEqual(codex.permissions, ["build", "plan"]);
+  assert.deepEqual(codex.permissions, ["plan", "build", "approve", "full"]);
+  assert.equal(codex.permissionLabels.plan, "Read-only");
   assert.equal(
     codex.permissionNotes.build,
-    "Codex workspace-write sandbox: can edit files in this project.",
+    "Codex workspace-write sandbox; approval requests follow Codex's non-interactive policy.",
   );
   assert.equal(
     codex.permissionNotes.plan,
@@ -70,6 +71,13 @@ test("optionCapabilities lists efforts/speeds from the model and always offers p
   assert.deepEqual(pi.speeds, []);
   assert.equal(pi.permissionNotes.build, "Pi tools: read, edit, write, grep, find, ls (no shell).");
   assert.equal(pi.permissionNotes.plan, "Pi read-only tools: read, grep, find, ls.");
+
+  const claude = optionCapabilities(adapters.claude);
+  assert.deepEqual(claude.permissions, ["manual", "build", "plan", "auto", "dont-ask", "bypass"]);
+  assert.equal(claude.permissionLabels.build, "Accept edits");
+  assert.equal(claude.permissionLabels["dont-ask"], "Don't ask");
+  assert.equal(claude.permissionLabels.bypass, "Bypass permissions");
+  assert.match(claude.permissionNotes.auto, /automatically/);
 });
 
 test("validateOptions accepts listed values and rejects unknown, flag-like, and unsupported ones", () => {
@@ -83,6 +91,14 @@ test("validateOptions accepts listed values and rejects unknown, flag-like, and 
     },
   );
   assert.deepEqual(validateOptions(adapters.codex, {}, model), { ok: true, value: {} });
+  for (const permission of ["manual", "build", "plan", "auto", "dont-ask", "bypass"]) {
+    assert.deepEqual(validateOptions(adapters.claude, { permission }), {
+      ok: true,
+      value: { permission },
+    });
+  }
+  assert.equal(validateOptions(adapters.codex, { permission: "manual" }).ok, false);
+  assert.equal(validateOptions(adapters.opencode, { permission: "auto" }).ok, false);
 
   const unknownEffort = validateOptions(adapters.codex, { effort: "ultra" }, model);
   assert.equal(unknownEffort.ok, false);

@@ -139,7 +139,8 @@ export const opencode = defineCliAgent({
   harness: {
     pkg: "opencode-ai",
     install: ["npm", ["install", "-g", "opencode-ai"]],
-    update: ["opencode", ["upgrade", "--method", "npm"]],
+    update: ["npm", ["install", "-g", "opencode-ai@latest"]],
+    brews: [{ kind: "formula", name: "opencode" }],
   },
   permissionNotes: {
     build: "Make changes using your configured OpenCode permissions.",
@@ -240,6 +241,7 @@ export const opencode = defineCliAgent({
     continuing,
     model,
     effort,
+    version,
     permission,
     attachments,
     computer,
@@ -258,8 +260,10 @@ export const opencode = defineCliAgent({
         // prompt. The project is selected by the process working directory,
         // which ADE sets when it spawns the CLI.
         // `-m provider/model` also works with `--session` continuation.
-        ...(model ? ["-m", model] : []),
-        ...(effort ? ["--variant", effort] : []),
+        ...(model
+          ? ["-m", effort && Number.parseInt(version, 10) >= 2 ? `${model}#${effort}` : model]
+          : []),
+        ...(effort && !(Number.parseInt(version, 10) >= 2) ? ["--variant", effort] : []),
         // Build is OpenCode's default primary agent; only pass --agent for plan.
         ...(permission === "plan" ? ["--agent", "plan"] : []),
         ...(continuing && session.agentSessionId ? ["--session", session.agentSessionId] : []),

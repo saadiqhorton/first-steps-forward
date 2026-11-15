@@ -108,16 +108,24 @@ test("visible mode requires an explicitly selected full browser and does not dow
   baseDirs.push(baseDir);
   const executable = path.join(baseDir, "chromium");
   writeFileSync(executable, "#!/bin/sh\n", { mode: 0o755 });
-  const make = (chosen) => createBrowserInstaller({
-    baseDir,
-    env: { ADE_BROWSER_HEADED: "1", ADE_BROWSER_EXECUTABLE: chosen },
-    fetchImpl: () => { throw new Error("must not download"); },
-  });
+  const make = (chosen) =>
+    createBrowserInstaller({
+      baseDir,
+      env: { ADE_BROWSER_HEADED: "1", ADE_BROWSER_EXECUTABLE: chosen },
+      fetchImpl: () => {
+        throw new Error("must not download");
+      },
+    });
   const good = make(executable);
   assert.equal(await good.executable(), executable);
   assert.equal(await good.installed(), executable);
   assert.equal(good.status().state, "installed");
-  for (const chosen of ["", "chromium", path.join(baseDir, "missing"), path.join(baseDir, "chrome-headless-shell")]) {
+  for (const chosen of [
+    "",
+    "chromium",
+    path.join(baseDir, "missing"),
+    path.join(baseDir, "chrome-headless-shell"),
+  ]) {
     const installer = make(chosen);
     await assert.rejects(installer.executable(), { code: "browser_unsupported" });
     assert.equal(await installer.installed(), null);

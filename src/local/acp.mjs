@@ -246,7 +246,7 @@ function watchExit(child, rpc, name, unfinished) {
 }
 
 /** The initialize handshake; resolves with the agent's capabilities. */
-async function initialize(call, name, clientVersion) {
+async function initialize(call, name, clientVersion, acpAuth) {
   const init = await call("initialize", {
     protocolVersion: ACP_PROTOCOL_VERSION,
     clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
@@ -256,6 +256,13 @@ async function initialize(call, name, clientVersion) {
     throw new AcpError(
       `${name} speaks ACP protocol version ${init?.protocolVersion ?? "(none)"}; ADE supports version ${ACP_PROTOCOL_VERSION}.`,
     );
+  if (acpAuth) {
+    const offered = new Set((init.authMethods ?? []).map((method) => method?.id));
+    const methodId = acpAuth.methods.find((method) => offered.has(method));
+    if (!methodId)
+      throw new AcpError(acpAuth.missingMessage ?? `${name} needs authentication.`, AUTH_REQUIRED);
+    await call("authenticate", { methodId, ...(acpAuth.meta ? { _meta: acpAuth.meta } : {}) });
+  }
   return init.agentCapabilities ?? {};
 }
 
@@ -263,6 +270,24 @@ const modelOptionOf = (opened) =>
   (opened?.configOptions ?? []).find(
     (option) => option?.category === "model" && option.type === "select",
   );
+const effortOptionOf = (opened) =>
+  (opened?.configOptions ?? []).find(
+    (option) => option?.category === "thought_level" && option.type === "select",
+  );
+
+function effortFields(opened) {
+  const option = effortOptionOf(opened);
+  if (!option) return { efforts: [] };
+  const efforts = selectValues(option)
+    .map((entry) => entry.value)
+    .filter((id) => id !== "default");
+  return {
+    efforts,
+    ...(option.currentValue && option.currentValue !== "default"
+      ? { defaultEffort: option.currentValue }
+      : {}),
+  };
+}
 
 /** Picker rows for a model option's values. */
 const modelRows = (values) =>
@@ -272,13 +297,34 @@ const modelRows = (values) =>
     ...(entry.description ? { meta: clip(entry.description, 120) } : {}),
   }));
 
+// Some agents still use ACP's earlier SessionModelState and set_model API.
+// Only use it when the session actually advertises that model list.
+function legacyModelRows(opened) {
+  const entries = opened?.models?.availableModels;
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .filter((entry) => typeof entry?.modelId === "string")
+    .map((entry) => {
+      const efforts = (entry._meta?.reasoningEfforts ?? [])
+        .map((effort) => effort?.value ?? effort?.id)
+        .filter((effort) => typeof effort === "string" && effort);
+      const defaultEffort = entry._meta?.reasoningEfforts?.find((effort) => effort?.default);
+      return {
+        id: entry.modelId,
+        ...(entry.name && entry.name !== entry.modelId ? { label: clip(entry.name, 80) } : {}),
+        ...(efforts.length ? { efforts } : {}),
+        ...(defaultEffort ? { defaultEffort: defaultEffort.value ?? defaultEffort.id } : {}),
+      };
+    });
+}
+
 /**
  * The models an ACP agent offers, read from a session it opens but is never
  * prompted in (ACP has no listing method). Resolves with [] when it offers no
  * model choice. The caller owns the process, as for runAcpTurn.
- * @param {{ child: any, name: string, cwd: string, sessionMeta?: object, clientVersion?: string }} options
+ * @param {{ child: any, name: string, cwd: string, sessionMeta?: object, clientVersion?: string, acpAuth?: {methods: string[], meta?: object, missingMessage?: string} }} options
  */
-export async function listAcpModels({ child, name, cwd, sessionMeta, clientVersion }) {
+export async function listAcpModels({ child, name, cwd, sessionMeta, clientVersion, acpAuth }) {
   const rpc = createRpc(child.stdout, child.stdin, {
     onRequest(method) {
       throw new AcpError(`ADE does not implement ${method}.`, METHOD_NOT_FOUND);
@@ -286,13 +332,33 @@ export async function listAcpModels({ child, name, cwd, sessionMeta, clientVersi
   });
   watchExit(child, rpc, name, "before reporting its models.");
   const call = authAware(rpc);
-  await initialize(call, name, clientVersion);
+  await initialize(call, name, clientVersion, acpAuth);
   const opened = await call("session/new", {
     cwd,
     mcpServers: [],
     ...(sessionMeta ? { _meta: sessionMeta } : {}),
   });
-  return modelRows(selectValues(modelOptionOf(opened)));
+  const modelOption = modelOptionOf(opened);
+  if (!modelOption) return legacyModelRows(opened);
+  const rows = modelRows(selectValues(modelOption));
+  for (const row of rows) {
+    if (row.id === modelOption.currentValue) {
+      Object.assign(row, effortFields(opened));
+      continue;
+    }
+    try {
+      const changed = await call("session/set_config_option", {
+        sessionId: opened.sessionId,
+        configId: modelOption.id,
+        value: row.id,
+      });
+      if (Array.isArray(changed?.configOptions)) Object.assign(row, effortFields(changed));
+    } catch {
+      // Some offered models cannot be selected on this account. Keep their
+      // model rows, but never invent their effort choices.
+    }
+  }
+  return rows;
 }
 
 const PLAN_VERBS = {
@@ -317,8 +383,11 @@ const PLAN_VERBS = {
  *   resumeId?: string,
  *   permission?: string,
  *   modes?: Record<string, string[]>,
+ *   unadvertisedModes?: boolean,
  *   model?: string,
  *   defaultModel?: string,
+ *   effort?: string,
+ *   acpAuth?: { methods: string[], meta?: object, missingMessage?: string },
  *   mcpServers?: object[],
  *   sessionMeta?: object,
  *   clientVersion?: string,
@@ -535,6 +604,20 @@ export async function runAcpTurn(options) {
       );
       return reject ? { outcome: "selected", optionId: reject.optionId } : { outcome: "cancelled" };
     }
+    // "Don't ask" means ADE answers every request itself instead of showing
+    // it: anything that would prompt is declined, matching Claude's dontAsk.
+    if (options.permission === "dont-ask") {
+      const reject =
+        choices.find((choice) => choice.kind === "reject_once") ??
+        choices.find((choice) => choice.kind === "reject_always");
+      on.log(JSON.stringify({ type: "permission", decision: "declined", title: request.title }));
+      on.notice(
+        request.kind === "switch_mode"
+          ? `${name} asked to leave the current mode. ADE declined because this session is set to Don't ask.`
+          : `${name} asked to ${PLAN_VERBS[request.kind] ?? "make a change"} (${request.title}). ADE declined because this session is set to Don't ask.`,
+      );
+      return reject ? { outcome: "selected", optionId: reject.optionId } : { outcome: "cancelled" };
+    }
     flush();
     lastRun = "";
     const answer = await on.permission({ ...request, options: choices });
@@ -570,7 +653,7 @@ export async function runAcpTurn(options) {
   });
   watchExit(child, rpc, name, "before finishing the turn. See Logs for its output.");
   const call = authAware(rpc);
-  const caps = await initialize(call, name, options.clientVersion);
+  const caps = await initialize(call, name, options.clientVersion, options.acpAuth);
   const setup = {
     cwd: options.cwd,
     mcpServers: options.mcpServers ?? [],
@@ -615,20 +698,29 @@ export async function runAcpTurn(options) {
 
   const wanted = options.modes?.[options.permission ?? "build"] ?? [];
   const available = (opened?.modes?.availableModes ?? []).map((mode) => mode?.id);
-  const mode = wanted.find((id) => available.includes(id));
-  if (mode && opened.modes.currentModeId !== mode)
+  const mode =
+    wanted.find((id) => available.includes(id)) ??
+    (options.unadvertisedModes ? wanted[0] : undefined);
+  if (mode && opened.modes?.currentModeId !== mode)
     await call("session/set_mode", { sessionId, modeId: mode });
   else if (!mode && options.permission === "plan")
     on.log(`${name} offers no plan mode; ADE declines edit and command requests itself.`);
+  else if (!mode && wanted.length)
+    throw new AcpError(
+      `${name} does not currently offer the selected permission mode "${options.permission}".`,
+    );
 
   const modelOption = modelOptionOf(opened);
-  const models = selectValues(modelOption);
-  if (models.length) on.models?.(modelRows(models));
+  const legacyRows = !modelOption ? legacyModelRows(opened) : [];
+  const models = modelOption
+    ? selectValues(modelOption)
+    : legacyRows.map((row) => ({ value: row.id, name: row.label }));
+  if (models.length) on.models?.(modelOption ? modelRows(models) : legacyRows);
   // A fresh conversation reports the model it starts on: the agent's own
   // configured default. A resumed one keeps whatever model it last ran, so
   // "no model chosen" restores that recorded default instead.
-  if (fresh && typeof modelOption?.currentValue === "string")
-    on.defaultModel?.(modelOption.currentValue);
+  const currentModel = modelOption?.currentValue ?? opened?.models?.currentModelId;
+  if (fresh && typeof currentModel === "string") on.defaultModel?.(currentModel);
   if (options.model && !models.some((entry) => entry.value === options.model))
     throw new AcpError(
       models.length
@@ -640,12 +732,43 @@ export async function runAcpTurn(options) {
     (!fresh && models.some((entry) => entry.value === options.defaultModel)
       ? options.defaultModel
       : undefined);
-  if (targetModel && modelOption.currentValue !== targetModel)
-    await call("session/set_config_option", {
+  let currentOptions = opened;
+  if (modelOption && targetModel && modelOption.currentValue !== targetModel) {
+    const changed = await call("session/set_config_option", {
       sessionId,
       configId: modelOption.id,
       value: targetModel,
     });
+    if (Array.isArray(changed?.configOptions)) currentOptions = changed;
+  }
+  const effortOption = effortOptionOf(currentOptions);
+  const effortValues = selectValues(effortOption).map((entry) => entry.value);
+  const legacyModel = legacyRows.find((row) => row.id === (targetModel ?? currentModel));
+  const allowedEfforts = modelOption ? effortValues : (legacyModel?.efforts ?? []);
+  if (options.effort && !allowedEfforts.includes(options.effort))
+    throw new AcpError(
+      `The selected effort "${options.effort}" is not available for this model in ${name}.`,
+    );
+  // Restore the bridge's default on resume when it explicitly exposes one.
+  const targetEffort = options.effort || (effortValues.includes("default") ? "default" : undefined);
+  if (modelOption && targetEffort && effortOption.currentValue !== targetEffort)
+    await call("session/set_config_option", {
+      sessionId,
+      configId: effortOption.id,
+      value: targetEffort,
+    });
+
+  if (!modelOption && ((targetModel && currentModel !== targetModel) || options.effort)) {
+    const changed = await call("session/set_model", {
+      sessionId,
+      modelId: targetModel ?? currentModel,
+      ...(options.effort ? { _meta: { reasoningEffort: options.effort } } : {}),
+    });
+    if (changed?._meta?.model?.Err)
+      throw new AcpError(
+        `${name} rejected the selected model or effort: ${String(changed._meta.model.Err)}`,
+      );
+  }
 
   const prompt = [{ type: "text", text: options.prompt }];
   if (caps.promptCapabilities?.image)

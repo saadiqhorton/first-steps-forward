@@ -95,8 +95,10 @@ import { findOnPath, runCommand, spawnCommand, stopProcess } from "../spawn.mjs"
  * @property {{ note: string, command?: string, device?: [string, string[]], waiting?: string }} signIn
  *   how the user signs in: a `command` to run in a terminal, or a `device`
  *   flow ADE starts itself (showing `waiting` while it runs)
- * @property {{ pkg: string, install: [string, string[]], update: [string, string[]], selfUpdates?: boolean }} harness
- *   how ADE installs and updates the CLI; `selfUpdates` when it updates itself
+ * @property {{ pkg: string, install: [string, string[]], update: [string, string[]], selfUpdates?: boolean, brews?: { kind: "formula" | "cask", name: string }[] }} harness
+ *   how ADE installs and updates the CLI; `selfUpdates` when it updates itself;
+ *   `brews` lists the Homebrew formula/cask identities that install this binary,
+ *   so a Homebrew-owned executable is updated by `brew upgrade` instead of npm
  * @property {{ build: string, plan: string }} permissionNotes what Build and Plan mean for this agent
  * @property {{ effort?: string, speed?: string }} [notes] caveats shown beside effort and speed
  *
@@ -249,14 +251,17 @@ export async function acpLaunch(spec, { dataDir, onInstall }) {
  * - `modes`: ADE permission → the agent's mode ids, first one offered wins.
  * - `bridge` (optional): an npm package that adapts the user's CLI to ACP.
  * - `wireComputer(computer)` (optional): spawn extras (`mcpServers`, …) for the turn.
- * - `sessionMeta({ computer, ephemeral })` (optional): `_meta` for session/new.
- * @template {{ id: string, name: string, bin: string, installHint: string, modes: { build: string[], plan: string[] }, command: (launch: any) => any[], bridge?: { pkg: string, version: string, bin: string, entry: string }, wireComputer?: (computer: ComputerContext | null) => ComputerWiring, sessionMeta?: (options: { computer: boolean, ephemeral?: boolean }) => object }} T
+ * - `sessionMeta({ computer, permission, ephemeral })` (optional): `_meta` for session/new.
+ * @template {{ id: string, name: string, bin: string, installHint: string, modes: { build: string[], plan: string[] }, command: (launch: any) => any[], bridge?: { pkg: string, version: string, bin: string, entry: string }, acpAuth?: () => {methods: string[], meta?: object, missingMessage?: string}, wireComputer?: (computer: ComputerContext | null) => ComputerWiring, sessionMeta?: (options: { computer: boolean, permission?: string, ephemeral?: boolean }) => object }} T
  * @param {T} spec
  */
 export function defineAcpAgent(spec) {
   /** The agent's models, from a session it opens and is never prompted in. */
   async function probeModels(dataDir) {
-    const [bin, args, env = {}] = spec.command(await acpLaunch(spec, { dataDir }));
+    const [bin, args, env = {}] = spec.command({
+      ...(await acpLaunch(spec, { dataDir })),
+      ephemeral: true,
+    });
     await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
     const child = spawnCommand(bin, args, {
       cwd: dataDir,
@@ -271,6 +276,7 @@ export function defineAcpAgent(spec) {
         name: spec.name,
         cwd: dataDir,
         sessionMeta: spec.sessionMeta?.({ computer: false, ephemeral: true }),
+        acpAuth: spec.acpAuth?.(),
       });
     } finally {
       clearTimeout(timer);
@@ -324,10 +330,13 @@ export function defineAcpAgent(spec) {
           resumeId: input.continuing ? input.session.agentSessionId : undefined,
           permission: input.permission ?? "build",
           modes: spec.modes,
+          unadvertisedModes: /** @type {any} */ (spec).unadvertisedModes,
           model: input.model,
           defaultModel: input.defaultModel,
+          effort: input.effort,
+          acpAuth: spec.acpAuth?.(),
           mcpServers: spec.wireComputer?.(input.computer)?.mcpServers ?? [],
-          sessionMeta: spec.sessionMeta?.({ computer: !!input.computer }),
+          sessionMeta: spec.sessionMeta?.({ computer: !!input.computer, permission: input.permission }),
           on: {
             sessionId: (id) => io.emit({ type: "conversation", id }),
             defaultModel: (id) => io.emit({ type: "default-model", id }),
@@ -335,7 +344,9 @@ export function defineAcpAgent(spec) {
             log: (line) => io.emit({ type: "log", line }),
             notice: (text) => io.emit({ type: "notice", text }),
             models: (models) =>
-              void rememberAcpModels(input.dataDir, spec.id, input.version, models),
+              void rememberAcpModels(input.dataDir, spec.id, input.version, models, {
+                complete: false,
+              }),
             permission: (request) => io.ask(request),
           },
         });

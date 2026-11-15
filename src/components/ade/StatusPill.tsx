@@ -36,7 +36,3 @@ export function StatusPill({
     </span>
   );
 }
-
-export function statusLabel(s: SessionStatus) {
-  return MAP[s].label;
-}

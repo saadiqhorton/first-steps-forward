@@ -121,7 +121,8 @@ test("agent tool scripts resolve from ADE's own files, whatever the working dire
   const before = process.cwd();
   process.chdir(home);
   try {
-    const { computerMcpScript, computerPiExtension } = await import("./adapters/computer-tools.mjs");
+    const { computerMcpScript, computerPiExtension } =
+      await import("./adapters/computer-tools.mjs");
     const mcpScript = computerMcpScript();
     const piExtension = computerPiExtension();
     assert.ok(existsSync(mcpScript), mcpScript);

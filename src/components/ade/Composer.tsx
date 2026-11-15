@@ -10,16 +10,27 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp, GitBranch, Workflow as WorkflowIcon, X } from "lucide-react";
+import { ArrowUp, AtSign, GitBranch } from "lucide-react";
 import { AgentPicker, agentChipLabel, type AgentSelection } from "@/components/ade/AgentPicker";
 import { useAdeState } from "@/lib/ade/store";
-import type { Workflow } from "@/lib/ade/types";
+import type { ContextReference, MessagePresentation, Workflow } from "@/lib/ade/types";
+import { ContextPills } from "@/components/ade/ContextPills";
 import {
   ComposerAttachButton,
   ComposerAttachments,
   type AttachmentDraft,
 } from "@/components/ade/ComposerAttachments";
 import { warnUser } from "@/lib/ade/userNotices";
+import {
+  ComposerSuggestions,
+  useComposerSuggestions,
+  type Suggestion,
+} from "./ComposerSuggestions";
+import {
+  composerTrigger,
+  replaceComposerTrigger,
+  type ComposerTrigger,
+} from "./composerSuggestions.mjs";
 import {
   isBrowserRecording,
   ensureBrowserFeedbackLoaded,
@@ -36,14 +47,17 @@ import {
   persistFeedbackFile,
   restoreFeedbackFile,
 } from "@/lib/ade/browser/feedbackPersistence";
-const PICKER_MAX_WIDTH = 960;
+const PICKER_MAX_WIDTH = 1080;
 const PICKER_EDGE = 16;
 const PICKER_GAP = 8;
 const MAX_FILES = 8;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TURN_BYTES = 20 * 1024 * 1024;
+const toolButtonClass =
+  "grid size-9 shrink-0 place-items-center rounded-lg bg-transparent text-dim transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/50 disabled:opacity-50 motion-reduce:transition-none";
 
-type PickerBox = { left: number; bottom: number; width: number };
+type PickerBox = { left: number; bottom: number; width: number; maxHeight: number };
+type ContextItem = ContextReference & { prompt?: string };
 
 function draftKey(file: File, index: number) {
   const suffix =
@@ -52,6 +66,7 @@ function draftKey(file: File, index: number) {
 }
 
 export function Composer({
+  projectId,
   mode,
   selection,
   onSelectionChange,
@@ -67,9 +82,11 @@ export function Composer({
   running = false,
   workflow,
   onWorkflowRemove,
+  onWorkflowSelect,
   sessionId,
   draftStorageKey,
 }: {
+  projectId?: string;
   mode: "new" | "follow-up";
   selection: AgentSelection;
   onSelectionChange: (s: AgentSelection) => void;
@@ -78,7 +95,12 @@ export function Composer({
   placeholder: string;
   sending: boolean;
   error?: string | null;
-  onSend: (text: string, files: File[], delivery?: "now" | "later") => Promise<boolean>;
+  onSend: (
+    text: string,
+    files: File[],
+    delivery?: "now" | "later",
+    presentation?: MessagePresentation,
+  ) => Promise<boolean>;
   initialText?: string;
   extra?: ReactNode;
   agentLocked?: string;
@@ -87,11 +109,13 @@ export function Composer({
   /** A selected workflow renders as a token; its prompt is sent with the draft. */
   workflow?: Workflow | null;
   onWorkflowRemove?: () => void;
+  onWorkflowSelect?: (workflow: Workflow) => void;
   sessionId?: string;
   draftStorageKey?: string;
 }) {
   const agents = useAdeState((state) => state.agents);
   const [text, setText] = useState(initialText ?? "");
+  const [contextItems, setContextItems] = useState<ContextItem[]>([]);
   const [drafts, setDrafts] = useState<AttachmentDraft[]>([]);
   const [draftReady, setDraftReady] = useState(!draftStorageKey);
   const draftStorageWarning = useRef(false);
@@ -106,6 +130,9 @@ export function Composer({
   draftsRef.current = drafts;
   const [pickerOpen, setPickerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [trigger, setTrigger] = useState<ComposerTrigger | null>(null);
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
+  const suggestions = useComposerSuggestions(projectId, trigger);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pickerBox, setPickerBox] = useState<PickerBox | null>(null);
   const pickerWrapRef = useRef<HTMLDivElement>(null);
@@ -114,8 +141,23 @@ export function Composer({
   const chip = agentChipLabel(selection, agents);
   const labelId = useId();
   const disabled = !!disabledReason || sending || !draftReady;
-  const workflowPrompt = workflow?.prompt.trim() ?? "";
-  const canSend = (!!text.trim() || !!workflowPrompt) && !disabled;
+  const workflowPrompt =
+    workflow?.prompt.trim() ??
+    contextItems.find((item) => item.kind === "workflow")?.prompt?.trim() ??
+    "";
+  const selectedItems: ContextItem[] = [
+    ...(workflow
+      ? [
+          {
+            kind: "workflow" as const,
+            label: workflow.name,
+            detail: workflow.description || workflow.name,
+          },
+        ]
+      : []),
+    ...contextItems,
+  ];
+  const canSend = (!!text.trim() || !!workflowPrompt || contextItems.length > 0) && !disabled;
 
   useEffect(() => {
     if (!draftStorageKey) return;
@@ -128,13 +170,26 @@ export function Composer({
         "Draft storage is unavailable. Your current message remains in the composer, but may not survive a reload.",
       );
     };
-    void loadFeedbackDraft<{ text: string; files: ReturnType<typeof persistFeedbackFile>[] }>(
-      `composer:${draftStorageKey}`,
-    )
+    void loadFeedbackDraft<{
+      text: string;
+      files: ReturnType<typeof persistFeedbackFile>[];
+      contextItems?: ContextItem[];
+    }>(`composer:${draftStorageKey}`)
       .then((saved) => {
         if (!active || !saved) return;
         const restored = saved.files.map(restoreFeedbackFile);
         setText(saved.text);
+        if (Array.isArray(saved.contextItems))
+          setContextItems(
+            saved.contextItems.filter(
+              (item) =>
+                item &&
+                ["workflow", "skill", "file", "folder"].includes(item.kind) &&
+                typeof item.label === "string" &&
+                typeof item.detail === "string" &&
+                (item.prompt === undefined || typeof item.prompt === "string"),
+            ),
+          );
         setDrafts(
           restored.map((file, index) => ({
             key: draftKey(file, index),
@@ -155,8 +210,8 @@ export function Composer({
   useEffect(() => {
     if (!draftStorageKey || !draftReady || draftRestoreFailed.current) return;
     const value =
-      text || drafts.length
-        ? { text, files: drafts.map(({ file }) => persistFeedbackFile(file)) }
+      text || drafts.length || contextItems.length
+        ? { text, files: drafts.map(({ file }) => persistFeedbackFile(file)), contextItems }
         : undefined;
     const transfer = feedbackTransfer.current;
     void saveComposerDraft(draftStorageKey, value)
@@ -176,7 +231,7 @@ export function Composer({
           "Draft storage is unavailable. Your current message remains in the composer, but may not survive a reload.",
         );
       });
-  }, [draftStorageKey, draftReady, text, drafts]);
+  }, [draftStorageKey, draftReady, text, drafts, contextItems]);
 
   useEffect(
     () => () => {
@@ -234,7 +289,12 @@ export function Composer({
       const width = Math.min(PICKER_MAX_WIDTH, viewport - PICKER_EDGE * 2);
       const centered = rect.left + rect.width / 2 - width / 2;
       const left = Math.min(Math.max(centered, PICKER_EDGE), viewport - PICKER_EDGE - width);
-      setPickerBox({ left, width, bottom: window.innerHeight - rect.top + PICKER_GAP });
+      setPickerBox({
+        left,
+        width,
+        bottom: window.innerHeight - rect.top + PICKER_GAP,
+        maxHeight: Math.max(80, rect.top - PICKER_GAP - PICKER_EDGE),
+      });
     };
     place();
     window.addEventListener("resize", place);
@@ -389,12 +449,29 @@ export function Composer({
   };
 
   const send = async (delivery?: "now" | "later") => {
-    const outgoing = [workflowPrompt, text.trim()].filter(Boolean).join("\n\n");
+    const references = contextItems.filter((item) => item.kind !== "workflow");
+    const context = references.length
+      ? `Selected context:\n${references.map((item) => (item.kind === "skill" ? `- Use the ${JSON.stringify(item.label)} skill: read and follow ${JSON.stringify(item.detail)}.` : `- Project ${item.kind}: ${JSON.stringify(item.detail)}`)).join("\n")}`
+      : "";
+    const outgoing = [workflowPrompt, text.trim(), context].filter(Boolean).join("\n\n");
     if (!outgoing || disabled) return;
     const files = drafts.map((d) => d.file);
-    const clear = await onSend(outgoing, files, running ? (delivery ?? "later") : undefined);
+    const presentation = selectedItems.length
+      ? {
+          text: text.trim(),
+          references: selectedItems.map(({ kind, label, detail }) => ({ kind, label, detail })),
+        }
+      : undefined;
+    const clear = await onSend(
+      outgoing,
+      files,
+      running ? (delivery ?? "later") : undefined,
+      presentation,
+    );
     if (clear) {
       setText("");
+      setContextItems([]);
+      setTrigger(null);
       onWorkflowRemove?.();
       setDrafts((prev) => {
         for (const draft of prev) {
@@ -405,7 +482,107 @@ export function Composer({
     }
   };
 
+  const updateTrigger = (value: string, caret: number) => {
+    setTrigger(composerTrigger(value, caret));
+    setActiveSuggestion(0);
+  };
+
+  const selectSuggestion = (option: Suggestion) => {
+    if (!trigger) return;
+    if (option.kind === "workflow") {
+      if (onWorkflowSelect) {
+        onWorkflowSelect(option.workflow);
+      } else {
+        setContextItems((previous) => [
+          ...previous.filter((item) => item.kind !== "workflow"),
+          {
+            kind: "workflow",
+            label: option.workflow.name,
+            detail: option.workflow.description || option.workflow.name,
+            prompt: option.workflow.prompt,
+          },
+        ]);
+      }
+    } else if (option.kind === "skill") {
+      const item: ContextItem = {
+        kind: "skill",
+        label: option.skill.name,
+        detail: `${option.skill.path}/SKILL.md`,
+      };
+      setContextItems((previous) =>
+        previous.some((entry) => entry.kind === item.kind && entry.detail === item.detail)
+          ? previous
+          : [...previous, item],
+      );
+    } else {
+      const item: ContextItem = {
+        kind: option.kind,
+        label: option.path.split("/").pop() || option.path,
+        detail: option.path,
+      };
+      setContextItems((previous) =>
+        previous.some((entry) => entry.kind === item.kind && entry.detail === item.detail)
+          ? previous
+          : [...previous, item],
+      );
+    }
+    const replacement = replaceComposerTrigger(text, trigger, "");
+    setText(replacement.text);
+    setTrigger(null);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(replacement.caret, replacement.caret);
+    });
+  };
+
+  const insertTrigger = (symbol: "/" | "@") => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const prefix = start > 0 && !/\s/.test(text.charAt(start - 1)) ? " " : "";
+    const next = text.slice(0, start) + prefix + symbol + text.slice(end);
+    const caret = start + prefix.length + 1;
+    setText(next);
+    updateTrigger(next, caret);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  };
+
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (trigger && !event.nativeEvent.isComposing) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setTrigger(null);
+        return;
+      }
+      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && suggestions.options.length) {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        setActiveSuggestion(
+          (previous) =>
+            (previous + direction + suggestions.options.length) % suggestions.options.length,
+        );
+        return;
+      }
+      if (
+        (event.key === "Enter" || event.key === "Tab") &&
+        !event.shiftKey &&
+        suggestions.options.length
+      ) {
+        event.preventDefault();
+        const selected =
+          suggestions.options[Math.min(activeSuggestion, suggestions.options.length - 1)];
+        if (selected) selectSuggestion(selected);
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        return;
+      }
+    }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void send(running ? "later" : undefined);
@@ -420,6 +597,14 @@ export function Composer({
       onDrop={onDrop}
     >
       {extra ? <div className="border-b border-line px-4 py-3">{extra}</div> : null}
+      {trigger && projectId && (
+        <ComposerSuggestions
+          {...suggestions}
+          kind={trigger.kind}
+          active={activeSuggestion}
+          onSelect={selectSuggestion}
+        />
+      )}
       <label htmlFor={labelId} className="sr-only">
         {mode === "new"
           ? workflow
@@ -427,43 +612,50 @@ export function Composer({
             : "Describe a change"
           : "Follow-up message"}
       </label>
-      {workflow ? (
+      {selectedItems.length ? (
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
-          <span
-            className="inline-flex max-w-full items-center gap-2 rounded-full bg-surface-muted py-1 pr-1 pl-3 text-xs text-ink ring-1 ring-line"
-            title={workflow.description || workflow.name}
-          >
-            <WorkflowIcon className="size-4 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
-            <span className="min-w-0 truncate font-medium">{workflow.name}</span>
-            <span className="hidden shrink-0 text-dim @[18rem]/composer:inline">Workflow</span>
-            {onWorkflowRemove ? (
-              <button
-                type="button"
-                onClick={onWorkflowRemove}
-                disabled={disabled}
-                aria-label={`Remove ${workflow.name} workflow`}
-                className="grid size-6 shrink-0 place-items-center rounded-full text-dim transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/40 disabled:opacity-60"
-              >
-                <X className="size-4" strokeWidth={1.5} aria-hidden />
-              </button>
-            ) : null}
-          </span>
+          <ContextPills
+            items={selectedItems}
+            disabled={disabled}
+            onRemove={(index) => {
+              if (workflow && index === 0) onWorkflowRemove?.();
+              else
+                setContextItems((previous) =>
+                  previous.filter((_, itemIndex) => itemIndex !== index - (workflow ? 1 : 0)),
+                );
+            }}
+          />
         </div>
       ) : null}
       <textarea
         id={labelId}
         ref={textareaRef}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          updateTrigger(e.target.value, e.target.selectionStart);
+        }}
+        onClick={(e) => updateTrigger(e.currentTarget.value, e.currentTarget.selectionStart)}
+        onKeyUp={(e) => {
+          if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key))
+            updateTrigger(e.currentTarget.value, e.currentTarget.selectionStart);
+        }}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         disabled={!!disabledReason || !draftReady}
+        aria-autocomplete="list"
+        aria-expanded={!!trigger && !!projectId}
+        aria-activedescendant={
+          trigger && suggestions.options.length
+            ? `composer-suggestion-${Math.min(activeSuggestion, suggestions.options.length - 1)}`
+            : undefined
+        }
         placeholder={
           disabledReason ??
           (workflow ? "Add instructions for this workflow (optional)" : placeholder)
         }
         rows={mode === "new" ? 3 : 1}
-        className={`block w-full resize-none bg-transparent px-4 ${workflow ? "pt-2" : "pt-3"} pb-2 text-sm leading-5.5 placeholder:text-dim/70 focus-visible:outline-none disabled:opacity-60`}
+        className={`block w-full resize-none bg-transparent px-4 ${selectedItems.length ? "pt-2" : "pt-3"} pb-2 text-sm leading-5.5 placeholder:text-dim/70 focus-visible:outline-none disabled:opacity-60`}
       />
       <ComposerAttachments
         drafts={drafts}
@@ -484,8 +676,13 @@ export function Composer({
           createPortal(
             <div
               ref={pickerWrapRef}
-              className="fixed z-50"
-              style={{ left: pickerBox.left, bottom: pickerBox.bottom, width: pickerBox.width }}
+              className="fixed z-50 overflow-y-auto"
+              style={{
+                left: pickerBox.left,
+                bottom: pickerBox.bottom,
+                width: pickerBox.width,
+                maxHeight: pickerBox.maxHeight,
+              }}
             >
               <AgentPicker
                 value={selection}
@@ -520,11 +717,40 @@ export function Composer({
             <span className="truncate">{branch || "unknown"}</span>
           </span>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            <ComposerAttachButton
-              disabled={disabled}
-              atLimit={drafts.length >= MAX_FILES}
-              fileInputRef={fileInputRef}
-            />
+            <div className="flex items-center gap-0.5">
+              {projectId && (
+                <>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => insertTrigger("/")}
+                    className={toolButtonClass}
+                    aria-label="Insert workflow or skill"
+                    title="Insert workflow or skill"
+                  >
+                    <span className="font-mono text-base leading-none" aria-hidden>
+                      /
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => insertTrigger("@")}
+                    className={toolButtonClass}
+                    aria-label="Reference a project file or folder"
+                    title="Reference a project file or folder"
+                  >
+                    <AtSign className="size-4" strokeWidth={1.5} aria-hidden />
+                  </button>
+                </>
+              )}
+              <ComposerAttachButton
+                disabled={disabled}
+                atLimit={drafts.length >= MAX_FILES}
+                fileInputRef={fileInputRef}
+                className={toolButtonClass}
+              />
+            </div>
             {running ? (
               <>
                 <button

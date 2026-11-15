@@ -61,12 +61,14 @@ type Api = {
     speed?: string;
     permission?: Permission;
     attachmentIds?: string[];
+    presentation?: import("./types").MessagePresentation;
   }) => Promise<Session>;
   steer: (
     sessionId: string,
     text: string,
     attachmentIds?: string[],
     when?: "now" | "later" | "drop" | "release",
+    presentation?: import("./types").MessagePresentation,
   ) => Promise<void>;
   complete: (sessionId: string) => Promise<void>;
   reopen: (sessionId: string) => void;
@@ -458,11 +460,12 @@ export function AdeProvider({ children }: { children: ReactNode }) {
       },
       // Resolves only after the POST and the refresh; rejects on 4xx/5xx or
       // network failure so the caller can keep the draft and show the error.
-      steer: async (sessionId, text, attachmentIds, when) => {
+      steer: async (sessionId, text, attachmentIds, when, presentation) => {
         await request(`/api/sessions/${sessionId}/messages`, "POST", {
           ...(text ? { text } : {}),
           ...(when ? { when } : {}),
           ...(attachmentIds?.length ? { attachmentIds } : {}),
+          ...(presentation ? { presentation } : {}),
         });
         await refresh();
       },

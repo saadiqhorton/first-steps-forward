@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { listEditorEntries, loadEditorFile } from "@/lib/ade/editorApi";
 import { listDocuments, listWorkflows } from "@/lib/ade/api";
+import { listProcesses, loadProcessOutput } from "@/lib/ade/processesApi";
 import { listSkills, readSkillFile } from "@/lib/ade/skillsApi";
 import type { ProjectDocument } from "@/lib/ade/types";
 
@@ -76,4 +77,23 @@ export const skillFileQuery = (projectId: string, rootId: string, skill: string,
     queryFn: () => readSkillFile(projectId, rootId, skill, path),
     staleTime: SECTION_STALE_MS,
     enabled: Boolean(path),
+  });
+
+/** The project's processes, refreshed while the page is open: a server can exit at any time. */
+export const processesQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: ["processes", projectId] as const,
+    queryFn: () => listProcesses(projectId),
+    staleTime: 0,
+    refetchInterval: 2_000,
+  });
+
+/** One process's output. Polling keeps "follow latest" honest without a stream. */
+export const processOutputQuery = (processId: string | null) =>
+  queryOptions({
+    queryKey: ["process-output", processId] as const,
+    queryFn: () => loadProcessOutput(processId ?? "", 0),
+    enabled: !!processId,
+    staleTime: 0,
+    refetchInterval: 1_200,
   });

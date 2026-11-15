@@ -109,13 +109,76 @@ The two modes keep their profiles and logins in separate directories (`~/.ade/br
 
 **Workspace files:** `GET /api/projects/:id/browser/files/<path>` serves a page from inside the project (HTML, PDF, and the page's own CSS, scripts, images and fonts) so the browser can display it. Paths outside the project, dotfiles, and unlisted file types are refused.
 
-**The dev server stays on the host** (native `node_modules`, fast file watching), and so does the browser, so `localhost:<port>` URLs reach it directly. The old Preview tab (iframe + attach-a-port form) and Processes list are gone; the agent starts and stops the dev server itself through its tools, and you watch the result in the browser.
+**The dev server stays on the host** (native `node_modules`, fast file watching), and so does the browser, so `localhost:<port>` URLs reach it directly. The old Preview tab (iframe + attach-a-port form) is gone; the agent starts and stops the dev server itself through its tools, you watch the result in the browser, and **Processes** keeps the record, its output and a Stop button.
 
 **Upgrading from the Docker computer:** ADE no longer uses Docker. Containers left over from earlier versions can be removed with `docker rm -f $(docker ps -aq --filter label=ade.computer=1)`, and their images with `docker image ls ade-computer` / `docker image rm`.
 
 **On Windows**, npm `.cmd` shims need a shell wrapper to be spawned safely; ADE handles this in its process layer (`src/local/spawn.mjs`) without ever interpolating arguments into a shell, and kills the whole process tree on stop so dev-server ports are actually freed.
 
+## Processes
+
+**Processes** is a tab in each project's right pane, beside Activity, Diff, Browser
+and Terminal, with a live count on the tab. It shows what an agent left running —
+today, the project's ADE-managed dev server — from the same records the agent's
+`dev_server_*` tools drive. A **Processes** project tab beside Skills opens ADE
+itself in every project; the right-pane tab keeps the agent processes.
+
+- **Grouped by conversation.** When an agent starts the dev server, ADE records the
+  session that asked for it, so the process sits under that conversation's title.
+  A server ADE finds already running (after a restart) shows as started outside a
+  conversation.
+- **Statuses.** `Running` means the port answered; `Starting…` means launched but not
+  listening yet; `Needs checking` means it was running and ADE can no longer confirm
+  it; `Stop requested…` covers a stop in flight; `Couldn't stop` carries the reason.
+  A process that exits leaves the list on its own.
+- **Rows** show a port light, the name, the loopback address and any status word, with
+  an icon-only **Open** on live rows. Selecting one expands its address, **Open**,
+  **Stop**, a small command/folder line and its output in place. The search field
+  matches names, commands and addresses.
+- **The output** follows the newest line until you scroll up. The bar then reads
+  **Scrolled back** and offers **Follow latest**; **Wrap lines** switches wrapping.
+  The newest line carries a brass rule. `GET
+/api/processes/:id/output?after=<line>` pages the log, like session logs.
+- **Process chips in a conversation** sit under the agent's reply: a command keycap
+  and its address. A stopped or failed command starts the process and opens the site
+  once the port answers; a running one opens this pane; the address opens the site in
+  the Browser tab. `ade:processes-open` brings the pane forward from anywhere.
+- **ADE itself** lives on the **Processes project tab**, beside Skills, in every
+  project. **ADE · This app** is the current window; **ADE dev server · Unmanaged** is
+  another ADE server on loopback that shares the ADE checkout, when that checkout is
+  added, such as one started in a terminal. Both are read-only **Open** links. Detection
+  is cached for a few seconds. An installed ADE started from another folder still shows
+  **This app**, but cannot find unmanaged ADE servers sharing the checkout.
+- **Stop all** asks first, lists what will stop, and reports anything that did not.
+  Stopping a server does not stop the agent's turn.
+- **Needs checking** is measured, not decorative: a 15-second liveness check probes
+  a running process's port, and two misses in a row mark it `unverified` until it
+  answers again or you select **Mark as good** (`POST /api/processes/:id/ack`).
+- **What is not listed:** projects with only a stopped or never-started dev script
+  record show the **Nothing running yet** state. ADE still manages one dev server per
+  project, so the pane shows one process per project; agent-started background jobs
+  outside ADE's dev-server record are not tracked.
+
+API: `GET /api/projects/:id/processes`, `GET /api/processes/:id`,
+`GET /api/processes/:id/output?after=`, `POST /api/processes/:id/ack`,
+`POST /api/processes/:id/start|stop`, and
+`POST /api/projects/:id/processes/stop-all`. Records live in `~/.ade/workspace.json`
+with the rest of the workspace; output is the same bounded tail the agent's tools see.
+The old `/processes` link, and any `/p/<project>/processes` bookmark, open the
+project's Conversations with this pane showing.
+
 ## Skills
+
+In a new conversation or follow-up, type `/` (or use the `/` button) to find a
+workflow or skill, or `@` to find a project file or folder. Selections appear as
+removable pills above the draft and remain visible in the sent conversation.
+Choosing a workflow applies its settings for a new task; a follow-up uses its
+instructions without changing the session's settings. The agent receives the
+workflow instructions, the selected skill's `SKILL.md` path, and the selected
+project paths. Use the arrow keys and Enter or Tab to choose, and Escape to
+dismiss. References identify paths for the agent to inspect; they do not copy
+file contents. Skill and file suggestions use the local-only host tools and are
+unavailable from a remote device.
 
 Each project has a **Skills** tab beside Conversations, Files and Workflows. It lists every
 [Agent Skills](https://agentskills.io/home) folder an agent here can load: the ones ADE keeps

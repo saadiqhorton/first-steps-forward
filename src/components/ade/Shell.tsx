@@ -41,6 +41,8 @@ import { AgentComputerPane } from "./AgentComputerPane";
 import { BrowserMiniPlayer } from "./browser/BrowserMiniPlayer";
 import { BrowserPreviewProvider } from "./browser/BrowserPreviewProvider";
 import { BROWSER_OPEN_EVENT } from "@/lib/ade/browser/openInPreview.mjs";
+import { PROCESSES_OPEN_EVENT } from "@/lib/ade/openProcesses.mjs";
+import { ProcessesPane } from "@/components/ade/processes/ProcessesPane";
 import { RightPaneHostContext } from "./rightPaneContext";
 import { RightPaneTabs } from "./RightPaneTabs";
 import { RightRail } from "./RightRail";
@@ -176,7 +178,6 @@ export function Shell({ children }: { children: ReactNode }) {
     projects.find((project) => project.id === routeProjectId) ??
     projects.find((project) => project.id === activeProjectId) ??
     projects[0];
-
   useEffect(() => {
     if (routeProjectId && projects.some((project) => project.id === routeProjectId))
       setSelectedProjectId(routeProjectId);
@@ -203,6 +204,10 @@ function ShellInner({
   onRightHostChange: (host: HTMLDivElement | null) => void;
 }) {
   const sessions = useAdeState((state) => state.sessions);
+  const processes = useAdeState((state) => state.processes);
+  const processCount = processes.filter(
+    (proc) => proc.projectId === activeProject?.id && proc.status !== "stopped",
+  ).length;
   const navigate = useNavigate();
   const router = useRouter();
   const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
@@ -406,6 +411,16 @@ function ShellInner({
     selectTab(tab);
     expandRight();
   };
+
+  useEffect(() => {
+    const open = () => {
+      setRightTab("processes");
+      setCollapsedRight(false);
+      activePanelRef.current?.expand();
+    };
+    window.addEventListener(PROCESSES_OPEN_EVENT, open);
+    return () => window.removeEventListener(PROCESSES_OPEN_EVENT, open);
+  }, [activePanelRef]);
   const collapseRight = useCallback(() => {
     activePanelRef.current?.collapse();
   }, [activePanelRef]);
@@ -511,6 +526,7 @@ function ShellInner({
             terminalOpened={terminalOpened}
             terminalClosing={terminalClosing}
             onCloseTerminal={closeTerminal}
+            processCount={processCount}
             activityTabRef={activityTabRef}
           />
         </div>
@@ -550,6 +566,21 @@ function ShellInner({
         ) : (
           <div className="grid flex-1 place-items-center px-5 text-center font-mono text-[11px] text-dim">
             Add a project to give agents a browser.
+          </div>
+        )}
+      </div>
+
+      <div
+        id="right-processes-panel"
+        role="tabpanel"
+        aria-labelledby="right-processes-tab"
+        className={`min-h-0 min-w-0 flex-1 overflow-hidden ${rightTab === "processes" ? "flex" : "hidden"}`}
+      >
+        {activeProject ? (
+          <ProcessesPane projectId={activeProject.id} active={rightTab === "processes"} />
+        ) : (
+          <div className="grid flex-1 place-items-center px-5 text-center font-mono text-[11px] text-dim">
+            Add a project to keep its processes.
           </div>
         )}
       </div>
@@ -594,7 +625,8 @@ function ShellInner({
   // Workflows and Skills are read-and-write spaces of their own. The right pane
   // belongs to a running session, so those sections take the whole window.
   const focusedSection = projectSectionFromPath(pathname);
-  const fullWidthSection = focusedSection === "workflows" || focusedSection === "skills";
+  const fullWidthSection =
+    focusedSection === "workflows" || focusedSection === "skills" || focusedSection === "processes";
   const rail = (
     <RightRail
       orientation={railOrientation}

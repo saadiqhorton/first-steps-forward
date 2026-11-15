@@ -14,7 +14,9 @@ export async function editor(ctx) {
         });
       if (parts.length === 3 && req.method === "GET" && parts[2] === "search")
         return json(res, 200, {
-          entries: await editor.searchEditorFiles(project.path, url.searchParams.get("q") ?? ""),
+          entries: await editor.searchEditorFiles(project.path, url.searchParams.get("q") ?? "", {
+            includeFolders: url.searchParams.get("folders") === "1",
+          }),
         });
       if (parts.length === 3 && req.method === "GET" && parts[2] === "file")
         return json(

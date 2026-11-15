@@ -6,6 +6,7 @@ import { Composer } from "@/components/ade/Composer";
 import { DiffPanel } from "@/components/ade/DiffPanel";
 import { RightPanePortal } from "@/components/ade/RightPanePortal";
 import { SessionMessage } from "@/components/ade/SessionMessage";
+import { ConversationProcesses } from "@/components/ade/processes/ConversationProcesses";
 import { MotionItem } from "@/components/ade/motion";
 import { DevCommandRequestCard } from "@/components/ade/DevCommandRequestCard";
 import { PermissionRequestCard } from "@/components/ade/PermissionRequestCard";
@@ -13,13 +14,12 @@ import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { AnimatePresence } from "motion/react";
 import { StatusPill } from "@/components/ade/StatusPill";
 import { useShell } from "@/components/ade/shellContext";
-import { resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
+import { writeLastModel } from "@/lib/ade/lastModels";
 import { currentActivity } from "@/lib/ade/formatLogs.mjs";
 import { sessionTitle } from "@/lib/ade/sessionTitle";
 import { askConfirm, warnUser } from "@/lib/ade/userNotices";
 import { sessionPairKey } from "@/shared/session-scope.mjs";
 import {
-  agentModels,
   answerDevCommand,
   needsYou,
   timeAgo,
@@ -34,7 +34,11 @@ import {
 import { isBrowserRecording } from "@/lib/ade/browser/composerFeedback";
 
 function waitingPreview(prompt: string) {
-  const visible = prompt.split("\n\nThe user attached these files")[0]?.trim() ?? "";
+  if (prompt.startsWith("Selected context:\n")) return "Selected context";
+  const visible =
+    (prompt.split("\n\nThe user attached these files")[0] ?? "")
+      .split("\n\nSelected context:\n")[0]
+      ?.trim() ?? "";
   if (visible.length <= 140) return visible;
   return `${visible.slice(0, 139)}…`;
 }
@@ -126,47 +130,6 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     session?.permission,
   ]);
 
-  // Prefer last model for this agent when the session has none pinned.
-  useEffect(() => {
-    if (!session) return;
-    const agentId = session.agentId;
-    if (session.model?.trim()) {
-      writeLastModel(agentId, session.model);
-      return;
-    }
-    let cancelled = false;
-    void agentModels(agentId)
-      .then((result) => {
-        if (cancelled) return;
-        const catalogIds = result.available ? (result.models ?? []).map((m) => m.id) : [];
-        setSelection((prev) => {
-          const base = prev ?? selectionFromSession(session);
-          if (base.agentId !== agentId || base.model.trim()) return prev;
-          const resolved = resolveModelForAgent(
-            agentId,
-            catalogIds,
-            "",
-            result.available && !!result.completeCatalog,
-          );
-          if (!resolved) return prev;
-          return { ...base, model: resolved, effort: "", speed: "" };
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setSelection((prev) => {
-          const base = prev ?? selectionFromSession(session);
-          if (base.agentId !== agentId || base.model.trim()) return prev;
-          const resolved = resolveModelForAgent(agentId, [], "");
-          if (!resolved) return prev;
-          return { ...base, model: resolved, effort: "", speed: "" };
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session, session?.id, session?.agentId, session?.model]);
-
   const project = state.projects.find((p) => p.id === session?.projectId);
   const agent = state.agents.find((a) => a.id === session?.agentId);
 
@@ -176,7 +139,11 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     if (!session) return [];
     const msgs = session.messages;
     const first = msgs[0];
-    if (first?.role === "user" && first.text.trim() === session.request.trim()) {
+    if (
+      first?.role === "user" &&
+      !first.presentation &&
+      first.text.trim() === session.request.trim()
+    ) {
       return msgs.slice(1);
     }
     return msgs;
@@ -202,7 +169,12 @@ export function SessionView({ sessionId }: { sessionId: string }) {
       : undefined;
   const activeSelection = selection ?? selectionFromSession(session);
 
-  const send = async (outgoing: string, files: File[], delivery?: "now" | "later") => {
+  const send = async (
+    outgoing: string,
+    files: File[],
+    delivery?: "now" | "later",
+    presentation?: import("@/lib/ade/types").MessagePresentation,
+  ) => {
     if (sending) return false;
     setSending(true);
     setSendError(null);
@@ -223,6 +195,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
         outgoing,
         attachmentIds.length ? attachmentIds : undefined,
         running ? (delivery ?? "later") : undefined,
+        presentation,
       );
       return true;
     } catch (e) {
@@ -362,9 +335,9 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           </div>
           <h1
             className="mt-2 line-clamp-1 text-[18px] font-medium leading-snug"
-            title={session.request}
+            title={session.displayRequest ?? session.request}
           >
-            {sessionTitle(session.request)}
+            {sessionTitle(session.displayRequest ?? session.request)}
           </h1>
           {session.criteria && (
             <p className="mt-1 line-clamp-2 text-xs text-dim" title={session.criteria}>
@@ -414,14 +387,11 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           <AnimatePresence initial={false}>
             {threadMessages.map((m) => (
               <MotionItem key={m.id} layout={false}>
-                <SessionMessage
-                  message={m}
-                  agentName={agent?.short}
-                  projectId={project.id}
-                />
+                <SessionMessage message={m} agentName={agent?.short} projectId={project.id} />
               </MotionItem>
             ))}
           </AnimatePresence>
+          <ConversationProcesses sessionId={session.id} />
           {session.pendingDevCommand && (
             <DevCommandRequestCard
               key={session.pendingDevCommand.id}
@@ -573,6 +543,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             </div>
           )}
           <Composer
+            projectId={project.id}
             key={`${project.id}:${session.id}`}
             draftStorageKey={sessionPairKey(project.id, session.id)}
             sessionId={session.id}

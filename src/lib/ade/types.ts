@@ -1,6 +1,7 @@
 /** Agent ids come from the server's adapter files; any id it serves is valid. */
 export type AgentId = string;
-export type Permission = "build" | "plan";
+export type Permission =
+  "build" | "plan" | "manual" | "auto" | "deny" | "approve" | "full" | "dont-ask" | "bypass";
 
 export interface Agent {
   id: AgentId;
@@ -18,8 +19,9 @@ export interface Agent {
   signIn: { note: string; command?: string; device?: boolean; waiting?: string };
   carriesConversation: boolean;
   installHint: string;
-  installMethod?: "npm" | "other" | "missing";
+  installMethod?: "npm" | "brew" | "mise" | "other" | "missing";
   installPath?: string;
+  brewItem?: { kind: "formula" | "cask"; name: string };
   latestVersion?: string;
   updateAvailable?: boolean;
   harness?: { install: string; update: string };
@@ -69,10 +71,22 @@ export interface LocalProcess {
   bin?: string;
   args?: string[];
   port: number;
-  status: "running" | "starting" | "stopped";
+  /**
+   * running: ADE confirmed it is up. starting: launched, not listening yet.
+   * unverified: it was running and ADE can no longer confirm it — needs checking.
+   * stopping: a stop is in flight. failed: the stop failed (see stopError).
+   */
+  status: "running" | "starting" | "stopping" | "unverified" | "failed" | "stopped";
   output?: string[];
   startedAt?: number;
   updatedAt?: number;
+  stoppedAt?: number;
+  /** When the port last answered, for a process ADE can confirm. */
+  verifiedAt?: number;
+  /** Why a stop failed, when status is "failed". */
+  stopError?: string;
+  /** The conversation whose agent started it, when ADE saw that turn. */
+  sessionId?: string;
   /** "approved": the project's approved dev command, not a package.json dev script. */
   source?: "approved";
   /** Where an approved command runs, relative to the project root. */
@@ -101,12 +115,22 @@ export interface MessageAttachment {
   size: number;
   kind: "image" | "file";
 }
+export interface ContextReference {
+  kind: "workflow" | "skill" | "file" | "folder";
+  label: string;
+  detail: string;
+}
+export interface MessagePresentation {
+  text: string;
+  references: ContextReference[];
+}
 export interface Message {
   id: string;
   role: "user" | "agent" | "system";
   text: string;
   at: number;
   attachments?: MessageAttachment[];
+  presentation?: MessagePresentation;
 }
 export interface AgentModel {
   id: string;
@@ -122,7 +146,8 @@ export interface OptionCapabilities {
   permissions: Permission[];
   effortNote: string;
   speedNote: string;
-  permissionNotes: Record<Permission, string>;
+  permissionLabels?: Partial<Record<Permission, string>>;
+  permissionNotes: Partial<Record<Permission, string>>;
 }
 export interface HarnessJob {
   agentId: AgentId;
@@ -204,6 +229,7 @@ export interface Session {
   agentId: AgentId;
   createdBy: AgentId;
   request: string;
+  displayRequest?: string;
   criteria: string;
   status: SessionStatus;
   messages: Message[];
@@ -266,6 +292,7 @@ export type SessionSummary = Pick<
   | "agentId"
   | "createdBy"
   | "request"
+  | "displayRequest"
   | "criteria"
   | "status"
   | "summary"

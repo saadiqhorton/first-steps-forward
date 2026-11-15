@@ -334,7 +334,11 @@ export function BrowserChromeRow({
     setFillViewport(false);
     const width = Number(deviceWidth);
     const height = Number(deviceHeight);
-    if (!Number.isInteger(width) || !Number.isInteger(height) || !viewportAcceptable({ width, height })) {
+    if (
+      !Number.isInteger(width) ||
+      !Number.isInteger(height) ||
+      !viewportAcceptable({ width, height })
+    ) {
       setDeviceWidth(String(settings.viewport.width));
       setDeviceHeight(String(settings.viewport.height));
       return;

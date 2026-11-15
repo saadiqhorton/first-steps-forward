@@ -45,6 +45,7 @@ const project = (name, packageJson = { name }) => {
 };
 const projects = [
   project("p-turn"),
+  project("p-context"),
   project("p-queue"),
   project("p-queue-image"),
   project("p-recording-feedback"),
@@ -273,6 +274,46 @@ test("a Codex turn runs to ready with the agent's reply", { skip }, async () => 
     ),
   );
 });
+
+test(
+  "selected context stays visible as pills while full prompts reach the agent",
+  { skip },
+  async () => {
+    const initial = {
+      text: "Review this",
+      references: [{ kind: "folder", label: "my folder", detail: "src/my folder" }],
+    };
+    const prompt = 'Review this\n\nSelected context:\n- Project folder: "src/my folder"';
+    const id = await start("p-context", "text", { request: prompt, presentation: initial });
+    await waitFor(() => settled(id), "the initial turn");
+    assert.deepEqual(session(id).messages[0].presentation, initial);
+    assert.ok(promptOf(turns("p-context")[0]).includes(prompt));
+    const followup = {
+      text: "Check again",
+      references: [{ kind: "skill", label: "test-skill", detail: "/skills/test/SKILL.md" }],
+    };
+    const nextPrompt =
+      'Check again\n\nSelected context:\n- Use the "test-skill" skill: read and follow "/skills/test/SKILL.md".';
+    const response = await call(`/api/sessions/${id}/messages`, {
+      text: nextPrompt,
+      presentation: followup,
+    });
+    assert.equal(response.status, 200);
+    await waitFor(() => turns("p-context").length === 2 && settled(id), "the follow-up");
+    assert.deepEqual(
+      session(id)
+        .messages.filter((m) => m.role === "user")
+        .at(-1).presentation,
+      followup,
+    );
+    assert.ok(promptOf(turns("p-context")[1]).includes(nextPrompt));
+    const rejected = await call(`/api/sessions/${id}/messages`, {
+      text: "hello",
+      presentation: { text: "hi", references: [{ kind: "unknown" }] },
+    });
+    assert.equal(rejected.status, 400);
+  },
+);
 
 test("a follow-up during a turn waits, then runs as the next turn", { skip }, async () => {
   const { open } = gate();

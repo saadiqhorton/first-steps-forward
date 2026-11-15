@@ -27,7 +27,7 @@ import { processRunsIn, runCommand, spawnCommand, stopProcess } from "./spawn.mj
 /** @typedef {{ id: string, name: string, path: string, branch?: string, uncommittedFiles?: string[], missing?: boolean }} Project */
 /** @typedef {{ id: string, name: string, short?: string, installed?: boolean, signedIn?: boolean, version?: string, providers?: string[], account?: string, tools?: string }} AgentRow */
 /** @typedef {{ id: string, name: string, mime: string, size: number, kind: string, absPath: string, recording?: boolean }} ResolvedFile */
-/** @typedef {{ text: string, files?: ResolvedFile[] }} Message */
+/** @typedef {{ text: string, files?: ResolvedFile[], presentation?: { text: string, references: { kind: string, label: string, detail: string }[] } }} Message */
 /** @typedef {Record<string, any> & { id: string, projectId: string, agentId: string, status: string, messages: any[], logs: string[] }} Session */
 /**
  * What ADE knows about a project at the start of a turn, beyond Git.
@@ -133,6 +133,7 @@ const SAFETY_PREAMBLE =
  * @param {(project: Project, session: Session) => TurnContext | Promise<TurnContext>} deps.turnContext dev server, agent browser and tool wiring for a project's turn
  * @param {{ append: (id: string, text: string) => Promise<unknown>, flush: (id: string) => Promise<void> }} [deps.logs]
  * @param {(scope: string) => void} [deps.emit]
+ * @param {(agentId: string) => boolean} [deps.isAgentUpdating]
  * @param {(session: Session) => void} [deps.turnEnded]
  */
 export function createSessionTurns({
@@ -143,6 +144,7 @@ export function createSessionTurns({
   turnContext,
   logs,
   emit = () => {},
+  isAgentUpdating = () => false,
   turnEnded = () => {},
 }) {
   /** @type {Map<string, { controller: AbortController, child?: import("node:child_process").ChildProcess }>} */
@@ -152,6 +154,13 @@ export function createSessionTurns({
 
   const projectOf = (session) => state.projects.find((p) => p.id === session.projectId);
   const busy = (session) => slots.has(session.id);
+  const refuseDuringAgentUpdate = (agentId) => {
+    if (isAgentUpdating(agentId))
+      throw new TurnRefused(
+        409,
+        "Wait for this agent's installation or update to finish before starting a task.",
+      );
+  };
   const persist = async (session) => {
     emit(`session:${session.id}`);
     await logs?.flush(session.id);
@@ -539,9 +548,21 @@ export function createSessionTurns({
     /**
      * Create a session and start its first turn. Refuses (409) while another
      * session in the project is running.
-     * @param {{ project: Project, agentId: string, request: string, criteria: string, text: string, files: ResolvedFile[], model?: string, options: object, baseline: { changes: any[], files: { path: string }[] } | null }} draft
+     * @param {{ project: Project, agentId: string, request: string, criteria: string, text: string, files: ResolvedFile[], presentation?: Message['presentation'], model?: string, options: object, baseline: { changes: any[], files: { path: string }[] } | null }} draft
      */
-    async start({ project, agentId, request, criteria, text, files, model, options, baseline }) {
+    async start({
+      project,
+      agentId,
+      request,
+      criteria,
+      text,
+      files,
+      presentation,
+      model,
+      options,
+      baseline,
+    }) {
+      refuseDuringAgentUpdate(agentId);
       if (
         state.sessions.some(
           (s) =>
@@ -561,7 +582,16 @@ export function createSessionTurns({
         request,
         criteria,
         status: "working",
-        messages: [{ id: randomUUID(), role: "user", text, at: now(), ...attachmentMeta(files) }],
+        messages: [
+          {
+            id: randomUUID(),
+            role: "user",
+            text,
+            at: now(),
+            ...attachmentMeta(files),
+            ...(presentation ? { presentation } : {}),
+          },
+        ],
         changes: baseline ? baseline.changes.map((c) => ({ ...c, preExisting: true })) : [],
         ...(baseline ? { baselineFiles: baseline.files.map((f) => f.path) } : {}),
         checks: [{ name: "Project checks", status: "not_run", detail: "Not run yet." }],
@@ -588,12 +618,16 @@ export function createSessionTurns({
      * interrupts the current run and goes next ("now").
      * @param {Session} session @param {Message} message @param {"now" | "later"} [when]
      */
-    async send(session, { text, files = [] }, when = "later") {
+    async send(session, { text, files = [], presentation }, when = "later") {
       refuseIfComplete(session, "sending a message");
+      refuseDuringAgentUpdate(session.agentId);
       const fresh = session.agentStartFresh === true;
       const rawPrompt = `${text}${formatAttachmentPrompt(files)}`;
       const prompt = fresh ? agentHandoffPrompt(session, rawPrompt) : rawPrompt;
-      addMessage(session, "user", text, attachmentMeta(files));
+      addMessage(session, "user", text, {
+        ...attachmentMeta(files),
+        ...(presentation ? { presentation } : {}),
+      });
       if (busy(session)) {
         const attachments = nativeAttachments(files);
         if (when === "now") steer(session, prompt, [attachments]);
@@ -624,6 +658,7 @@ export function createSessionTurns({
     /** Send the waiting messages now, interrupting the current run if there is one. */
     async release(session) {
       refuseIfComplete(session, "sending a message");
+      refuseDuringAgentUpdate(session.agentId);
       const waiting = [...(session.queuedMessages ?? [])];
       const attachmentBatches = session.queuedAttachments ?? [];
       if (!waiting.length) throw new TurnRefused(400, "There is no waiting message to send.");

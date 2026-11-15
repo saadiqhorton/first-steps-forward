@@ -134,7 +134,9 @@
     const shown = mock
       .visibleSkills(state.library, state.detectFound)
       .filter((s) =>
-        !term ? true : s.name.toLowerCase().includes(term) || s.description.toLowerCase().includes(term),
+        !term
+          ? true
+          : s.name.toLowerCase().includes(term) || s.description.toLowerCase().includes(term),
       );
 
     return `<section class="c-library">
@@ -220,7 +222,9 @@
         importPhase: "pick",
         staged: null,
         picked: [],
-        notice: { text: `Installed ${chosen.skills.length} skill${chosen.skills.length === 1 ? "" : "s"}` },
+        notice: {
+          text: `Installed ${chosen.skills.length} skill${chosen.skills.length === 1 ? "" : "s"}`,
+        },
       });
       return;
     }

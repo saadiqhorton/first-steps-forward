@@ -42,6 +42,7 @@ import { attachments } from "./routes/attachments.mjs";
 import { sessionActions } from "./routes/sessionActions.mjs";
 import { browser } from "./routes/browser.mjs";
 import { devServer } from "./routes/devServer.mjs";
+import { processes } from "./routes/processes.mjs";
 import { agents } from "./routes/agents.mjs";
 import { workflows } from "./routes/workflows.mjs";
 import { skills } from "./routes/skills.mjs";
@@ -71,6 +72,7 @@ const authChildren = new Map();
 // Loopback base URL of the server this module is mounted on, recorded when it
 // starts listening (see setListenAddress); null until then.
 let listenBaseUrl = null;
+let listenPort = null;
 // One agent computer (headless Chrome) per project; see computer.mjs.
 const browserInstaller = createBrowserInstaller({ baseDir: DATA_DIR });
 const browserContexts = createBrowserContexts({
@@ -117,6 +119,7 @@ const turns = createSessionTurns({
   adapters,
   dataDir: DATA_DIR,
   logs: sessionLogs,
+  isAgentUpdating: (agentId) => harnessJobs.get(agentId).status === "running",
   emit: (scope) => eventHub.emit(scope),
   turnEnded: () => refreshBootstrapInBackground(eventHub.activeProjects()),
   turnContext: async (project, session) => {
@@ -174,6 +177,13 @@ function safeTokenEqual(a, b) {
 
 let lastBootstrapFingerprint = "";
 const summaryOf = (session) => {
+  const initialPresentation = session.messages?.find(
+    (message) => message.role === "user",
+  )?.presentation;
+  const displayRequest = initialPresentation
+    ? initialPresentation.text.trim() ||
+      initialPresentation.references.map((item) => item.label).join(", ")
+    : undefined;
   const lastUserMessageAt =
     session.lastUserMessageAt ??
     session.messages?.filter((message) => message.role === "user").at(-1)?.at ??
@@ -188,6 +198,7 @@ const summaryOf = (session) => {
     agentId: session.agentId,
     createdBy: session.createdBy,
     request: session.request,
+    ...(displayRequest ? { displayRequest } : {}),
     criteria: session.criteria,
     status: session.status,
     summary: session.summary,
@@ -390,7 +401,12 @@ const safeProject = (p) => {
  * @param {import("node:net").AddressInfo | string | null} address `server.address()`
  */
 export function setListenAddress(address) {
-  if (!address || typeof address === "string") return;
+  if (!address || typeof address === "string") {
+    listenBaseUrl = null;
+    listenPort = null;
+    return;
+  }
+  listenPort = address.port;
   const host = address.address;
   if (host === "::1") listenBaseUrl = `http://[::1]:${address.port}`;
   else if (["0.0.0.0", "::"].includes(host) || isLoopbackAddress(host))
@@ -541,6 +557,7 @@ const routes = [
   attachments,
   sessionActions,
   browser,
+  processes,
   devServer,
   agents,
   workflows,
@@ -617,9 +634,7 @@ export async function handle(req, res) {
     parts[2] === "computer" &&
     ["import", "import-sources"].includes(parts[3]);
   if (
-    (["terminal", "editor", "skills"].includes(parts[0]) ||
-      harnessRoute ||
-      browserImportRoute) &&
+    (["terminal", "editor", "skills"].includes(parts[0]) || harnessRoute || browserImportRoute) &&
     !isLoopbackPeer(req)
   )
     return json(res, 403, { error: "Host tools are available only on this machine." });
@@ -666,6 +681,9 @@ export async function handle(req, res) {
       computerView,
       devServers,
       devApprovals,
+      appAddress: listenBaseUrl,
+      appPort: listenPort,
+      appRoot: process.cwd(),
       handled: false,
       json: (...args) => {
         json(...args);
@@ -701,6 +719,13 @@ export function _setDevApprovalWaitForTest(ms) {
 export function _getSessionForTest(sessionId) {
   return state.sessions.find((item) => item.id === sessionId);
 }
+/** Test-only: move a seeded process into a status a real machine reaches over time. */
+export function _setProcessStatusForTest(processId, status) {
+  const proc = state.processes.find((item) => item.id === processId);
+  if (!proc) return false;
+  proc.status = status;
+  return true;
+}
 /**
  * Test-only: whether a turn or checks run still holds the session's slot —
  * including a stopped session whose run is winding down. A stopped session
@@ -717,6 +742,7 @@ let started = null;
  */
 export function start() {
   started ??= load();
+  void started.then(() => devServers.startMonitor());
   return started;
 }
 /**
@@ -726,6 +752,7 @@ export function start() {
  * opens them.
  */
 export async function stop() {
+  devServers.stopMonitor();
   if (clientRefreshTimer) clearInterval(clientRefreshTimer);
   clientRefreshTimer = null;
   if (computerWatchTimer) clearInterval(computerWatchTimer);
