@@ -3,8 +3,8 @@ import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
 /** @param {import("./kit.mjs").ComputerContext | null} computer */
-function wireComputer(computer) {
-  return { args: codexComputerArgs(computer) };
+function wireComputer(computer, workspaceAssistant = null) {
+  return { args: codexComputerArgs(computer, workspaceAssistant) };
 }
 
 /** Parse `codex debug models` JSON. Only visibility === "list" is offered. */
@@ -113,6 +113,7 @@ export const codex = defineCliAgent({
     permission,
     attachments,
     computer,
+    workspaceAssistant,
   }) {
     // `-m` is valid for both `codex exec` and `codex exec resume`; omit it when
     // no model was chosen so the CLI keeps its own configured default.
@@ -122,7 +123,7 @@ export const codex = defineCliAgent({
       ...(speed ? ["-c", `service_tier="${speed}"`] : []),
     ];
     // The agent computer's MCP server, configured per turn (resume too).
-    const { args: computerArgs = [] } = wireComputer(computer);
+    const { args: computerArgs = [] } = wireComputer(computer, workspaceAssistant);
     const plan = permission === "plan";
     const fullAccess = permission === "full";
     const approveForMe = permission === "approve";

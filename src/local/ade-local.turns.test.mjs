@@ -78,6 +78,7 @@ const projects = [
     name: "manifest",
     scripts: { dev: "vite", "dev:backend": "node server.js" },
   }),
+  project("p-handoff"),
 ];
 const agentRow = (id, name, extra = {}) => ({
   id,
@@ -767,5 +768,70 @@ test(
       ),
     );
     assert.ok(piArgs[piArgs.indexOf("--tools") + 1].includes("computer_open_url"));
+  },
+);
+
+test("removed appearance and help routes answer 404 instead of 500", { skip }, async () => {
+  for (const urlPath of [
+    "/api/workspace/appearance",
+    "/api/workspace/help",
+    "/api/appearance",
+    "/api/help",
+  ]) {
+    const res = await call(urlPath);
+    assert.equal(res.status, 404, `${urlPath} should be gone`);
+    assert.match(res.json.error, /not found/i);
+  }
+});
+
+test(
+  "a confirmed request starts one turn in another project and brings its reply back",
+  { skip },
+  async () => {
+    process.env.FAKE_CLI_SCENARIO = "text";
+    const created = await call("/api/workspace/assistant/threads", { agentId: "codex" });
+    assert.equal(created.status, 201, JSON.stringify(created.json));
+    const threadId = created.json.thread.id;
+
+    const sent = await call("/api/workspace/handoffs", {
+      source: { kind: "assistant", id: threadId },
+      targets: [{ projectId: "p-handoff", request: "summarize the readme" }],
+      deliveryKey: "e2e-handoff",
+    });
+    assert.equal(sent.status, 202, JSON.stringify(sent.json));
+    const handoff = sent.json.handoffs[0];
+    assert.equal(handoff.status, "delivered");
+    assert.ok(handoff.targetSessionId);
+    assert.equal(handoff.href, `/p/p-handoff/conversations/${handoff.targetSessionId}`);
+
+    const target = await waitFor(() => settled(handoff.targetSessionId), "the destination turn");
+    assert.equal(target.status, "ready");
+    const prompt = promptOf(turns("p-handoff")[0]);
+    assert.match(prompt, /Task: summarize the readme$/);
+    assert.equal(session(handoff.targetSessionId).createdBy, "workspace-assistant");
+    assert.equal(session(handoff.targetSessionId).handoffId, handoff.id);
+
+    // The reply is returned to the chat that asked, with a link to the turn.
+    const listed = await waitFor(async () => {
+      const result = await call(`/api/workspace/handoffs?sourceThreadId=${threadId}`);
+      return result.json.handoffs[0]?.status === "replied" ? result.json.handoffs[0] : null;
+    }, "the returned answer");
+    assert.equal(listed.answer, "Done.");
+    assert.equal(listed.answerMessageId, session(handoff.targetSessionId).messages.at(-1).id);
+
+    const thread = await call(`/api/workspace/assistant/threads/${threadId}`);
+    const returned = thread.json.messages.find((m) => m.handoffId === handoff.id);
+    assert.ok(returned, "the assistant chat holds the returned answer");
+    assert.match(returned.text, /p-handoff replied/);
+    assert.match(returned.text, /Done\./);
+
+    // A retried delivery key does not start a second turn.
+    const again = await call("/api/workspace/handoffs", {
+      source: { kind: "assistant", id: threadId },
+      targets: [{ projectId: "p-handoff", request: "summarize the readme" }],
+      deliveryKey: "e2e-handoff",
+    });
+    assert.equal(again.json.handoffs[0].id, handoff.id);
+    assert.equal(turns("p-handoff").length, 1);
   },
 );

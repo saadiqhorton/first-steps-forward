@@ -27,6 +27,7 @@
 // - Never log file contents or diffs. A result carries a few plain words (`summary`: "95
 //   lines", a command's last output line, an error's first line), changed line counts and paths.
 import { promises as fs } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { commandLine } from "../harness.mjs";
 import { listAcpModels, runAcpTurn } from "../acp.mjs";
 import { acpBridge } from "../acp-bridge.mjs";
@@ -71,6 +72,8 @@ import { findOnPath, runCommand, spawnCommand, stopProcess } from "../spawn.mjs"
  * @property {"build" | "plan"} [permission]
  * @property {Attachment[]} attachments
  * @property {ComputerContext | null} computer how the agent reaches its browser tools
+ * @property {{ url: string, token: string, threadId: string, node?: string }} [workspaceAssistant]
+ *   a one-turn capability for the assistant's workspace tools (only for workspace chats)
  *
  * What the session turn module lends the agent for one turn.
  * @typedef {object} TurnIO
@@ -288,6 +291,7 @@ export function defineAcpAgent(spec) {
   }
   return {
     ...spec,
+    protocol: "acp",
     /**
      * The models the agent last reported for this version; with `canProbe`
      * (installed and signed in) it is asked when there is no list yet.
@@ -335,8 +339,27 @@ export function defineAcpAgent(spec) {
           defaultModel: input.defaultModel,
           effort: input.effort,
           acpAuth: spec.acpAuth?.(),
-          mcpServers: spec.wireComputer?.(input.computer)?.mcpServers ?? [],
-          sessionMeta: spec.sessionMeta?.({ computer: !!input.computer, permission: input.permission }),
+          mcpServers: [
+            ...(spec.wireComputer?.(input.computer)?.mcpServers ?? []),
+            ...(input.workspaceAssistant
+              ? [
+                  {
+                    name: "ade_workspace",
+                    command: process.execPath,
+                    args: [fileURLToPath(new URL("../workspace-tools.mjs", import.meta.url))],
+                    env: [
+                      { name: "ADE_WORKSPACE_TOOL_URL", value: input.workspaceAssistant.url },
+                      { name: "ADE_WORKSPACE_TOOL_TOKEN", value: input.workspaceAssistant.token },
+                      { name: "ADE_WORKSPACE_THREAD_ID", value: input.workspaceAssistant.threadId },
+                    ],
+                  },
+                ]
+              : []),
+          ],
+          sessionMeta: spec.sessionMeta?.({
+            computer: !!input.computer,
+            permission: input.permission,
+          }),
           on: {
             sessionId: (id) => io.emit({ type: "conversation", id }),
             defaultModel: (id) => io.emit({ type: "default-model", id }),

@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { reconcileWorkspaceMessages, saveWorkspace } from "./workspace-persistence.mjs";
+import {
+  mergeWorkspaceRecords,
+  reconcileWorkspaceMessages,
+  saveWorkspace,
+} from "./workspace-persistence.mjs";
 
 const message = (id, at) => ({ id, role: "user", text: id, at });
 const snapshot = (messages) => ({
@@ -82,4 +86,115 @@ test("reconciliation does not restore sessions for removed projects", async () =
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("a stale process cannot restore a removed project or its sessions", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ade-persistence-"));
+  const file = path.join(dir, "workspace.json");
+  try {
+    const removed = { projects: [], sessions: [], processes: [], deletedProjects: { p: 5 } };
+    await saveWorkspace(file, removed);
+    const stale = snapshot([message("first", 1)]);
+    await saveWorkspace(file, stale);
+    const persisted = JSON.parse(await readFile(file, "utf8"));
+    assert.equal(persisted.projects.length, 0);
+    assert.equal(persisted.sessions.length, 0);
+    assert.equal(persisted.deletedProjects.p, 5);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("unsnoozing survives another process's stale snooze", () => {
+  const current = {
+    workspaceOrganization: {
+      snoozes: {},
+      snoozeTombstones: { s: 20 },
+      projectPins: [],
+      pinTombstones: { p: 30 },
+    },
+  };
+  mergeWorkspaceRecords(current, {
+    workspaceOrganization: {
+      snoozes: { s: { until: 99_999, createdAt: 10 } },
+      projectPins: [{ projectId: "p", position: 0, updatedAt: 10 }],
+    },
+  });
+  assert.equal(current.workspaceOrganization.snoozes.s, undefined);
+  assert.equal(current.workspaceOrganization.projectPins.length, 0);
+});
+
+test("voice choices and session tombstones survive a stale process save", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ade-persistence-"));
+  const file = path.join(dir, "workspace.json");
+  try {
+    const current = {
+      projects: [{ id: "p" }],
+      sessions: [],
+      processes: [],
+      voice: { muted: true, speakReplies: false, chimeDuringDictation: true },
+      deletedSessions: { s: 5 },
+    };
+    // This process never loaded the voice block; its save must not erase it.
+    const stale = {
+      projects: [{ id: "p" }],
+      sessions: [{ id: "s", projectId: "p", messages: [], updatedAt: 1 }],
+      processes: [],
+    };
+    await saveWorkspace(file, current);
+    await saveWorkspace(file, stale);
+    const persisted = JSON.parse(await readFile(file, "utf8"));
+    assert.deepEqual(persisted.voice, {
+      muted: true,
+      speakReplies: false,
+      chimeDuringDictation: true,
+    });
+    assert.equal(persisted.sessions.length, 0);
+    assert.equal(persisted.deletedSessions.s, 5);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("mark unread survives another process's stale read and clears on read", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ade-persistence-"));
+  const file = path.join(dir, "workspace.json");
+  const snapshot = (organization) => ({
+    projects: [{ id: "p" }],
+    sessions: [{ id: "s", projectId: "p", messages: [], updatedAt: 1 }],
+    processes: [],
+    workspaceOrganization: organization,
+  });
+  try {
+    await saveWorkspace(file, snapshot({ reads: { s: 50 }, unread: {} }));
+    // Mark unread at 60, after the last read at 50.
+    await saveWorkspace(file, snapshot({ reads: { s: 50 }, unread: { s: 60 } }));
+    // Another process still has the older read cursor and saves a stale snapshot.
+    await saveWorkspace(file, snapshot({ reads: { s: 40 }, unread: {} }));
+    let persisted = JSON.parse(await readFile(file, "utf8"));
+    assert.equal(persisted.workspaceOrganization.unread.s, 60);
+    assert.equal(persisted.workspaceOrganization.reads.s, 50);
+
+    // Reading at 70 clears the marker; a stale process that still carries the
+    // older marker cannot bring it back.
+    await saveWorkspace(file, snapshot({ reads: { s: 70 }, unread: {} }));
+    await saveWorkspace(file, snapshot({ reads: { s: 40 }, unread: { s: 60 } }));
+    persisted = JSON.parse(await readFile(file, "utf8"));
+    assert.equal(persisted.workspaceOrganization.unread.s, undefined);
+    assert.equal(persisted.workspaceOrganization.reads.s, 70);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("voice choices survive a merge with another process's older snapshot", () => {
+  const current = { voice: { muted: true } };
+  mergeWorkspaceRecords(current, {
+    voice: { muted: false, speakReplies: false, chimeDuringDictation: true },
+  });
+  assert.deepEqual(current.voice, {
+    muted: true,
+    speakReplies: false,
+    chimeDuringDictation: true,
+  });
 });

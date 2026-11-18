@@ -4,6 +4,63 @@ import { resolveAttachments } from "../attachments.mjs";
 import { body } from "../http.mjs";
 import { readMessagePresentation } from "../message-presentation.mjs";
 
+/** Shared, fully validated project launch used by the API and workspace shortcuts. */
+export async function startProjectSession(ctx, data = {}) {
+  const { state, turns, DATA_DIR, resolveSessionOptions, UNSUPPORTED_RISK } = ctx;
+  const project = state.projects.find((p) => p.id === data.projectId);
+  const agentId =
+    data.agentId ??
+    project?.defaultAgent ??
+    state.agents.find((a) => a.installed && a.signedIn)?.id;
+  const agent = state.agents.find((a) => a.id === agentId);
+  if (!project || !agent)
+    throw Object.assign(new Error("Select a valid project and agent."), { status: 400 });
+  if (!agent.installed || !agent.signedIn)
+    throw Object.assign(new Error(`${agent.name} must be installed and authenticated first.`), {
+      status: 400,
+    });
+  const request = String(data.request ?? "").trim();
+  if (request.length < 4)
+    throw Object.assign(new Error("Describe the task in at least four characters."), {
+      status: 400,
+    });
+  if (UNSUPPORTED_RISK.test(request))
+    throw Object.assign(
+      new Error("ADE cannot mediate this destructive or external action's approval flow yet."),
+      { status: 403 },
+    );
+  const model = String(data.model ?? "").trim();
+  if (model && !MODEL_ID.test(model))
+    throw Object.assign(new Error("Invalid model id."), { status: 400 });
+  const checked = await resolveSessionOptions(agent.id, model || undefined, {
+    effort: data.effort,
+    speed: data.speed,
+    permission: data.permission,
+  });
+  if (!checked.ok) throw Object.assign(new Error(checked.error), { status: 400 });
+  await projectInfo(project);
+  if (project.missing)
+    throw Object.assign(new Error(`The folder ${project.path} no longer exists.`), { status: 409 });
+  const baseline = project.uncommittedFiles?.length ? await getDiff(project) : null;
+  const files = data.attachmentIds?.length
+    ? await resolveAttachments(DATA_DIR, data.attachmentIds, { includeBytes: false })
+    : [];
+  const session = await turns.start({
+    project,
+    agentId: agent.id,
+    request,
+    criteria: String(data.criteria ?? ""),
+    text: request,
+    files,
+    model: model || undefined,
+    options: checked.value,
+    baseline,
+  });
+  for (const key of ["createdBy", "workflowId", "handoffId", "source"])
+    if (data[key] !== undefined) session[key] = data[key];
+  return session;
+}
+
 /** `/api/sessions`: search, read one session, and start a new one. */
 export async function sessionReads(ctx) {
   const {

@@ -5,8 +5,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { TOOLS } from "../computer-tool-schemas.mjs";
+import { TOOLS as WORKSPACE_TOOLS } from "../workspace-tools.mjs";
 
 export const COMPUTER_TOOL_NAMES = TOOLS.map((tool) => tool.name);
+export const WORKSPACE_TOOL_NAMES = WORKSPACE_TOOLS.map((tool) => tool.name);
 const SERVER = "mcp_servers.ade_computer";
 const LOCAL = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -23,29 +25,42 @@ export function computerPiExtension() {
 /** Spawn extras for one turn's computer tools. @typedef {{ args?: string[], env?: Record<string, string>, mcpServers?: object[], toolNames?: string[] }} ComputerWiring */
 
 /** Codex: `-c` overrides parsed as TOML (JSON strings/arrays are valid TOML). */
-export function codexComputerArgs(computer) {
-  if (!computer) return [];
-  const env = Object.entries(computer.env)
-    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-    .join(",");
-  return [
-    "-c",
-    `${SERVER}.command=${JSON.stringify(computer.node)}`,
-    "-c",
-    `${SERVER}.args=${JSON.stringify([computerMcpScript()])}`,
-    "-c",
-    `${SERVER}.env={${env}}`,
-    // `codex exec` runs with approval policy "never", which denies every MCP
-    // tool call that would need a prompt. Pre-approve only this server's
-    // tools; Codex's global approval policy and shell sandbox are unchanged.
-    "-c",
-    `${SERVER}.default_tools_approval_mode="approve"`,
-    "-c",
-    `${SERVER}.startup_timeout_sec=30`,
-    // The first call may download the browser and launch it.
-    "-c",
-    `${SERVER}.tool_timeout_sec=900`,
-  ];
+export function codexComputerArgs(computer, workspaceAssistant) {
+  if (!computer && !workspaceAssistant) return [];
+  const entries = computer
+    ? [["ade_computer", computer.node, computerMcpScript(), computer.env]]
+    : [];
+  if (workspaceAssistant)
+    entries.push([
+      "ade_workspace",
+      workspaceAssistant.node ?? process.execPath,
+      path.join(LOCAL, "workspace-tools.mjs"),
+      {
+        ADE_WORKSPACE_TOOL_URL: workspaceAssistant.url,
+        ADE_WORKSPACE_TOOL_TOKEN: workspaceAssistant.token,
+        ADE_WORKSPACE_THREAD_ID: workspaceAssistant.threadId,
+      },
+    ]);
+  return entries.flatMap(([name, node, script, serverEnv]) => {
+    const server = `mcp_servers.${name}`;
+    const env = Object.entries(serverEnv)
+      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+      .join(",");
+    return [
+      "-c",
+      `${server}.command=${JSON.stringify(node)}`,
+      "-c",
+      `${server}.args=${JSON.stringify([script])}`,
+      "-c",
+      `${server}.env={${env}}`,
+      "-c",
+      `${server}.default_tools_approval_mode="approve"`,
+      "-c",
+      `${server}.startup_timeout_sec=30`,
+      "-c",
+      `${server}.tool_timeout_sec=900`,
+    ];
+  });
 }
 
 /** ACP agents: a stdio server in session/new `mcpServers` (env as name/value pairs). */
@@ -62,8 +77,12 @@ export function acpComputerServers(computer) {
 }
 
 /** OpenCode: an inline config layered on the user's own (OPENCODE_CONFIG_CONTENT). */
-export function opencodeComputerEnv(computer, existing = process.env.OPENCODE_CONFIG_CONTENT) {
-  if (!computer) return {};
+export function opencodeComputerEnv(
+  computer,
+  existing = process.env.OPENCODE_CONFIG_CONTENT,
+  workspaceAssistant,
+) {
+  if (!computer && !workspaceAssistant) return {};
   let base = {};
   try {
     const parsed = existing ? JSON.parse(existing) : {};
@@ -73,23 +92,54 @@ export function opencodeComputerEnv(computer, existing = process.env.OPENCODE_CO
     ...base,
     mcp: {
       ...(base.mcp ?? {}),
-      ade_computer: {
-        type: "local",
-        command: [computer.node, computerMcpScript()],
-        environment: computer.env,
-        enabled: true,
-      },
+      ...(computer
+        ? {
+            ade_computer: {
+              type: "local",
+              command: [computer.node, computerMcpScript()],
+              environment: computer.env,
+              enabled: true,
+            },
+          }
+        : {}),
+      ...(workspaceAssistant
+        ? {
+            ade_workspace: {
+              type: "local",
+              command: [
+                workspaceAssistant.node ?? process.execPath,
+                path.join(LOCAL, "workspace-tools.mjs"),
+              ],
+              environment: {
+                ADE_WORKSPACE_TOOL_URL: workspaceAssistant.url,
+                ADE_WORKSPACE_TOOL_TOKEN: workspaceAssistant.token,
+                ADE_WORKSPACE_THREAD_ID: workspaceAssistant.threadId,
+              },
+              enabled: true,
+            },
+          }
+        : {}),
     },
   };
   return { OPENCODE_CONFIG_CONTENT: JSON.stringify(config) };
 }
 
 /** Pi: extension path, allowlisted tool names, and env for the extension process. */
-export function piComputerWiring(computer) {
-  if (!computer) return { args: [], env: {}, toolNames: [] };
+export function piComputerWiring(computer, workspaceAssistant) {
+  if (!computer && !workspaceAssistant) return { args: [], env: {}, toolNames: [] };
+  const workspaceEnv = workspaceAssistant
+    ? {
+        ADE_WORKSPACE_TOOL_URL: workspaceAssistant.url,
+        ADE_WORKSPACE_TOOL_TOKEN: workspaceAssistant.token,
+        ADE_WORKSPACE_THREAD_ID: workspaceAssistant.threadId,
+      }
+    : {};
   return {
     args: ["-e", computerPiExtension()],
-    env: computer.env,
-    toolNames: COMPUTER_TOOL_NAMES,
+    env: { ...(computer?.env ?? {}), ...workspaceEnv },
+    toolNames: [
+      ...(computer ? COMPUTER_TOOL_NAMES : []),
+      ...(workspaceAssistant ? WORKSPACE_TOOL_NAMES : []),
+    ],
   };
 }

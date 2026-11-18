@@ -174,6 +174,8 @@ export async function projects(ctx) {
     );
     state.projects.splice(idx, 1);
     state.sessions = state.sessions.filter((s) => s.projectId !== parts[1]);
+    state.deletedProjects ??= {};
+    state.deletedProjects[parts[1]] = ctx.now?.() ?? Date.now();
     await Promise.all(removedSessions.map((session) => sessionLogs.remove(session.id)));
     state.processes = state.processes.filter((x) => x.projectId !== parts[1]);
     ctx.devApprovals.cancelForProject(parts[1]);

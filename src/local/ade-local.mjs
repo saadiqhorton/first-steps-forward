@@ -28,6 +28,7 @@ import { saveWorkspace } from "./workspace-persistence.mjs";
 import { createEventHub } from "./events.mjs";
 import { createSessionLogs } from "./session-logs.mjs";
 import { SourceError } from "./project-sources.mjs";
+import { expandUserPath } from "./project-sources.mjs";
 import { body, json, PayloadTooLarge } from "./http.mjs";
 import { createDevServers } from "./dev-server.mjs";
 import { createDevCommandApprovals, DevCommandError } from "./dev-command.mjs";
@@ -46,12 +47,21 @@ import { processes } from "./routes/processes.mjs";
 import { agents } from "./routes/agents.mjs";
 import { workflows } from "./routes/workflows.mjs";
 import { skills } from "./routes/skills.mjs";
+import { createWorkspaceAssistant } from "./workspace-assistant.mjs";
+import { workspaceAssistant as workspaceAssistantRoute } from "./routes/workspaceAssistant.mjs";
+import { createWorkspaceHandoffs } from "./workspace-handoffs.mjs";
+import { workspaceHandoffs as workspaceHandoffsRoute } from "./routes/workspaceHandoffs.mjs";
+import { createWorkspaceOrganization } from "./workspace-organization.mjs";
+import { workspaceOrganization } from "./routes/workspaceOrganization.mjs";
+import { startProjectSession } from "./routes/sessionReads.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
 const sessionLogs = createSessionLogs(path.join(DATA_DIR, "session-logs"));
 const eventHub = createEventHub();
 const state = { projects: [], sessions: [], processes: [], agents: [], workflows: [] };
+const id = () => randomUUID();
+const now = () => Date.now();
 const devServers = createDevServers({ state, save });
 export const refreshDevProcess = devServers.refreshDevProcess;
 // "Run this dev command?" questions waiting on the user, one per project (docs/adr/0005).
@@ -112,6 +122,10 @@ const browserHub = createBrowserHub({
   },
 });
 const computers = createComputerManager({ installer: browserInstaller, hub: browserHub });
+// Set after the handoff service exists; every project turn gets its own capability.
+let sessionWorkspaceTools = () => undefined;
+let handoffs = null;
+let organizationService = null;
 // Every session's turns and checks, and the only writer of a session's status.
 const turns = createSessionTurns({
   state,
@@ -122,6 +136,7 @@ const turns = createSessionTurns({
   isAgentUpdating: (agentId) => harnessJobs.get(agentId).status === "running",
   emit: (scope) => eventHub.emit(scope),
   turnEnded: () => refreshBootstrapInBackground(eventHub.activeProjects()),
+  workspaceTools: (session) => sessionWorkspaceTools(session),
   turnContext: async (project, session) => {
     // The manifest says which dev command applies now, not as of the last bootstrap poll.
     const { changed } = await devServers
@@ -135,6 +150,234 @@ const turns = createSessionTurns({
     };
   },
 });
+const workspaceAssistant = createWorkspaceAssistant({
+  state,
+  save,
+  id: () => randomUUID(),
+  now: () => Date.now(),
+  emit: (scope) => eventHub.emit(scope),
+  adapters,
+  agentStatus,
+  resolveSessionOptions,
+  dataDir: DATA_DIR,
+  getAppAddress: () => listenBaseUrl,
+  onDeleteThread: async (threadId) => {
+    if (handoffs) await handoffs.cancelForSource(threadId);
+  },
+  dispatchAction: async (thread, name, args) => {
+    if (!handoffs)
+      throw Object.assign(new Error("The workspace service is not ready."), { status: 503 });
+    const source = { kind: "assistant", id: thread.id };
+    if (name === "workspace_start_project") {
+      const result = await handoffs.dispatch({
+        source,
+        targets: [{ projectId: args.projectId, request: args.request }],
+      });
+      const handoff = result.handoffs[0];
+      return {
+        handoffId: handoff.id,
+        status: handoff.status,
+        sessionId: handoff.targetSessionId,
+        projectId: handoff.targetProjectId,
+        href: handoff.href,
+        ...(handoff.status === "approval_pending"
+          ? { note: "The owner must confirm this request in the workspace before work starts." }
+          : {}),
+      };
+    }
+    if (name === "workspace_message_session") {
+      const result = await handoffs.dispatch({
+        source,
+        targets: [{ sessionId: args.sessionId, request: args.text }],
+      });
+      const handoff = result.handoffs[0];
+      return {
+        handoffId: handoff.id,
+        status: handoff.status,
+        sessionId: handoff.targetSessionId,
+        projectId: handoff.targetProjectId,
+        href: handoff.href,
+        ...(handoff.status === "approval_pending"
+          ? { note: "The owner must confirm this message in the workspace before it is sent." }
+          : {}),
+      };
+    }
+    if (name === "workspace_list_handoffs")
+      return (await handoffs.list({ sourceThreadId: thread.id, status: args.status })).handoffs;
+    if (name === "workspace_discover_projects") {
+      if (!organizationService)
+        throw Object.assign(new Error("Project discovery is unavailable."), { status: 503 });
+      return organizationService.discoverProjects(args.path);
+    }
+    if (name === "workspace_add_project") {
+      const requested = String(args.path ?? "").trim();
+      if (!requested)
+        throw Object.assign(new Error("Choose a local folder path."), { status: 400 });
+      const real = await fs.realpath(expandUserPath(requested, os.homedir()));
+      const stat = await fs.stat(real);
+      if (!stat.isDirectory())
+        throw Object.assign(new Error("That path is not a directory."), { status: 400 });
+      const existing = state.projects.find((project) => project.path === real);
+      if (existing)
+        return {
+          project: { id: existing.id, name: existing.name, path: existing.path },
+          alreadyRegistered: true,
+        };
+      const project = {
+        id: id(),
+        name: String(args.name || path.basename(real)),
+        path: real,
+        branch: "",
+        ahead: 0,
+        uncommittedFiles: [],
+        defaultAgent: "codex",
+        addedAt: now(),
+      };
+      await projectInfo(project);
+      state.projects.push(project);
+      await devServers.refreshDevProcess(project).catch(() => ({ changed: false }));
+      await save();
+      eventHub.emit("workspace:projects");
+      return {
+        project: { id: project.id, name: project.name, path: project.path },
+        alreadyRegistered: false,
+      };
+    }
+    if (name === "workspace_pin_project") {
+      if (!organizationService)
+        throw Object.assign(new Error("Project pinning is unavailable."), { status: 503 });
+      return organizationService.pinProject(args.projectId, args.pinned !== false, args.position);
+    }
+    if (name === "workspace_project_settings") {
+      if (!organizationService)
+        throw Object.assign(new Error("Project settings are unavailable."), { status: 503 });
+      const settings = organizationService.projectSettings(args.projectId);
+      return {
+        projectId: settings.project.id,
+        revision: settings.revision,
+        instructions: settings.instructions,
+        color: settings.color,
+        icon: settings.icon,
+      };
+    }
+    if (name === "workspace_update_project_settings") {
+      if (!organizationService)
+        throw Object.assign(new Error("Project settings are unavailable."), { status: 503 });
+      const changed = await organizationService.updateProjectSettings(args.projectId, {
+        expectedRevision: args.expectedRevision,
+        ...(args.instructions !== undefined ? { instructions: args.instructions } : {}),
+        ...(args.color !== undefined ? { color: args.color } : {}),
+        ...(args.icon !== undefined ? { icon: args.icon } : {}),
+      });
+      return {
+        projectId: changed.project.id,
+        revision: changed.revision,
+        instructions: changed.instructions,
+        color: changed.color,
+        icon: changed.icon,
+      };
+    }
+    const session = state.sessions.find((s) => s.id === args.sessionId);
+    if (!session) throw Object.assign(new Error("Session not found."), { status: 404 });
+    if (name === "workspace_stop_session")
+      return { sessionId: session.id, ...(await turns.stop(session)) };
+    if (name === "workspace_complete_session") {
+      if (
+        session.pendingPermissions?.length ||
+        session.pendingQuestion ||
+        devApprovals.forSession(session.id)
+      )
+        throw Object.assign(
+          new Error("Resolve pending questions and approvals before completing this session."),
+          { status: 409 },
+        );
+      await turns.complete(session);
+      return {
+        sessionId: session.id,
+        status: session.status,
+        href: `/p/${session.projectId}/conversations/${session.id}`,
+      };
+    }
+    throw Object.assign(new Error("Unsupported workspace action."), { status: 400 });
+  },
+});
+const workspaceOrganizationService = createWorkspaceOrganization({
+  state,
+  save,
+  id,
+  now,
+  turns,
+  devApprovals,
+  devicePolicy: () => true,
+  projectStart: async (input) => {
+    const session = await startProjectSession(
+      { state, turns, DATA_DIR, resolveSessionOptions, UNSUPPORTED_RISK },
+      input,
+    );
+    await save();
+    return session;
+  },
+  emit: (scope) => eventHub.emit(scope),
+});
+organizationService = workspaceOrganizationService;
+handoffs = createWorkspaceHandoffs({
+  state,
+  save,
+  id,
+  now,
+  emit: (scope) => eventHub.emit(scope),
+  getAppAddress: () => listenBaseUrl,
+  isBusy: (session) => turns.isBusy(session),
+  refuseRisk: (text) => UNSUPPORTED_RISK.test(text),
+  projectStart: async (input) => {
+    const session = await startProjectSession(
+      { state, turns, DATA_DIR, resolveSessionOptions, UNSUPPORTED_RISK },
+      input,
+    );
+    await save();
+    return session;
+  },
+  sendToSession: async (session, text, meta) => {
+    await turns.send(session, { text, ...meta }, "later");
+    return (session.messages ?? []).at(-1);
+  },
+  sessionAction: async (name, args, source) => {
+    const session = state.sessions.find((s) => s.id === args.sessionId);
+    if (name === "workspace_list_handoffs") {
+      if (!handoffs) return [];
+      return (await handoffs.list({ sourceSessionId: source.id, status: args.status })).handoffs;
+    }
+    if (!session) throw Object.assign(new Error("Session not found."), { status: 404 });
+    // A project agent may act on its own project's sessions, never another project's.
+    if (session.projectId !== source.projectId)
+      throw Object.assign(new Error("A project agent can only act inside its own project."), {
+        status: 403,
+      });
+    if (name === "workspace_stop_session")
+      return { sessionId: session.id, ...(await turns.stop(session)) };
+    if (name === "workspace_complete_session") {
+      if (
+        session.pendingPermissions?.length ||
+        session.pendingQuestion ||
+        devApprovals.forSession(session.id)
+      )
+        throw Object.assign(
+          new Error("Resolve pending questions and approvals before completing this session."),
+          { status: 409 },
+        );
+      await turns.complete(session);
+      return {
+        sessionId: session.id,
+        status: session.status,
+        href: `/p/${session.projectId}/conversations/${session.id}`,
+      };
+    }
+    throw Object.assign(new Error(`Unsupported workspace action for ${source.label}.`), {
+      status: 400,
+    });
+  },
+});
+sessionWorkspaceTools = (session) => handoffs.sessionCapability(session);
 // Viewers reach the stream through /preview-stream on the server that serves
 // the UI and API (see handleUpgrade); it never listens on its own.
 const browserStream = createBrowserStreamServer({
@@ -151,8 +394,6 @@ let clientRefreshTimer = null;
 let computerWatchTimer = null;
 const computerFingerprints = new Map();
 const CLIENT_REFRESH_MS = 10_000;
-const id = () => randomUUID();
-const now = () => Date.now();
 // Optional exposure beyond loopback (LAN / Tailscale). Deliberately opt-in and
 // always token-gated: with no ADE_HOST the API stays loopback-only, and
 // scripts/start-local.mjs refuses to bind a non-loopback address without a
@@ -240,8 +481,25 @@ async function load() {
     const saved = JSON.parse(await fs.readFile(DATA_FILE, "utf8"));
     state.projects = Array.isArray(saved.projects) ? saved.projects : [];
     state.sessions = Array.isArray(saved.sessions) ? saved.sessions : [];
+    state.deletedProjects = saved.deletedProjects ?? {};
+    state.deletedSessions = saved.deletedSessions ?? {};
+    const goneProjects = new Set(Object.keys(state.deletedProjects));
+    const goneSessions = new Set(Object.keys(state.deletedSessions));
+    state.projects = state.projects.filter((project) => !goneProjects.has(project.id));
+    state.sessions = state.sessions.filter(
+      (session) => !goneProjects.has(session.projectId) && !goneSessions.has(session.id),
+    );
     state.processes = Array.isArray(saved.processes) ? saved.processes : [];
     state.workflows = Array.isArray(saved.workflows) ? saved.workflows : [];
+    state.assistantThreads = Array.isArray(saved.assistantThreads) ? saved.assistantThreads : [];
+    state.assistantMessages = Array.isArray(saved.assistantMessages) ? saved.assistantMessages : [];
+    state.assistantActivity = Array.isArray(saved.assistantActivity) ? saved.assistantActivity : [];
+    state.assistantDeleted = Array.isArray(saved.assistantDeleted) ? saved.assistantDeleted : [];
+    state.workspaceAssistant = saved.workspaceAssistant ?? {};
+    state.handoffs = Array.isArray(saved.handoffs) ? saved.handoffs : [];
+    state.inboxState = Array.isArray(saved.inboxState) ? saved.inboxState : [];
+    state.workspaceOrganization = saved.workspaceOrganization ?? {};
+    state.voice = saved.voice ?? {};
     let changed = false;
     for (const session of state.sessions) {
       if (!session.lastUserMessageAt)
@@ -298,6 +556,10 @@ async function load() {
       changed = true;
     }
     if (changed) await save();
+    // Expired snoozes and handoffs whose target finished while ADE was closed
+    // become visible on boot, before the first page asks for them.
+    await handoffs?.reconcile?.().catch(() => {});
+    await organizationService?.reconcile?.().catch(() => {});
   } catch {}
 }
 function refreshBootstrapInBackground(activeProjectIds = []) {
@@ -549,6 +811,9 @@ function localRequest(req) {
 }
 // In dispatch order: where two modules could match the same path, the earlier one answers.
 const routes = [
+  workspaceAssistantRoute,
+  workspaceHandoffsRoute,
+  workspaceOrganization,
   terminal,
   editor,
   events,
@@ -610,7 +875,8 @@ export async function handle(req, res) {
   // proving the token here is exactly how a LAN/Tailscale client becomes
   // authorized (the route itself validates it).
   const isAuthExchange = req.method === "POST" && parts[0] === "auth" && parts.length === 1;
-  if (!localRequest(req) && !isAuthExchange) {
+  const isLocalOwner = localRequest(req);
+  if (!isLocalOwner && !isAuthExchange) {
     // In exposed mode, or behind a proxy while a token is set, an unauthorized
     // peer gets 401 + authRequired (the UI shows its token gate). Otherwise —
     // including ADE_HOST without ADE_TOKEN, which start-local refuses to boot —
@@ -665,6 +931,10 @@ export async function handle(req, res) {
       refreshBootstrapInBackground,
       sessionLogs,
       turns,
+      workspaceAssistant,
+      handoffs,
+      organization: workspaceOrganizationService,
+      deviceContext: { owner: true, deviceId: "host", access: "full", authenticated: true },
       UNSUPPORTED_RISK,
       resolveSessionOptions,
       authChildren,

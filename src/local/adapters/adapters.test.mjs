@@ -911,3 +911,57 @@ test("ACP agents receive the agent computer as a stdio MCP server", () => {
   assert.deepEqual(acpComputerServers(null), []);
   assert.deepEqual(claude.wireComputer(null), { mcpServers: [] });
 });
+
+test("every CLI adapter receives the one-turn workspace capability", () => {
+  const capability = {
+    url: "http://127.0.0.1:3000/api/workspace/assistant/tool-call",
+    token: "turn-token",
+    threadId: "session-1",
+    node: "/usr/bin/node",
+  };
+  const codexArgs = codex.command({
+    projectPath: "/tmp/project",
+    prompt: "Work",
+    session,
+    continuing: false,
+    computer: null,
+    workspaceAssistant: capability,
+  })[1];
+  for (const name of [
+    "ade_workspace",
+    "workspace-tools.mjs",
+    "ADE_WORKSPACE_THREAD_ID",
+    "turn-token",
+  ])
+    assert.ok(
+      codexArgs.some((arg) => String(arg).includes(name)),
+      `Codex receives ${name}`,
+    );
+
+  const [, , opencodeEnv] = opencode.command({
+    projectPath: "/tmp/project",
+    prompt: "Work",
+    session,
+    continuing: false,
+    computer: null,
+    workspaceAssistant: capability,
+  });
+  const config = JSON.parse(opencodeEnv.OPENCODE_CONFIG_CONTENT);
+  assert.equal(config.mcp.ade_workspace.enabled, true);
+  assert.ok(config.mcp.ade_workspace.command[1].endsWith("workspace-tools.mjs"));
+  assert.equal(config.mcp.ade_workspace.environment.ADE_WORKSPACE_TOOL_TOKEN, "turn-token");
+
+  const piArgs = pi.command({
+    prompt: "Work",
+    session,
+    continuing: false,
+    dataDir: mkdtempSync(path.join(os.tmpdir(), "ade-pi-workspace-")),
+    computer: null,
+    workspaceAssistant: capability,
+  })[1];
+  assert.ok(piArgs.includes("-e"));
+  const tools = piArgs[piArgs.indexOf("--tools") + 1];
+  assert.ok(tools.includes("workspace_start_project"));
+  // The capability is a capability, not a permission: the token names the thread.
+  assert.equal(capability.threadId, "session-1");
+});
