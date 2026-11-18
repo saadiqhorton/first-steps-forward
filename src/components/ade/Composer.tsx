@@ -709,13 +709,17 @@ export function Composer({
               </span>
             </span>
           </button>
-          <span
-            className="@max-[22rem]/composer:hidden flex min-w-0 flex-1 basis-0 items-center gap-1.5 font-mono text-xs text-dim"
-            title={`Branch ${branch}`}
-          >
-            <GitBranch className="size-4 shrink-0" strokeWidth={1.5} aria-hidden />
-            <span className="truncate">{branch || "unknown"}</span>
-          </span>
+          {branch ? (
+            <span
+              className="@max-[22rem]/composer:hidden flex min-w-0 flex-1 basis-0 items-center gap-1.5 font-mono text-xs text-dim"
+              title={`Branch ${branch}`}
+            >
+              <GitBranch className="size-4 shrink-0" strokeWidth={1.5} aria-hidden />
+              <span className="truncate">{branch}</span>
+            </span>
+          ) : (
+            <span className="flex-1" />
+          )}
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <div className="flex items-center gap-0.5">
               {projectId && (

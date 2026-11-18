@@ -8,6 +8,7 @@ import {
   projectSectionFromPath,
   type ProjectSection,
 } from "@/lib/ade/navigation";
+import { useAppPathname } from "@/lib/ade/useAppPathname";
 import { useAdeState } from "@/lib/ade/store";
 import { needsAttention } from "@/lib/ade/viewed";
 
@@ -18,7 +19,15 @@ export function SectionTabs() {
     sessions: state.sessions,
   }));
   const queryClient = useQueryClient();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pathname = useAppPathname();
+  // The prerendered shell can still report `/` on a direct load of a workspace
+  // page. Match the route as well so project tabs never flash above it.
+  const workspaceRoute = useRouterState({
+    select: (state) =>
+      state.matches.some(
+        (match) => match.pathname === "/workspace" || match.pathname.startsWith("/workspace/"),
+      ),
+  });
   const projectId = projectIdFromPath(pathname) ?? activeProjectId;
   const routeSection = projectSectionFromPath(pathname);
   // Optimistic selection so the highlight moves on click, not after the route settles.
@@ -39,12 +48,18 @@ export function SectionTabs() {
     void queryClient.prefetchQuery(entriesQuery(projectId));
   }, [projectId, pathname, queryClient]);
 
-  if (!projectId || !projects.some((p) => p.id === projectId)) return null;
+  if (
+    workspaceRoute ||
+    pathname.startsWith("/workspace") ||
+    !projectId ||
+    !projects.some((p) => p.id === projectId)
+  )
+    return null;
 
   const needsInput = sessions.filter((s) => s.projectId === projectId && needsAttention(s)).length;
 
   const linkClass = (active: boolean) =>
-    `relative isolate inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] transition-colors ${
+    `relative isolate inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] transition-colors ${
       active ? "font-medium text-ink" : "text-dim hover:bg-ink/[0.04] hover:text-ink"
     }`;
   const highlight = (
@@ -58,7 +73,7 @@ export function SectionTabs() {
   return (
     <nav
       aria-label="Project sections"
-      className="flex h-9 shrink-0 items-center gap-1 border-b border-line bg-paper px-3 sm:px-4"
+      className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-line bg-paper px-3 [scrollbar-width:none] sm:px-4 [&::-webkit-scrollbar]:hidden"
     >
       <Link
         to="/p/$projectId/conversations"

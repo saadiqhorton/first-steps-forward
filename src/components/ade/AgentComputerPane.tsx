@@ -348,9 +348,10 @@ export function AgentComputerPane({
               ? "Unpacking Chrome for Testing. This happens once."
               : "ADE downloads its own copy of Chrome for Testing once, then reuses it for every project."
             : (computer.detail ?? "The browser will appear here in a moment.");
-  const checks = sessionDetail ? summarizeChecks(sessionDetail.checks) : null;
-  const added = sessionDetail?.changes.reduce((n, c) => n + c.added, 0) ?? 0;
-  const removed = sessionDetail?.changes.reduce((n, c) => n + c.removed, 0) ?? 0;
+  const changes = sessionDetail?.changes ?? [];
+  const checks = sessionDetail ? summarizeChecks(sessionDetail.checks ?? []) : null;
+  const added = changes.reduce((n, c) => n + c.added, 0);
+  const removed = changes.reduce((n, c) => n + c.removed, 0);
 
   const mediaInfoClasses =
     dock === "bottom"

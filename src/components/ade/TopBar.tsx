@@ -1,5 +1,7 @@
-import { Link, useRouterState } from "@tanstack/react-router";
-import { Plus, Settings } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Inbox, MessageCircle, Plus, Settings } from "lucide-react";
+import { getAssistantThreads } from "@/lib/ade/workspaceApi";
 import { GlideIndicator } from "@/components/ade/motion";
 import { projectColor } from "@/components/ade/projectColor";
 import { ProjectsMenu } from "@/components/ade/ProjectsMenu";
@@ -7,6 +9,7 @@ import { useShell } from "@/components/ade/shellContext";
 import { ThemeSwitch } from "@/components/arc/theme-switch/theme-switch";
 import { useAdeState } from "@/lib/ade/store";
 import { projectIdFromPath } from "@/lib/ade/navigation";
+import { useAppPathname } from "@/lib/ade/useAppPathname";
 import { useTheme } from "@/lib/theme";
 
 const ICON_BUTTON =
@@ -29,7 +32,19 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
   );
   const { openDialog } = useShell();
   const { theme, setTheme } = useTheme();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pathname = useAppPathname();
+  const assistant = useQuery({
+    queryKey: ["workspace-assistant-threads", "global"],
+    queryFn: () => getAssistantThreads(),
+    enabled: serviceAvailable,
+    refetchInterval: 5000,
+  });
+  const unreadChats = (assistant.data?.threads ?? []).filter((thread) =>
+    thread.readAt !== undefined ? thread.readAt < thread.updatedAt : thread.unread,
+  ).length;
+  const assistantWorking = (assistant.data?.threads ?? []).some(
+    (thread) => thread.status === "thinking",
+  );
 
   const activeFromRoute = projectIdFromPath(pathname);
   const activeId = activeFromRoute ?? activeProjectId;
@@ -37,12 +52,47 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
   return (
     <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-3 sm:px-4">
       <Link
-        to="/"
+        to="/workspace"
         className="heading-display shrink-0 text-xl text-ink hover:text-ink"
         aria-label="ADE home"
+        suppressHydrationWarning
       >
         ADE
       </Link>
+
+      <nav className="hidden items-center gap-1 sm:flex" aria-label="Workspace">
+        <Link
+          to="/workspace/inbox"
+          className="topbar-workspace-link"
+          activeProps={{ className: "topbar-workspace-link active" }}
+          suppressHydrationWarning
+        >
+          <Inbox className="size-4" strokeWidth={1.5} aria-hidden /> Inbox
+        </Link>
+        <Link
+          to="/workspace/assistant"
+          className="topbar-workspace-link"
+          activeProps={{ className: "topbar-workspace-link active" }}
+          suppressHydrationWarning
+        >
+          <MessageCircle className="size-4" strokeWidth={1.5} aria-hidden /> Luna
+          {(unreadChats > 0 || assistantWorking) && (
+            <span
+              className={`topbar-assistant-dot ${assistantWorking ? "working" : ""}`}
+              title={
+                assistantWorking
+                  ? "Luna is working"
+                  : `${unreadChats} unseen assistant ${unreadChats === 1 ? "reply" : "replies"}`
+              }
+              aria-label={
+                assistantWorking
+                  ? "Luna is working"
+                  : `${unreadChats} unseen assistant ${unreadChats === 1 ? "reply" : "replies"}`
+              }
+            />
+          )}
+        </Link>
+      </nav>
 
       {isDesktop ? (
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
@@ -69,12 +119,22 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
                     className="absolute inset-0 -z-10 rounded-md bg-ink/[0.06]"
                   />
                 )}
-                <span
-                  className={`grid size-5 shrink-0 place-items-center rounded-xs font-mono text-xs font-medium ${colors.bg} ${colors.fg}`}
-                  aria-hidden
-                >
-                  {initial}
-                </span>
+                {p.icon && /^(data:image\/|https?:)/i.test(p.icon) ? (
+                  <img
+                    src={p.icon}
+                    alt=""
+                    className="size-5 shrink-0 rounded-xs object-cover"
+                    aria-hidden
+                  />
+                ) : (
+                  <span
+                    className={`grid size-5 shrink-0 place-items-center rounded-xs font-mono text-xs font-medium ${colors.bg} ${colors.fg}`}
+                    style={p.color ? { background: `${p.color}26`, color: p.color } : undefined}
+                    aria-hidden
+                  >
+                    {p.icon || initial}
+                  </span>
+                )}
                 <span className="min-w-0 truncate" style={{ maxWidth: "18ch" }}>
                   {p.name}
                 </span>

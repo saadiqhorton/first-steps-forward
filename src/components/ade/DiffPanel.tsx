@@ -4,7 +4,7 @@ import type { Session } from "@/lib/ade/types";
 export function DiffPanel({ session }: { session: Session }) {
   const filesLabel = session.changeCountUnavailable
     ? "Files changed"
-    : `Files changed (${session.changes.length})`;
+    : `Files changed (${session.changes?.length ?? 0})`;
 
   return (
     <aside
@@ -15,7 +15,10 @@ export function DiffPanel({ session }: { session: Session }) {
         <section>
           <h2 className="label-mono">{filesLabel}</h2>
           <div className="mt-2">
-            <DiffView changes={session.changes} unavailable={!!session.changeCountUnavailable} />
+            <DiffView
+              changes={session.changes ?? []}
+              unavailable={!!session.changeCountUnavailable}
+            />
           </div>
         </section>
       </div>

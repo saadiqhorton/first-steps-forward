@@ -7,6 +7,7 @@ import {
   usePanelRef,
   type GroupImperativeHandle,
   type Layout,
+  type LayoutChangedMeta,
 } from "react-resizable-panels";
 import { z } from "zod";
 import { ConversationList } from "@/components/ade/ConversationList";
@@ -51,7 +52,49 @@ const LIST_REST_PCT = 24;
 const DEFAULT_LAYOUT: Layout = { [LIST_PANEL]: 24, [MAIN_PANEL]: 76 };
 const LIST_MIN_PX = 240;
 const LIST_MAX_PX = 440;
+const MAIN_MIN_PX = 360;
 const AUTO_COLLAPSE_THRESHOLD = 720;
+const LIST_WIDTH_KEY = "ade-conversations-list-width";
+
+/** Persist the list in pixels so resizing the other pane cannot rescale it. */
+function readListWidth(): number | null {
+  try {
+    const value = Number(localStorage.getItem(LIST_WIDTH_KEY));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeListWidth(px: number): void {
+  try {
+    localStorage.setItem(LIST_WIDTH_KEY, String(Math.round(px)));
+  } catch {
+    // Private mode / quota: keep the in-memory layout.
+  }
+}
+
+/** The nested project split should only be measured when the shell pane is shown. */
+function projectPaneVisible(): boolean {
+  if (typeof document === "undefined") return false;
+  if (document.body.classList.contains("shell-full-width")) return false;
+  const right = document.querySelector('[data-testid="shell-right"]');
+  return !right || getComputedStyle(right).display !== "none";
+}
+
+/** Below the auto-collapse breakpoint the split becomes one-pane-at-a-time. */
+function useIsNarrow(): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(`(max-width: ${AUTO_COLLAPSE_THRESHOLD - 1}px)`);
+    const apply = () => setNarrow(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+  return narrow;
+}
 
 function ConversationsLayout() {
   const { registerListToggle } = useShell();
@@ -62,32 +105,77 @@ function ConversationsLayout() {
   const [collapsedList, setCollapsedList] = useState(false);
   const autoCollapsedRef = useRef(false);
   const prevNarrowRef = useRef(false);
+  const hydratedRef = useRef(false);
+  const isNarrow = useIsNarrow();
+
+  const applyListPx = useCallback((px: number) => {
+    const group = groupRef.current;
+    const element = groupElementRef.current;
+    if (!group || !element) return false;
+    const total = element.offsetWidth;
+    if (!projectPaneVisible() || total <= 0) return false;
+    const maxForMain = Math.max(LIST_MIN_PX, total - MAIN_MIN_PX);
+    const clamped = Math.min(Math.max(px, LIST_MIN_PX), Math.min(LIST_MAX_PX, maxForMain));
+    const percentage = (clamped / total) * 100;
+    group.setLayout({
+      ...group.getLayout(),
+      [LIST_PANEL]: percentage,
+      [MAIN_PANEL]: 100 - percentage,
+    });
+    return true;
+  }, []);
 
   useEffect(() => {
-    hydrateGroup(groupRef, DEFAULT_LAYOUT);
-  }, [hydrateGroup]);
+    if (hydratedRef.current) return;
+    const saved = readListWidth();
+    if (!saved) {
+      hydratedRef.current = true;
+      hydrateGroup(groupRef, DEFAULT_LAYOUT);
+      return;
+    }
+    // On client-side navigation the Group can mount one frame before it has a
+    // measurable width. Retry until the saved pixel width can be applied.
+    let cancelled = false;
+    let frames = 0;
+    const attempt = () => {
+      if (cancelled || hydratedRef.current) return;
+      if (applyListPx(saved)) {
+        hydratedRef.current = true;
+        return;
+      }
+      if (frames++ < 30) requestAnimationFrame(attempt);
+      else {
+        hydratedRef.current = true;
+        hydrateGroup(groupRef, DEFAULT_LAYOUT);
+      }
+    };
+    attempt();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyListPx, hydrateGroup]);
+
+  const expandList = useCallback(() => {
+    if (isNarrow) {
+      const group = groupRef.current;
+      if (!group) return;
+      // One pane at a time: the list owns the full nested group.
+      group.setLayout({ ...group.getLayout(), [LIST_PANEL]: 100, [MAIN_PANEL]: 0 });
+      return;
+    }
+    const total = groupElementRef.current?.offsetWidth ?? 0;
+    const fallback = Math.max(LIST_MIN_PX, Math.round((total * LIST_REST_PCT) / 100));
+    applyListPx(readListWidth() ?? fallback);
+  }, [applyListPx, isNarrow]);
 
   const toggleList = useCallback(() => {
-    const current = groupRef.current?.getLayout();
-    if (!current) return;
-    const cur = current[LIST_PANEL] ?? 0;
-    const curMain = current[MAIN_PANEL] ?? 0;
-    if (cur < 1) {
-      groupRef.current?.setLayout({
-        ...current,
-        [LIST_PANEL]: LIST_REST_PCT,
-        [MAIN_PANEL]: Math.max(0, 100 - LIST_REST_PCT),
-      });
-    } else {
-      groupRef.current?.setLayout({
-        ...current,
-        [LIST_PANEL]: 0,
-        [MAIN_PANEL]: curMain + cur,
-      });
-    }
+    const panel = listPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) expandList();
+    else panel.collapse();
     // User manually toggled, reset auto-collapse tracking
     autoCollapsedRef.current = false;
-  }, []);
+  }, [expandList, listPanelRef]);
 
   useEffect(() => {
     registerListToggle(toggleList);
@@ -97,6 +185,18 @@ function ConversationsLayout() {
   const onListResize = (size: { asPercentage: number }) =>
     setCollapsedList((c) => (c === (size.asPercentage === 0) ? c : size.asPercentage === 0));
 
+  const handleLayoutChanged = useCallback(
+    (layout: Layout, meta: LayoutChangedMeta) => {
+      onLayoutChanged(layout, meta);
+      if (!meta.isUserInteraction || isNarrow) return;
+      const total = groupElementRef.current?.offsetWidth;
+      const percentage = layout[LIST_PANEL] ?? 0;
+      // A collapsed list must not overwrite the last expanded width.
+      if (total && percentage > 0) writeListWidth((percentage / 100) * total);
+    },
+    [isNarrow, onLayoutChanged],
+  );
+
   // Auto-collapse when Group width crosses threshold
   useEffect(() => {
     const groupElement = groupElementRef.current;
@@ -104,26 +204,31 @@ function ConversationsLayout() {
 
     const observer = new ResizeObserver(() => {
       const width = groupElement.offsetWidth;
-      const isNarrow = width < AUTO_COLLAPSE_THRESHOLD;
+      const isNowNarrow = width < AUTO_COLLAPSE_THRESHOLD;
 
-      if (isNarrow && !prevNarrowRef.current) {
+      if (isNowNarrow && !prevNarrowRef.current) {
         if (!listPanelRef.current?.isCollapsed()) {
           listPanelRef.current?.collapse();
           autoCollapsedRef.current = true;
         }
-      } else if (!isNarrow && prevNarrowRef.current && autoCollapsedRef.current) {
-        if (listPanelRef.current?.isCollapsed()) {
-          listPanelRef.current?.expand();
+      } else if (!isNowNarrow && prevNarrowRef.current) {
+        const current = groupRef.current?.getLayout();
+        const listPercentage = current?.[LIST_PANEL] ?? 0;
+        // Restore a desktop width when the window grows again, including the
+        // one-pane mobile layout the user opened manually.
+        if (autoCollapsedRef.current || listPercentage >= 99) {
+          const fallback = Math.max(LIST_MIN_PX, Math.round((width * LIST_REST_PCT) / 100));
+          applyListPx(readListWidth() ?? fallback);
           autoCollapsedRef.current = false;
         }
       }
 
-      prevNarrowRef.current = isNarrow;
+      prevNarrowRef.current = isNowNarrow;
     });
 
     observer.observe(groupElement);
     return () => observer.disconnect();
-  }, [listPanelRef]);
+  }, [applyListPx, listPanelRef]);
 
   return (
     <div ref={groupElementRef} style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
@@ -132,7 +237,7 @@ function ConversationsLayout() {
         groupRef={groupRef}
         orientation="horizontal"
         defaultLayout={DEFAULT_LAYOUT}
-        onLayoutChanged={onLayoutChanged}
+        onLayoutChanged={handleLayoutChanged}
         style={{ flex: 1, minHeight: 0, minWidth: 0 }}
         className="min-h-0 min-w-0 flex-1"
       >
@@ -142,8 +247,9 @@ function ConversationsLayout() {
           className="min-w-0 overflow-hidden"
           collapsible
           collapsedSize={0}
-          minSize={`${LIST_MIN_PX}px`}
-          maxSize={`${LIST_MAX_PX}px`}
+          minSize={isNarrow ? "0px" : `${LIST_MIN_PX}px`}
+          maxSize={isNarrow ? "100%" : `${LIST_MAX_PX}px`}
+          groupResizeBehavior="preserve-pixel-size"
           style={{ minWidth: 0, overflow: "hidden" }}
           onResize={onListResize}
         >
@@ -165,7 +271,7 @@ function ConversationsLayout() {
           id={MAIN_PANEL}
           className="min-w-0 overflow-hidden"
           style={{ minWidth: 0, overflow: "hidden" }}
-          minSize="360px"
+          minSize={isNarrow ? "0px" : `${MAIN_MIN_PX}px`}
         >
           <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <Outlet />

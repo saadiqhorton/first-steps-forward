@@ -13,16 +13,24 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as ProcessesRouteImport } from './routes/processes'
+import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as PProjectIdRouteImport } from './routes/p.$projectId'
 import { Route as ProjectsAddRouteImport } from './routes/projects.add'
 import { Route as SessionsSessionIdRouteImport } from './routes/sessions.$sessionId'
 import { Route as TasksNewRouteImport } from './routes/tasks.new'
+import { Route as WorkspaceIndexRouteImport } from './routes/workspace.index'
+import { Route as WorkspaceAssistantRouteImport } from './routes/workspace.assistant'
+import { Route as WorkspaceInboxRouteImport } from './routes/workspace.inbox'
+import { Route as WorkspaceProjectsRouteImport } from './routes/workspace.projects'
+import { Route as WorkspaceSettingsRouteImport } from './routes/workspace.settings'
 import { Route as PProjectIdIndexRouteImport } from './routes/p.$projectId.index'
 import { Route as PProjectIdConversationsRouteImport } from './routes/p.$projectId.conversations'
 import { Route as PProjectIdFilesRouteImport } from './routes/p.$projectId.files'
 import { Route as PProjectIdProcessesRouteImport } from './routes/p.$projectId.processes'
 import { Route as PProjectIdSkillsRouteImport } from './routes/p.$projectId.skills'
 import { Route as PProjectIdWorkflowsRouteImport } from './routes/p.$projectId.workflows'
+import { Route as WorkspaceAssistantIndexRouteImport } from './routes/workspace.assistant.index'
+import { Route as WorkspaceAssistantThreadIdRouteImport } from './routes/workspace.assistant.$threadId'
 import { Route as PProjectIdConversationsIndexRouteImport } from './routes/p.$projectId.conversations.index'
 import { Route as PProjectIdConversationsSessionIdRouteImport } from './routes/p.$projectId.conversations.$sessionId'
 
@@ -46,6 +54,11 @@ const ProcessesRoute = ProcessesRouteImport.update({
   path: '/processes',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkspaceRoute = WorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PProjectIdRoute = PProjectIdRouteImport.update({
   id: '/p/$projectId',
   path: '/p/$projectId',
@@ -65,6 +78,31 @@ const TasksNewRoute = TasksNewRouteImport.update({
   id: '/tasks/new',
   path: '/tasks/new',
   getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspaceIndexRoute = WorkspaceIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceAssistantRoute = WorkspaceAssistantRouteImport.update({
+  id: '/assistant',
+  path: '/assistant',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceInboxRoute = WorkspaceInboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceProjectsRoute = WorkspaceProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceSettingsRoute = WorkspaceSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => WorkspaceRoute,
 } as any)
 const PProjectIdIndexRoute = PProjectIdIndexRouteImport.update({
   id: '/',
@@ -96,6 +134,17 @@ const PProjectIdWorkflowsRoute = PProjectIdWorkflowsRouteImport.update({
   path: '/workflows',
   getParentRoute: () => PProjectIdRoute,
 } as any)
+const WorkspaceAssistantIndexRoute = WorkspaceAssistantIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => WorkspaceAssistantRoute,
+} as any)
+const WorkspaceAssistantThreadIdRoute =
+  WorkspaceAssistantThreadIdRouteImport.update({
+    id: '/$threadId',
+    path: '/$threadId',
+    getParentRoute: () => WorkspaceAssistantRoute,
+  } as any)
 const PProjectIdConversationsIndexRoute =
   PProjectIdConversationsIndexRouteImport.update({
     id: '/',
@@ -114,16 +163,24 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRoute
   '/history': typeof HistoryRoute
   '/processes': typeof ProcessesRoute
+  '/workspace': typeof WorkspaceRouteWithChildren
   '/p/$projectId': typeof PProjectIdRouteWithChildren
   '/projects/add': typeof ProjectsAddRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/tasks/new': typeof TasksNewRoute
+  '/workspace/assistant': typeof WorkspaceAssistantRouteWithChildren
+  '/workspace/inbox': typeof WorkspaceInboxRoute
+  '/workspace/projects': typeof WorkspaceProjectsRoute
+  '/workspace/settings': typeof WorkspaceSettingsRoute
+  '/workspace/': typeof WorkspaceIndexRoute
   '/p/$projectId/conversations': typeof PProjectIdConversationsRouteWithChildren
   '/p/$projectId/files': typeof PProjectIdFilesRoute
   '/p/$projectId/processes': typeof PProjectIdProcessesRoute
   '/p/$projectId/skills': typeof PProjectIdSkillsRoute
   '/p/$projectId/workflows': typeof PProjectIdWorkflowsRoute
+  '/workspace/assistant/$threadId': typeof WorkspaceAssistantThreadIdRoute
   '/p/$projectId/': typeof PProjectIdIndexRoute
+  '/workspace/assistant/': typeof WorkspaceAssistantIndexRoute
   '/p/$projectId/conversations/$sessionId': typeof PProjectIdConversationsSessionIdRoute
   '/p/$projectId/conversations/': typeof PProjectIdConversationsIndexRoute
 }
@@ -135,11 +192,17 @@ export interface FileRoutesByTo {
   '/projects/add': typeof ProjectsAddRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/tasks/new': typeof TasksNewRoute
+  '/workspace/inbox': typeof WorkspaceInboxRoute
+  '/workspace/projects': typeof WorkspaceProjectsRoute
+  '/workspace/settings': typeof WorkspaceSettingsRoute
+  '/workspace': typeof WorkspaceIndexRoute
   '/p/$projectId/files': typeof PProjectIdFilesRoute
   '/p/$projectId/processes': typeof PProjectIdProcessesRoute
   '/p/$projectId/skills': typeof PProjectIdSkillsRoute
   '/p/$projectId/workflows': typeof PProjectIdWorkflowsRoute
+  '/workspace/assistant/$threadId': typeof WorkspaceAssistantThreadIdRoute
   '/p/$projectId': typeof PProjectIdIndexRoute
+  '/workspace/assistant': typeof WorkspaceAssistantIndexRoute
   '/p/$projectId/conversations/$sessionId': typeof PProjectIdConversationsSessionIdRoute
   '/p/$projectId/conversations': typeof PProjectIdConversationsIndexRoute
 }
@@ -149,16 +212,24 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRoute
   '/history': typeof HistoryRoute
   '/processes': typeof ProcessesRoute
+  '/workspace': typeof WorkspaceRouteWithChildren
   '/p/$projectId': typeof PProjectIdRouteWithChildren
   '/projects/add': typeof ProjectsAddRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/tasks/new': typeof TasksNewRoute
+  '/workspace/assistant': typeof WorkspaceAssistantRouteWithChildren
+  '/workspace/inbox': typeof WorkspaceInboxRoute
+  '/workspace/projects': typeof WorkspaceProjectsRoute
+  '/workspace/settings': typeof WorkspaceSettingsRoute
+  '/workspace/': typeof WorkspaceIndexRoute
   '/p/$projectId/conversations': typeof PProjectIdConversationsRouteWithChildren
   '/p/$projectId/files': typeof PProjectIdFilesRoute
   '/p/$projectId/processes': typeof PProjectIdProcessesRoute
   '/p/$projectId/skills': typeof PProjectIdSkillsRoute
   '/p/$projectId/workflows': typeof PProjectIdWorkflowsRoute
+  '/workspace/assistant/$threadId': typeof WorkspaceAssistantThreadIdRoute
   '/p/$projectId/': typeof PProjectIdIndexRoute
+  '/workspace/assistant/': typeof WorkspaceAssistantIndexRoute
   '/p/$projectId/conversations/$sessionId': typeof PProjectIdConversationsSessionIdRoute
   '/p/$projectId/conversations/': typeof PProjectIdConversationsIndexRoute
 }
@@ -169,16 +240,24 @@ export interface FileRouteTypes {
     | '/agents'
     | '/history'
     | '/processes'
+    | '/workspace'
     | '/p/$projectId'
     | '/projects/add'
     | '/sessions/$sessionId'
     | '/tasks/new'
+    | '/workspace/assistant'
+    | '/workspace/inbox'
+    | '/workspace/projects'
+    | '/workspace/settings'
+    | '/workspace/'
     | '/p/$projectId/conversations'
     | '/p/$projectId/files'
     | '/p/$projectId/processes'
     | '/p/$projectId/skills'
     | '/p/$projectId/workflows'
+    | '/workspace/assistant/$threadId'
     | '/p/$projectId/'
+    | '/workspace/assistant/'
     | '/p/$projectId/conversations/$sessionId'
     | '/p/$projectId/conversations/'
   fileRoutesByTo: FileRoutesByTo
@@ -190,11 +269,17 @@ export interface FileRouteTypes {
     | '/projects/add'
     | '/sessions/$sessionId'
     | '/tasks/new'
+    | '/workspace/inbox'
+    | '/workspace/projects'
+    | '/workspace/settings'
+    | '/workspace'
     | '/p/$projectId/files'
     | '/p/$projectId/processes'
     | '/p/$projectId/skills'
     | '/p/$projectId/workflows'
+    | '/workspace/assistant/$threadId'
     | '/p/$projectId'
+    | '/workspace/assistant'
     | '/p/$projectId/conversations/$sessionId'
     | '/p/$projectId/conversations'
   id:
@@ -203,16 +288,24 @@ export interface FileRouteTypes {
     | '/agents'
     | '/history'
     | '/processes'
+    | '/workspace'
     | '/p/$projectId'
     | '/projects/add'
     | '/sessions/$sessionId'
     | '/tasks/new'
+    | '/workspace/assistant'
+    | '/workspace/inbox'
+    | '/workspace/projects'
+    | '/workspace/settings'
+    | '/workspace/'
     | '/p/$projectId/conversations'
     | '/p/$projectId/files'
     | '/p/$projectId/processes'
     | '/p/$projectId/skills'
     | '/p/$projectId/workflows'
+    | '/workspace/assistant/$threadId'
     | '/p/$projectId/'
+    | '/workspace/assistant/'
     | '/p/$projectId/conversations/$sessionId'
     | '/p/$projectId/conversations/'
   fileRoutesById: FileRoutesById
@@ -222,6 +315,7 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRoute
   HistoryRoute: typeof HistoryRoute
   ProcessesRoute: typeof ProcessesRoute
+  WorkspaceRoute: typeof WorkspaceRouteWithChildren
   PProjectIdRoute: typeof PProjectIdRouteWithChildren
   ProjectsAddRoute: typeof ProjectsAddRoute
   SessionsSessionIdRoute: typeof SessionsSessionIdRoute
@@ -258,6 +352,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProcessesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/workspace': {
+      id: '/workspace'
+      path: '/workspace'
+      fullPath: '/workspace'
+      preLoaderRoute: typeof WorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/p/$projectId': {
       id: '/p/$projectId'
       path: '/p/$projectId'
@@ -285,6 +386,41 @@ declare module '@tanstack/react-router' {
       fullPath: '/tasks/new'
       preLoaderRoute: typeof TasksNewRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/workspace/': {
+      id: '/workspace/'
+      path: '/'
+      fullPath: '/workspace/'
+      preLoaderRoute: typeof WorkspaceIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/workspace/assistant': {
+      id: '/workspace/assistant'
+      path: '/assistant'
+      fullPath: '/workspace/assistant'
+      preLoaderRoute: typeof WorkspaceAssistantRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/workspace/inbox': {
+      id: '/workspace/inbox'
+      path: '/inbox'
+      fullPath: '/workspace/inbox'
+      preLoaderRoute: typeof WorkspaceInboxRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/workspace/projects': {
+      id: '/workspace/projects'
+      path: '/projects'
+      fullPath: '/workspace/projects'
+      preLoaderRoute: typeof WorkspaceProjectsRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/workspace/settings': {
+      id: '/workspace/settings'
+      path: '/settings'
+      fullPath: '/workspace/settings'
+      preLoaderRoute: typeof WorkspaceSettingsRouteImport
+      parentRoute: typeof WorkspaceRoute
     }
     '/p/$projectId/': {
       id: '/p/$projectId/'
@@ -328,6 +464,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PProjectIdWorkflowsRouteImport
       parentRoute: typeof PProjectIdRoute
     }
+    '/workspace/assistant/': {
+      id: '/workspace/assistant/'
+      path: '/'
+      fullPath: '/workspace/assistant/'
+      preLoaderRoute: typeof WorkspaceAssistantIndexRouteImport
+      parentRoute: typeof WorkspaceAssistantRoute
+    }
+    '/workspace/assistant/$threadId': {
+      id: '/workspace/assistant/$threadId'
+      path: '/$threadId'
+      fullPath: '/workspace/assistant/$threadId'
+      preLoaderRoute: typeof WorkspaceAssistantThreadIdRouteImport
+      parentRoute: typeof WorkspaceAssistantRoute
+    }
     '/p/$projectId/conversations/': {
       id: '/p/$projectId/conversations/'
       path: '/'
@@ -344,6 +494,39 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface WorkspaceAssistantRouteChildren {
+  WorkspaceAssistantThreadIdRoute: typeof WorkspaceAssistantThreadIdRoute
+  WorkspaceAssistantIndexRoute: typeof WorkspaceAssistantIndexRoute
+}
+
+const WorkspaceAssistantRouteChildren: WorkspaceAssistantRouteChildren = {
+  WorkspaceAssistantThreadIdRoute: WorkspaceAssistantThreadIdRoute,
+  WorkspaceAssistantIndexRoute: WorkspaceAssistantIndexRoute,
+}
+
+const WorkspaceAssistantRouteWithChildren =
+  WorkspaceAssistantRoute._addFileChildren(WorkspaceAssistantRouteChildren)
+
+interface WorkspaceRouteChildren {
+  WorkspaceAssistantRoute: typeof WorkspaceAssistantRouteWithChildren
+  WorkspaceInboxRoute: typeof WorkspaceInboxRoute
+  WorkspaceProjectsRoute: typeof WorkspaceProjectsRoute
+  WorkspaceSettingsRoute: typeof WorkspaceSettingsRoute
+  WorkspaceIndexRoute: typeof WorkspaceIndexRoute
+}
+
+const WorkspaceRouteChildren: WorkspaceRouteChildren = {
+  WorkspaceAssistantRoute: WorkspaceAssistantRouteWithChildren,
+  WorkspaceInboxRoute: WorkspaceInboxRoute,
+  WorkspaceProjectsRoute: WorkspaceProjectsRoute,
+  WorkspaceSettingsRoute: WorkspaceSettingsRoute,
+  WorkspaceIndexRoute: WorkspaceIndexRoute,
+}
+
+const WorkspaceRouteWithChildren = WorkspaceRoute._addFileChildren(
+  WorkspaceRouteChildren,
+)
 
 interface PProjectIdConversationsRouteChildren {
   PProjectIdConversationsSessionIdRoute: typeof PProjectIdConversationsSessionIdRoute
@@ -389,6 +572,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsRoute: AgentsRoute,
   HistoryRoute: HistoryRoute,
   ProcessesRoute: ProcessesRoute,
+  WorkspaceRoute: WorkspaceRouteWithChildren,
   PProjectIdRoute: PProjectIdRouteWithChildren,
   ProjectsAddRoute: ProjectsAddRoute,
   SessionsSessionIdRoute: SessionsSessionIdRoute,

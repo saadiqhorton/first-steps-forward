@@ -31,6 +31,7 @@ import {
   RIGHT_TABS,
   type RightTab,
 } from "@/lib/ade/navigation";
+import { useAppPathname } from "@/lib/ade/useAppPathname";
 import { useActiveProjectSelection, useAdeState } from "@/lib/ade/store";
 import type { Project } from "@/lib/ade/types";
 import { AddProjectDialog } from "./AddProjectDialog";
@@ -163,7 +164,7 @@ function PaneSlot({ el }: { el: HTMLDivElement }) {
 
 export function Shell({ children }: { children: ReactNode }) {
   const [rightHost, setRightHost] = useState<HTMLDivElement | null>(null);
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const pathname = useAppPathname();
   const conversationId = useRouterState({
     select: (state) =>
       (state.matches.at(-1)?.params as { sessionId?: string } | undefined)?.sessionId ?? null,
@@ -211,7 +212,7 @@ function ShellInner({
   const navigate = useNavigate();
   const router = useRouter();
   const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pathname = useAppPathname();
   // Animate the section that is actually rendered. Requested location changes
   // before pending route code loads, while matches still show the outgoing page.
   const sectionKey = useRouterState({
@@ -224,6 +225,28 @@ function ShellInner({
   const activeSessionId = useRouterState({
     select: (s) => (s.matches.at(-1)?.params as { sessionId?: string } | undefined)?.sessionId,
   });
+  // Workflows, Skills, Processes and the workspace are spaces of their own.
+  // The right pane belongs to a running session, so those sections take the
+  // whole window. Derive this from the matched routes as well as the URL: on a
+  // direct load the prerendered shell's router can briefly report `/` while the
+  // real route is already matched.
+  const focusedSection = projectSectionFromPath(pathname);
+  const fullWidthMatch = useRouterState({
+    select: (state) =>
+      state.matches.some((match) => {
+        if (match.pathname === "/workspace" || match.pathname.startsWith("/workspace/"))
+          return true;
+        const section = projectSectionFromPath(match.pathname);
+        return section === "workflows" || section === "skills" || section === "processes";
+      }),
+  });
+  const fullWidthSection =
+    pathname === "/" ||
+    focusedSection === "workflows" ||
+    focusedSection === "skills" ||
+    focusedSection === "processes" ||
+    fullWidthMatch ||
+    pathname.startsWith("/workspace");
   const searchStr = useRouterState({ select: (s) => s.location.searchStr });
   const [rightTab, setRightTab] = useState<RightTab>("computer");
   const [dialog, setDialog] = useState<ShellDialog | null>(null);
@@ -384,15 +407,55 @@ function ShellInner({
     // Old layouts could persist the right panel at 0 (fully hidden). With the
     // new rail, 0 — or anything short of the min size — must resolve to a
     // clean collapse instead of an under-sized panel. Measuring needs a frame.
+    // Skip while a full-window page is open: the pane is display:none there, so
+    // it measures 0 and would otherwise stay collapsed when the user returns.
+    if (fullWidthSection) return;
     const panelRef = effectiveDock === "side" ? sidePanelRef : bottomPanelRef;
     const minPx = effectiveDock === "side" ? RIGHT_MIN_PX : BOTTOM_MIN_PX;
     requestAnimationFrame(() => {
       const size = panelRef.current?.getSize();
       if (size && size.inPixels < minPx) panelRef.current?.collapse();
     });
-  }, [effectiveDock, hydrateSideGroup, hydrateBottomGroup]);
+  }, [effectiveDock, hydrateSideGroup, hydrateBottomGroup, fullWidthSection]);
 
   const [collapsedRight, setCollapsedRight] = useState(false);
+  const collapsedBeforeFullWidth = useRef(false);
+  const wasFullWidth = useRef(fullWidthSection);
+
+  // Workspace chat is global. Keep its shortcuts available from every project,
+  // while leaving normal typing and browser shortcuts untouched.
+  const returnPath = useRef<string | null>(null);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      // Read the browser URL in the handler: the router snapshot can still be
+      // the prerendered `/` on the first load, and a stale return path would
+      // send Escape back to home instead of the page the user left.
+      const here = typeof window === "undefined" ? pathname : window.location.pathname;
+      const target = event.target as HTMLElement | null;
+      const editing =
+        !!target &&
+        (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        // Closing the assistant returns to the project or page the user left.
+        if (!here.startsWith("/workspace")) returnPath.current = here;
+        void navigate({ to: "/workspace/assistant" });
+      } else if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key === "\\" &&
+        here.startsWith("/workspace/assistant")
+      ) {
+        event.preventDefault();
+        window.dispatchEvent(new CustomEvent("ade:assistant-toggle-history"));
+      } else if (!editing && event.key === "Escape" && here.startsWith("/workspace/assistant")) {
+        const back = returnPath.current;
+        returnPath.current = null;
+        void navigate({ to: back ?? "/workspace" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate, pathname]);
 
   // A link from chat or the terminal brings the browser tab forward.
   useEffect(() => {
@@ -622,11 +685,30 @@ function ShellInner({
   );
 
   const railOrientation = effectiveDock === "side" ? "vertical" : "horizontal";
-  // Workflows and Skills are read-and-write spaces of their own. The right pane
-  // belongs to a running session, so those sections take the whole window.
-  const focusedSection = projectSectionFromPath(pathname);
-  const fullWidthSection =
-    focusedSection === "workflows" || focusedSection === "skills" || focusedSection === "processes";
+  // Toggle the class on <body> rather than on the Group's JSX. The prerendered
+  // shell is rendered at `/`, and a host attribute changed during hydration can
+  // be dropped, which left deep-linked Workflows/Skills/Processes split with an
+  // empty right pane. A layout effect writes the browser-owned node before the
+  // next paint and keeps the React markup identical on both sides of hydration.
+  //
+  // Hiding the pane also makes the library measure it at 0px. Remember whether
+  // the user had collapsed it before a full-window page and restore that exact
+  // intent when they come back, instead of returning to a surprise 40px rail.
+  useLayoutEffect(() => {
+    const panel = activePanelRef.current;
+    if (fullWidthSection && !wasFullWidth.current) {
+      collapsedBeforeFullWidth.current = collapsedRight;
+    }
+    const root = document.body;
+    root.classList.toggle("shell-full-width", fullWidthSection);
+    if (!fullWidthSection && wasFullWidth.current) {
+      if (collapsedBeforeFullWidth.current) panel?.collapse();
+      else panel?.expand();
+    }
+    wasFullWidth.current = fullWidthSection;
+    return () => root.classList.remove("shell-full-width");
+  }, [fullWidthSection, collapsedRight, activePanelRef]);
+
   const rail = (
     <RightRail
       orientation={railOrientation}
@@ -661,14 +743,7 @@ function ShellInner({
         <SectionTabs />
 
         <div className="flex min-h-0 flex-1">
-          {fullWidthSection ? (
-            <SectionFade
-              sectionKey={sectionKey}
-              className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-            >
-              {children}
-            </SectionFade>
-          ) : effectiveDock === "side" ? (
+          {effectiveDock === "side" ? (
             <Group
               key={SHELL_LAYOUT_ID}
               id={SHELL_LAYOUT_ID}
@@ -710,7 +785,10 @@ function ShellInner({
                 minSize={`${RIGHT_MIN_PX}px`}
                 maxSize={`${RIGHT_MAX_PCT}%`}
                 style={{ minWidth: 0, overflow: "hidden" }}
-                onResize={() => setCollapsedRight(sidePanelRef.current?.isCollapsed() ?? false)}
+                onResize={() => {
+                  if (fullWidthSection) return;
+                  setCollapsedRight(sidePanelRef.current?.isCollapsed() ?? false);
+                }}
               >
                 {panelBody}
               </Panel>
@@ -757,7 +835,10 @@ function ShellInner({
                 minSize={`${BOTTOM_MIN_PX}px`}
                 maxSize={`${BOTTOM_MAX_PCT}%`}
                 style={{ minWidth: 0, overflow: "hidden" }}
-                onResize={() => setCollapsedRight(bottomPanelRef.current?.isCollapsed() ?? false)}
+                onResize={() => {
+                  if (fullWidthSection) return;
+                  setCollapsedRight(bottomPanelRef.current?.isCollapsed() ?? false);
+                }}
               >
                 {panelBody}
               </Panel>

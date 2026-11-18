@@ -37,6 +37,11 @@ export interface Project {
   missing?: boolean;
   defaultAgent: AgentId;
   addedAt: number;
+  /** ADE-managed project instructions, applied to every agent turn. */
+  workspaceInstructions?: string;
+  /** The owner's project color (six-digit hex) and icon (emoji or image URL). */
+  color?: string | null;
+  icon?: string | null;
   /** The dev command the user approved for a project without a package.json dev script. */
   devCommand?: ApprovedDevCommand;
   /** A proposed dev command waiting on the user that no session holds (shown in the right pane). */

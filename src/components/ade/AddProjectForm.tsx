@@ -163,7 +163,7 @@ export function AddProjectForm({
     <div
       className={
         embedded
-          ? "min-h-0 w-full overflow-y-auto px-6 pb-6 pt-6 pr-12"
+          ? "min-h-0 w-full overflow-y-auto px-6 pb-6 pt-6 pr-6 sm:pr-12"
           : "mx-auto w-full max-w-xl px-7 pb-8 pt-8"
       }
     >
@@ -171,10 +171,28 @@ export function AddProjectForm({
         Add a project
       </h1>
       <Tabs value={mode} onValueChange={switchMode} className="mt-4">
-        <TabsList aria-label="Where the project comes from" className="h-auto flex-wrap">
-          <TabsTrigger value="folder">Existing folder</TabsTrigger>
-          <TabsTrigger value="clone">Clone from GitHub</TabsTrigger>
-          <TabsTrigger value="new">New folder</TabsTrigger>
+        <TabsList
+          aria-label="Where the project comes from"
+          className="grid h-auto w-full grid-cols-3 gap-1 sm:inline-flex sm:w-auto"
+        >
+          <TabsTrigger
+            value="folder"
+            className="min-h-9 min-w-0 px-2 text-xs focus-visible:ring-amber/60 focus-visible:ring-offset-paper sm:px-3 sm:text-sm"
+          >
+            Existing folder
+          </TabsTrigger>
+          <TabsTrigger
+            value="clone"
+            className="min-h-9 min-w-0 px-2 text-xs focus-visible:ring-amber/60 focus-visible:ring-offset-paper sm:px-3 sm:text-sm"
+          >
+            Clone from GitHub
+          </TabsTrigger>
+          <TabsTrigger
+            value="new"
+            className="min-h-9 min-w-0 px-2 text-xs focus-visible:ring-amber/60 focus-visible:ring-offset-paper sm:px-3 sm:text-sm"
+          >
+            New folder
+          </TabsTrigger>
         </TabsList>
       </Tabs>
       <p className="mt-3 text-[13px] text-dim">{DESCRIPTIONS[mode]}</p>

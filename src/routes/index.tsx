@@ -1,7 +1,6 @@
-import { useEffect } from "react";
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { readLastProject } from "@/lib/ade/navigation";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useAdeState } from "@/lib/ade/store";
+import { WorkspaceOverview } from "@/components/ade/WorkspaceHub";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -24,20 +23,6 @@ export const Route = createFileRoute("/")({
 
 function ProjectHome() {
   const state = useAdeState((state) => ({ hydrated: state.hydrated, projects: state.projects }));
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!state.hydrated || !state.projects.length) return;
-    const last = readLastProject();
-    const projectId =
-      (last && state.projects.some((p) => p.id === last) ? last : null) ?? state.projects[0]!.id;
-    void navigate({
-      to: "/p/$projectId/conversations",
-      params: { projectId },
-      replace: true,
-    });
-  }, [state.hydrated, state.projects, navigate]);
-
   if (!state.hydrated) return <main className="flex-1" />;
 
   if (!state.projects.length)
@@ -57,5 +42,5 @@ function ProjectHome() {
       </main>
     );
 
-  return <main className="flex-1" />;
+  return <WorkspaceOverview />;
 }
