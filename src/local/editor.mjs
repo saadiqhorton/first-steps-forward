@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { mediaKindOf, mediaTypeOf } from "../shared/media-types.mjs";
 
 const MAX_FILE_BYTES = 512 * 1024;
 const SEARCH_LIMIT = 80;
@@ -27,6 +28,11 @@ const DOCUMENT_SKIP_DIRS = new Set([
   ".next",
   ".tanstack",
 ]);
+const PREVIEW_MAX_FILES = 400;
+const PREVIEW_CONCURRENCY = 16;
+const PREVIEW_BYTES = 4096;
+const PREVIEW_LINES = 16;
+const PREVIEW_LINE_CHARS = 120;
 const DOCUMENT_EXTENSIONS = new Set([".md", ".mdx"]);
 export class EditorError extends Error {
   constructor(status, message) {
@@ -318,4 +324,121 @@ export async function listDocuments(projectPath, { limit = 12, maxDepth = 4 } = 
   return found
     .sort((a, b) => b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path))
     .slice(0, limit);
+}
+
+async function mapPool(items, limit, task) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await task(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+function snippetOf(bytes) {
+  if (bytes.includes(0)) return null;
+  let decoded;
+  try {
+    decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: true });
+  } catch {
+    return null;
+  }
+  return decoded
+    .replace(/\r\n/g, "\n")
+    .replace(/\t/g, "  ")
+    .split("\n")
+    .slice(0, PREVIEW_LINES)
+    .map((line) => line.slice(0, PREVIEW_LINE_CHARS))
+    .join("\n");
+}
+
+async function readSnippet(file) {
+  let handle;
+  try {
+    handle = await fs.open(file, "r");
+    const buffer = Buffer.alloc(PREVIEW_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, PREVIEW_BYTES, 0);
+    return snippetOf(buffer.subarray(0, bytesRead));
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/** Size, modified time, media kind and a text snippet for each file directly inside a folder. */
+export async function listEditorPreviews(projectPath, relative = "") {
+  const entries = (await listEditorEntries(projectPath, relative))
+    .filter((entry) => entry.kind === "file")
+    .slice(0, PREVIEW_MAX_FILES);
+  const { root } = await resolveInside(projectPath, "");
+  const found = await mapPool(entries, PREVIEW_CONCURRENCY, async (entry) => {
+    const absolute = path.join(root, ...entry.path.split("/"));
+    let stat;
+    try {
+      stat = await fs.stat(absolute);
+    } catch {
+      return null;
+    }
+    const media = mediaKindOf(entry.name);
+    return [
+      entry.path,
+      {
+        size: stat.size,
+        modifiedAt: stat.mtimeMs,
+        media,
+        text: media ? null : await readSnippet(absolute),
+      },
+    ];
+  });
+  return Object.fromEntries(found.filter(Boolean));
+}
+
+/** null: send everything; undefined: unsatisfiable; otherwise the inclusive byte range. */
+function parseRange(header, size) {
+  if (typeof header !== "string" || header === "" || header.includes(",")) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (match[1] === "" && match[2] === "")) return undefined;
+  let start;
+  let end;
+  if (match[1] === "") {
+    const suffix = Number(match[2]);
+    if (suffix === 0 || size === 0) return undefined;
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] === "" ? size - 1 : Math.min(Number(match[2]), size - 1);
+  }
+  if (start >= size || start > end) return undefined;
+  return { start, end };
+}
+
+/** Resolves a picture, video or sound for streaming, with the byte range a Range header asks for. */
+export async function openEditorMedia(projectPath, relative, rangeHeader) {
+  const parts = validateRelative(relative);
+  if (!parts.length) throw new EditorError(400, "Choose a file.");
+  if (parts.includes(".git")) throw new EditorError(400, "Git internals cannot be opened here.");
+  const { target } = await resolveInside(projectPath, relative);
+  let stat;
+  try {
+    stat = await fs.stat(target);
+  } catch {
+    throw new EditorError(404, "File not found.");
+  }
+  if (!stat.isFile()) throw new EditorError(400, "Choose a file, not a folder.");
+  const type = mediaTypeOf(relative);
+  if (!type) throw new EditorError(415, "Only pictures, videos and sounds open here.");
+  const range = parseRange(rangeHeader, stat.size);
+  return {
+    target,
+    stat,
+    mime: type.mime,
+    size: stat.size,
+    range: range === undefined ? "unsatisfiable" : range,
+  };
 }

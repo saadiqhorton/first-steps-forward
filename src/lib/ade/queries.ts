@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { listEditorEntries, loadEditorFile } from "@/lib/ade/editorApi";
+import { listEditorEntries, listEditorPreviews, loadEditorFile } from "@/lib/ade/editorApi";
 import { listDocuments, listWorkflows } from "@/lib/ade/api";
 import { listProcesses, loadProcessOutput } from "@/lib/ade/processesApi";
 import { listSkills, readSkillFile } from "@/lib/ade/skillsApi";
@@ -62,6 +62,19 @@ export const entriesQuery = (projectId: string, directory = "") =>
     queryKey: ["entries", projectId, directory],
     queryFn: async () => (await listEditorEntries(projectId, directory)).entries,
     staleTime: SECTION_STALE_MS,
+  });
+
+/**
+ * Sizes, media kinds and first lines for the files directly inside `directory`. Previews are
+ * decoration, so a failure falls straight back to plain page icons instead of holding blank
+ * tiles through retries.
+ */
+export const entryPreviewsQuery = (projectId: string, directory = "") =>
+  queryOptions({
+    queryKey: ["entry-previews", projectId, directory],
+    queryFn: async () => (await listEditorPreviews(projectId, directory)).previews,
+    staleTime: SECTION_STALE_MS,
+    retry: false,
   });
 
 export const skillsQuery = (projectId: string) =>

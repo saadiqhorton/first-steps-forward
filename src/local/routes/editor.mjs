@@ -1,4 +1,48 @@
+import { createReadStream } from "node:fs";
 import { body } from "../http.mjs";
+
+function streamMedia({ res, json }, media) {
+  const { target, mime, size, range } = media;
+  if (range === "unsatisfiable") {
+    res.statusCode = 416;
+    res.setHeader("accept-ranges", "bytes");
+    res.setHeader("content-range", `bytes */${size}`);
+    res.setHeader("content-length", 0);
+    res.end();
+    return true;
+  }
+  const { start, end } = range ?? { start: 0, end: size - 1 };
+  const stream = size === 0 ? null : createReadStream(target, { start, end });
+  const send = () => {
+    res.statusCode = range ? 206 : 200;
+    res.setHeader("accept-ranges", "bytes");
+    res.setHeader("content-type", mime);
+    res.setHeader("content-length", size === 0 ? 0 : end - start + 1);
+    if (range) res.setHeader("content-range", `bytes ${start}-${end}/${size}`);
+    res.setHeader("last-modified", media.stat.mtime.toUTCString());
+    res.setHeader("cache-control", "private, max-age=3600");
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader(
+      "content-security-policy",
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    );
+  };
+  if (!stream) {
+    send();
+    res.end();
+    return true;
+  }
+  stream.once("error", () => {
+    if (!res.headersSent) json(res, 404, { error: "File not found." });
+    else res.destroy();
+  });
+  stream.once("open", () => {
+    send();
+    stream.pipe(res);
+  });
+  res.once("close", () => stream.destroy());
+  return true;
+}
 
 /** `/api/editor/:projectId/*`: browse, search, read and write project files. */
 export async function editor(ctx) {
@@ -23,6 +67,22 @@ export async function editor(ctx) {
           res,
           200,
           await editor.readEditorFile(project.path, url.searchParams.get("path") ?? ""),
+        );
+      if (parts.length === 3 && req.method === "GET" && parts[2] === "previews")
+        return json(res, 200, {
+          previews: await editor.listEditorPreviews(
+            project.path,
+            url.searchParams.get("path") ?? "",
+          ),
+        });
+      if (parts.length === 3 && req.method === "GET" && parts[2] === "raw")
+        return await streamMedia(
+          ctx,
+          await editor.openEditorMedia(
+            project.path,
+            url.searchParams.get("path") ?? "",
+            req.headers.range,
+          ),
         );
       if (parts.length === 3 && req.method === "GET" && parts[2] === "documents")
         return json(res, 200, { documents: await editor.listDocuments(project.path) });

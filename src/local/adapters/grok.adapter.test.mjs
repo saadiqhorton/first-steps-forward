@@ -10,7 +10,8 @@ test("Grok launches its own ACP agent and uses xAI's npm package", () => {
 });
 
 test("Grok auth requires a positive CLI status, not just a successful model list", async () => {
-  const sample = "You are not authenticated.\n\nDefault model: grok-4.6\n\nAvailable models:\n  * grok-4.6 (default)\n  - grok-4.5\n";
+  const sample =
+    "You are not authenticated.\n\nDefault model: grok-4.6\n\nAvailable models:\n  * grok-4.6 (default)\n  - grok-4.5\n";
   const seen = [];
   const result = await grok.detectAuth(async (...args) => {
     seen.push(args);
@@ -37,4 +38,3 @@ test("Grok rechecks a stale sign-in banner after the CLI refreshes its token", a
   assert.deepEqual(result, { signedIn: true, account: "Grok account" });
   assert.equal(calls, 2);
 });
-

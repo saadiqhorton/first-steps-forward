@@ -7,6 +7,7 @@ import {
   Separator,
   type GroupImperativeHandle,
   type Layout,
+  type LayoutChangedMeta,
 } from "react-resizable-panels";
 import { X } from "lucide-react";
 import { FilesExplorer } from "@/components/ade/files/FilesExplorer";
@@ -14,6 +15,8 @@ import { FilesHome } from "@/components/ade/files/FilesHome";
 import { clearEditorDraft, listDirtyDraftPaths } from "@/components/ade/files/editorDrafts";
 import { createEditorFile, deleteEditorFile } from "@/lib/ade/editorApi";
 import { editorFileIcon } from "@/components/ade/files/editorIcons";
+import { MediaTab } from "@/components/ade/files/MediaTab";
+import { mediaKindOf } from "@/shared/media-types.mjs";
 import { askConfirm } from "@/lib/ade/userNotices";
 import { usePersistedLayout } from "@/components/ade/persistLayout";
 
@@ -32,6 +35,32 @@ const MAIN_PANEL = "files-main";
 const DEFAULT_LAYOUT: Layout = { [EXPLORER_PANEL]: 22, [MAIN_PANEL]: 78 };
 const EXPLORER_MIN_PX = 200;
 const EXPLORER_MAX_PX = 420;
+const MAIN_MIN_PCT = 40;
+const EXPLORER_WIDTH_KEY = "ade-files-explorer-width";
+
+function readExplorerWidth(): number | null {
+  try {
+    const value = Number(localStorage.getItem(EXPLORER_WIDTH_KEY));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function projectPaneVisible(): boolean {
+  if (typeof document === "undefined") return false;
+  if (document.body.classList.contains("shell-full-width")) return false;
+  const right = document.querySelector('[data-testid="shell-right"]');
+  return !right || getComputedStyle(right).display !== "none";
+}
+
+function writeExplorerWidth(px: number): void {
+  try {
+    localStorage.setItem(EXPLORER_WIDTH_KEY, String(Math.round(px)));
+  } catch {
+    // Private mode / quota: keep the in-memory layout.
+  }
+}
 
 type TabsState = { open: string[]; active: "home" | string };
 
@@ -70,6 +99,8 @@ function FilesPage() {
   const { projectId } = Route.useParams();
   const queryClient = useQueryClient();
   const groupRef = useRef<GroupImperativeHandle | null>(null);
+  const groupElementRef = useRef<HTMLDivElement | null>(null);
+  const hydratedRef = useRef(false);
   const { onLayoutChanged, hydrateGroup } = usePersistedLayout(LAYOUT_ID);
   const [tabs, setTabs] = useState<TabsState>(() => readTabs(projectId));
   const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(
@@ -78,9 +109,61 @@ function FilesPage() {
   const [revealFolder, setRevealFolder] = useState<string | null>(null);
   const [entriesRevision, setEntriesRevision] = useState(0);
 
+  const applyExplorerPx = useCallback((px: number) => {
+    const group = groupRef.current;
+    const element = groupElementRef.current;
+    if (!group || !element) return false;
+    const total = element.offsetWidth;
+    if (!projectPaneVisible() || total <= 0) return false;
+    const maxForMain = Math.max(EXPLORER_MIN_PX, (total * (100 - MAIN_MIN_PCT)) / 100);
+    const clamped = Math.min(Math.max(px, EXPLORER_MIN_PX), Math.min(EXPLORER_MAX_PX, maxForMain));
+    const percentage = (clamped / total) * 100;
+    group.setLayout({
+      ...group.getLayout(),
+      [EXPLORER_PANEL]: percentage,
+      [MAIN_PANEL]: 100 - percentage,
+    });
+    return true;
+  }, []);
+
   useEffect(() => {
-    hydrateGroup(groupRef, DEFAULT_LAYOUT);
-  }, [hydrateGroup]);
+    if (hydratedRef.current) return;
+    const saved = readExplorerWidth();
+    if (!saved) {
+      hydratedRef.current = true;
+      hydrateGroup(groupRef, DEFAULT_LAYOUT);
+      return;
+    }
+    let cancelled = false;
+    let frames = 0;
+    const attempt = () => {
+      if (cancelled || hydratedRef.current) return;
+      if (applyExplorerPx(saved)) {
+        hydratedRef.current = true;
+        return;
+      }
+      if (frames++ < 30) requestAnimationFrame(attempt);
+      else {
+        hydratedRef.current = true;
+        hydrateGroup(groupRef, DEFAULT_LAYOUT);
+      }
+    };
+    attempt();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyExplorerPx, hydrateGroup]);
+
+  const handleLayoutChanged = useCallback(
+    (layout: Layout, meta: LayoutChangedMeta) => {
+      onLayoutChanged(layout, meta);
+      if (!meta.isUserInteraction) return;
+      const total = groupElementRef.current?.offsetWidth;
+      const percentage = layout[EXPLORER_PANEL] ?? 0;
+      if (total && percentage > 0) writeExplorerWidth((percentage / 100) * total);
+    },
+    [onLayoutChanged],
+  );
 
   useEffect(() => {
     const next = readTabs(projectId);
@@ -117,6 +200,7 @@ function FilesPage() {
   const refreshFileLists = useCallback(
     async (path?: string) => {
       await queryClient.invalidateQueries({ queryKey: ["entries", projectId] });
+      await queryClient.invalidateQueries({ queryKey: ["entry-previews", projectId] });
       await queryClient.invalidateQueries({ queryKey: ["documents", projectId] });
       await queryClient.invalidateQueries({ queryKey: ["document-previews", projectId] });
       if (path) await queryClient.invalidateQueries({ queryKey: ["file", projectId, path] });
@@ -203,119 +287,133 @@ function FilesPage() {
   const homeActive = tabs.active === "home";
 
   return (
-    <Group
-      id={LAYOUT_ID}
-      groupRef={groupRef}
-      orientation="horizontal"
-      defaultLayout={DEFAULT_LAYOUT}
-      onLayoutChanged={onLayoutChanged}
-      style={{ flex: 1, minHeight: 0, minWidth: 0 }}
-      className="min-h-0 min-w-0 flex-1"
-    >
-      <Panel
-        id={EXPLORER_PANEL}
-        minSize={`${EXPLORER_MIN_PX}px`}
-        maxSize={`${EXPLORER_MAX_PX}px`}
-        style={{ minWidth: 0, overflow: "hidden" }}
+    <div ref={groupElementRef} style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
+      <Group
+        id={LAYOUT_ID}
+        groupRef={groupRef}
+        orientation="horizontal"
+        defaultLayout={DEFAULT_LAYOUT}
+        onLayoutChanged={handleLayoutChanged}
+        style={{ flex: 1, minHeight: 0, minWidth: 0 }}
+        className="min-h-0 min-w-0 flex-1"
       >
-        <FilesExplorer
-          projectId={projectId}
-          activePath={homeActive ? null : tabs.active}
-          dirtyPaths={dirtyPaths}
-          homeActive={homeActive}
-          revealFolder={revealFolder}
-          entriesRevision={entriesRevision}
-          onOpenFile={openFile}
-          onGoHome={goHome}
-          onCreateFile={createFile}
-          onRemoveFile={removeFile}
-        />
-      </Panel>
-      <Separator id="seam-files-explorer" className="panel-seam" data-orientation="vertical" />
-      <Panel id={MAIN_PANEL} style={{ minWidth: 0, overflow: "hidden" }} minSize="40%">
-        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          <div
-            className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-line bg-panel"
-            aria-label="Open files"
-            role="tablist"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={homeActive}
-              onClick={goHome}
-              className={`shrink-0 border-b-2 px-3 text-sm ${
-                homeActive ? "border-amber text-ink" : "border-transparent text-dim hover:text-ink"
-              }`}
+        <Panel
+          id={EXPLORER_PANEL}
+          minSize={`${EXPLORER_MIN_PX}px`}
+          maxSize={`${EXPLORER_MAX_PX}px`}
+          groupResizeBehavior="preserve-pixel-size"
+          style={{ minWidth: 0, overflow: "hidden" }}
+        >
+          <FilesExplorer
+            projectId={projectId}
+            activePath={homeActive ? null : tabs.active}
+            dirtyPaths={dirtyPaths}
+            homeActive={homeActive}
+            revealFolder={revealFolder}
+            entriesRevision={entriesRevision}
+            onOpenFile={openFile}
+            onGoHome={goHome}
+            onCreateFile={createFile}
+            onRemoveFile={removeFile}
+          />
+        </Panel>
+        <Separator id="seam-files-explorer" className="panel-seam" data-orientation="vertical" />
+        <Panel id={MAIN_PANEL} style={{ minWidth: 0, overflow: "hidden" }} minSize="40%">
+          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+            <div
+              className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-line bg-panel"
+              aria-label="Open files"
+              role="tablist"
             >
-              Home
-            </button>
-            {tabs.open.map((path) => {
-              const active = tabs.active === path;
-              return (
-                <div
-                  key={path}
-                  className={`flex shrink-0 items-stretch border-b-2 ${
-                    active ? "border-amber text-ink" : "border-transparent text-dim"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    title={path}
-                    onClick={() => setTabs((previous) => ({ ...previous, active: path }))}
-                    className="flex items-center gap-1.5 pl-3 pr-1 font-mono text-[11px] hover:text-ink"
+              <button
+                type="button"
+                role="tab"
+                aria-selected={homeActive}
+                onClick={goHome}
+                className={`shrink-0 border-b-2 px-3 text-sm ${
+                  homeActive
+                    ? "border-amber text-ink"
+                    : "border-transparent text-dim hover:text-ink"
+                }`}
+              >
+                Home
+              </button>
+              {tabs.open.map((path) => {
+                const active = tabs.active === path;
+                return (
+                  <div
+                    key={path}
+                    className={`flex shrink-0 items-stretch border-b-2 ${
+                      active ? "border-amber text-ink" : "border-transparent text-dim"
+                    }`}
                   >
-                    {editorFileIcon(path)}
-                    <span>{path.split("/").at(-1)}</span>
-                    {dirtyPaths.has(path) && (
-                      <span className="ed-dirty-dot" aria-label="Unsaved changes" />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Close ${path}`}
-                    title={`Close ${path}`}
-                    onClick={() => closeFile(path)}
-                    className="mr-1 grid size-5 place-items-center self-center rounded text-dim hover:bg-ink/10 hover:text-ink"
-                  >
-                    <X size={12} aria-hidden />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      title={path}
+                      onClick={() => setTabs((previous) => ({ ...previous, active: path }))}
+                      className="flex items-center gap-1.5 pl-3 pr-1 font-mono text-[11px] hover:text-ink"
+                    >
+                      {editorFileIcon(path)}
+                      <span>{path.split("/").at(-1)}</span>
+                      {dirtyPaths.has(path) && (
+                        <span className="ed-dirty-dot" aria-label="Unsaved changes" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Close ${path}`}
+                      title={`Close ${path}`}
+                      onClick={() => closeFile(path)}
+                      className="mr-1 grid size-5 place-items-center self-center rounded text-dim hover:bg-ink/10 hover:text-ink"
+                    >
+                      <X size={12} aria-hidden />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
 
-          <div className={`${homeActive ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
-            <FilesHome
-              projectId={projectId}
-              onOpenFile={openFile}
-              onRevealFolder={setRevealFolder}
-              onCreateFile={createFile}
-              onRemoveFile={removeFile}
-            />
-          </div>
-
-          {tabs.open.map((path) => (
-            <Suspense
-              key={path}
-              fallback={
-                <div className="grid min-h-0 flex-1 place-items-center font-mono text-[12px] text-dim">
-                  Opening file…
-                </div>
-              }
-            >
-              <FileTab
+            <div className={`${homeActive ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
+              <FilesHome
                 projectId={projectId}
-                path={path}
-                visible={tabs.active === path}
-                onDirtyChange={onDirtyChange}
+                onOpenFile={openFile}
+                onRevealFolder={setRevealFolder}
+                onCreateFile={createFile}
+                onRemoveFile={removeFile}
               />
-            </Suspense>
-          ))}
-        </div>
-      </Panel>
-    </Group>
+            </div>
+
+            {tabs.open.map((path) =>
+              mediaKindOf(path) ? (
+                <MediaTab
+                  key={path}
+                  projectId={projectId}
+                  path={path}
+                  visible={tabs.active === path}
+                />
+              ) : (
+                <Suspense
+                  key={path}
+                  fallback={
+                    <div className="grid min-h-0 flex-1 place-items-center font-mono text-[12px] text-dim">
+                      Opening file…
+                    </div>
+                  }
+                >
+                  <FileTab
+                    projectId={projectId}
+                    path={path}
+                    visible={tabs.active === path}
+                    onDirtyChange={onDirtyChange}
+                  />
+                </Suspense>
+              ),
+            )}
+          </div>
+        </Panel>
+      </Group>
+    </div>
   );
 }

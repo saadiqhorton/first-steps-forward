@@ -1,13 +1,19 @@
-import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Folder, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, Plus, RotateCcw } from "lucide-react";
+import { useEffect, useState } from "react";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
-import { documentPreviewsQuery, documentsQuery, entriesQuery } from "@/lib/ade/queries";
-import { timeAgo, useNow } from "@/lib/ade/store";
+import { projectColor } from "@/components/ade/projectColor";
+import {
+  documentPreviewsQuery,
+  documentsQuery,
+  entriesQuery,
+  entryPreviewsQuery,
+} from "@/lib/ade/queries";
+import { timeAgo, useAdeState, useNow } from "@/lib/ade/store";
 import type { ProjectDocument } from "@/lib/ade/types";
 import type { EditorEntry } from "@/lib/ade/editorApi";
-import { editorFileIcon } from "./editorIcons";
 import { MarkdownDocument } from "./MarkdownDocument";
+import { ProjectFilesGrid } from "./ProjectFilesGrid";
 
 type Props = {
   projectId: string;
@@ -18,17 +24,8 @@ type Props = {
   onRemoveFile: (path: string) => Promise<boolean>;
 };
 
-function formatBytes(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10_240 ? 1 : 0)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function parentDir(path: string) {
-  const parts = path.split("/").filter(Boolean);
-  parts.pop();
-  return parts.join("/");
-}
+const ICON_BUTTON =
+  "grid size-7 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none";
 
 const NO_DOCUMENTS: ProjectDocument[] = [];
 const NO_ENTRIES: EditorEntry[] = [];
@@ -46,6 +43,8 @@ export function FilesHome({
   onRemoveFile,
 }: Props) {
   const now = useNow();
+  const queryClient = useQueryClient();
+  const project = useAdeState((state) => state.projects.find((p) => p.id === projectId));
   const [cwd, setCwd] = useState("");
   const [creating, setCreating] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -56,14 +55,14 @@ export function FilesHome({
   const previews = useQuery(documentPreviewsQuery(projectId, documents)).data ?? {};
   const dirQuery = useQuery(entriesQuery(projectId, cwd));
   const entries = dirQuery.data ?? NO_ENTRIES;
+  // Without previews (an older local service, or a failed read) files fall back to plain page icons.
+  const previewsQuery = useQuery(entryPreviewsQuery(projectId, cwd));
   const loadingDocs = docsQuery.isPending;
   const loadingDir = dirQuery.isPending;
   const error = actionError || errorText(docsQuery.error) || errorText(dirQuery.error);
-  const entrySizes = useMemo(() => {
-    const sizes: Record<string, number> = {};
-    for (const doc of documents) sizes[doc.path] = doc.size;
-    return sizes;
-  }, [documents]);
+  const colors = projectColor(projectId);
+  const projectName = project?.name ?? "Project";
+  const initial = (projectName.trim().charAt(0) || "?").toUpperCase();
 
   useEffect(() => {
     setCwd("");
@@ -100,6 +99,11 @@ export function FilesHome({
     }
   };
 
+  const refresh = () => {
+    for (const key of ["entries", "entry-previews", "documents", "document-previews"])
+      void queryClient.invalidateQueries({ queryKey: [key, projectId] });
+  };
+
   const crumbs = cwd ? cwd.split("/").filter(Boolean) : [];
 
   return (
@@ -111,7 +115,7 @@ export function FilesHome({
       )}
 
       <section>
-        <h2 className="label-mono">Documents</h2>
+        <h2 className="text-[13px] font-medium text-ink">Documents</h2>
         {loadingDocs ? (
           <TextShimmer as="p" className="mt-3 text-[13px] text-dim">
             Loading documents…
@@ -152,41 +156,39 @@ export function FilesHome({
       </section>
 
       <section className="mt-8">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1">
-            <h2 className="label-mono">Project files</h2>
-            <button
-              type="button"
-              aria-label="New file"
-              title="New file"
-              aria-expanded={creating}
-              onClick={() => setCreating((open) => !open)}
-              className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
-            >
-              <Plus className="size-4" aria-hidden strokeWidth={2} />
-            </button>
-          </div>
-          <nav
-            aria-label="Folder path"
-            className="flex w-full min-w-0 flex-wrap items-center gap-0.5 font-mono text-[11px] text-dim"
-          >
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="shrink-0 text-[13px] font-medium text-ink">Project files</h2>
+          <nav aria-label="Folder path" className="flex min-w-0 flex-wrap items-center gap-0.5">
             <button
               type="button"
               onClick={() => openFolder("")}
-              className={`rounded px-1.5 py-0.5 hover:bg-ink/5 hover:text-ink ${cwd === "" ? "text-ink" : ""}`}
+              aria-current={cwd === "" ? "location" : undefined}
+              title={cwd ? `Back to ${projectName}` : projectName}
+              className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[13px] text-ink transition-colors hover:bg-ink/[0.04] focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none"
             >
-              root
+              <span
+                className={`grid size-5 shrink-0 place-items-center rounded-xs font-mono text-xs font-medium ${colors.bg} ${colors.fg}`}
+                aria-hidden
+              >
+                {initial}
+              </span>
+              <span className="min-w-0 truncate" style={{ maxWidth: "18ch" }}>
+                {projectName}
+              </span>
             </button>
             {crumbs.map((part, index) => {
               const path = crumbs.slice(0, index + 1).join("/");
               const last = index === crumbs.length - 1;
               return (
                 <span key={path} className="flex min-w-0 items-center gap-0.5">
-                  <ChevronRight size={12} aria-hidden className="shrink-0 opacity-50" />
+                  <ChevronRight size={12} aria-hidden className="shrink-0 text-dim opacity-50" />
                   <button
                     type="button"
                     onClick={() => openFolder(path)}
-                    className={`max-w-[10rem] truncate rounded px-1.5 py-0.5 hover:bg-ink/5 hover:text-ink ${last ? "text-ink" : ""}`}
+                    aria-current={last ? "location" : undefined}
+                    className={`max-w-[12rem] truncate rounded-md px-1.5 py-0.5 text-[13px] transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none ${
+                      last ? "text-ink" : "text-dim"
+                    }`}
                   >
                     {part}
                   </button>
@@ -194,6 +196,27 @@ export function FilesHome({
               );
             })}
           </nav>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              aria-label="New file"
+              title="New file"
+              aria-expanded={creating}
+              onClick={() => setCreating((open) => !open)}
+              className={ICON_BUTTON}
+            >
+              <Plus className="size-4" aria-hidden strokeWidth={1.5} />
+            </button>
+            <button
+              type="button"
+              aria-label="Refresh files"
+              title="Refresh"
+              onClick={refresh}
+              className={ICON_BUTTON}
+            >
+              <RotateCcw className="size-4" aria-hidden strokeWidth={1.5} />
+            </button>
+          </div>
         </div>
         {creating && (
           <form
@@ -215,7 +238,7 @@ export function FilesHome({
                   setFileName("");
                 }
               }}
-              className="min-w-0 flex-1 rounded-md border border-line bg-paper px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
+              className="min-w-0 flex-1 rounded-md border border-line bg-paper px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-dim focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none"
             />
             <button
               type="submit"
@@ -227,72 +250,26 @@ export function FilesHome({
           </form>
         )}
         {loadingDir ? (
-          <TextShimmer as="p" className="mt-3 text-[13px] text-dim">
+          <TextShimmer as="p" className="mt-4 text-[13px] text-dim">
             Loading files…
           </TextShimmer>
         ) : entries.length === 0 ? (
-          <p className="mt-3 text-[13px] text-dim">
+          <p className="mt-4 text-[13px] text-dim">
             {cwd ? "This folder is empty." : "This project folder is empty."}
           </p>
         ) : (
-          <ul className="mt-3 divide-y divide-line border-y border-line">
-            {cwd ? (
-              <li>
-                <button
-                  type="button"
-                  onClick={() => openFolder(parentDir(cwd))}
-                  className="flex w-full items-center gap-2 px-1 py-2.5 text-left font-mono text-[12px] text-dim hover:bg-ink/5 hover:text-ink"
-                >
-                  <Folder size={14} aria-hidden className="shrink-0" />
-                  <span>..</span>
-                  <span className="ml-auto shrink-0 text-[10px]">up</span>
-                </button>
-              </li>
-            ) : null}
-            {entries.map((entry) => {
-              const size = entrySizes[entry.path];
-              return (
-                <li key={entry.path}>
-                  {entry.kind === "folder" ? (
-                    <button
-                      type="button"
-                      onClick={() => openFolder(entry.path)}
-                      className="flex w-full items-center gap-2 px-1 py-2.5 text-left font-mono text-[12px] text-ink hover:bg-ink/5"
-                      title={entry.path}
-                    >
-                      <Folder size={14} aria-hidden className="shrink-0 text-dim" />
-                      <span className="truncate">{entry.name}</span>
-                      <span className="ml-auto shrink-0 text-[10px] text-dim">folder</span>
-                    </button>
-                  ) : (
-                    <div className="flex items-center">
-                      <button
-                        type="button"
-                        onClick={() => onOpenFile(entry.path)}
-                        className="flex min-w-0 flex-1 items-center gap-2 px-1 py-2.5 text-left font-mono text-[12px] text-ink hover:bg-ink/5"
-                        title={entry.path}
-                      >
-                        <span className="shrink-0 text-dim">{editorFileIcon(entry.path)}</span>
-                        <span className="truncate">{entry.name}</span>
-                        <span className="ml-auto shrink-0 text-[10px] text-dim">
-                          {size != null ? formatBytes(size) : "file"}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Delete ${entry.path}`}
-                        title="Delete file"
-                        onClick={() => void removeFile(entry.path)}
-                        className="ed-tree-remove mr-1"
-                      >
-                        <Trash2 size={12} aria-hidden />
-                      </button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <div className="mt-4">
+            <ProjectFilesGrid
+              projectId={projectId}
+              tone={colors.tone}
+              entries={entries}
+              previews={previewsQuery.data}
+              previewsPending={previewsQuery.isPending}
+              onOpenFolder={openFolder}
+              onOpenFile={onOpenFile}
+              onRemoveFile={(path) => void removeFile(path)}
+            />
+          </div>
         )}
       </section>
     </div>

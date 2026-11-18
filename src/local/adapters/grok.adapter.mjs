@@ -8,7 +8,9 @@ import { MODEL_ID } from "../models.mjs";
 // Grok's public source prints these exact banners in `grok models`:
 // https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/src/models.rs
 export function grokAuthenticated(output) {
-  return /^(?:You are logged in with .+\.|You are using XAI_API_KEY\.|You are authenticated via deployment key\.|Model '.+' is using its own API key\.)\s*$/m.test(output ?? "");
+  return /^(?:You are logged in with .+\.|You are using XAI_API_KEY\.|You are authenticated via deployment key\.|Model '.+' is using its own API key\.)\s*$/m.test(
+    output ?? "",
+  );
 }
 
 export function parseGrokModels(output) {

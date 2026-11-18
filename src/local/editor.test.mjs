@@ -12,6 +12,8 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { EventEmitter } from "node:events";
+import { Readable } from "node:stream";
 
 const home = mkdtempSync(path.join(os.tmpdir(), "ade-editor-test-"));
 const project = path.join(home, "project");
@@ -214,6 +216,130 @@ test("editor creates and deletes files inside the project", async () => {
   const escaped = await call("/api/editor/p1/delete", { path: "../outside.txt" });
   assert.equal(escaped.status, 400);
   assert.equal(readFileSync(outside, "utf8"), "outside\n");
+});
+
+async function callRaw(pathname, headers = {}, remoteAddress = "127.0.0.1") {
+  const chunks = [];
+  const res = Object.assign(new EventEmitter(), {
+    statusCode: 200,
+    headers: {},
+    headersSent: false,
+    writableEnded: false,
+    setHeader(name, value) {
+      this.headers[name.toLowerCase()] = value;
+    },
+    getHeader(name) {
+      return this.headers[name.toLowerCase()];
+    },
+    write(chunk) {
+      this.headersSent = true;
+      chunks.push(Buffer.from(chunk));
+      return true;
+    },
+    end(chunk) {
+      if (chunk) chunks.push(Buffer.from(chunk));
+      this.headersSent = this.writableEnded = true;
+      this.emit("finish");
+      this.emit("close");
+    },
+  });
+  const done = new Promise((resolve) => res.once("close", resolve));
+  const url = new URL(`http://127.0.0.1:3000${pathname}`);
+  const req = Object.assign(Readable.from([]), {
+    method: "GET",
+    url: `${url.pathname}${url.search}`,
+    headers: { host: url.host, origin: url.origin, ...headers },
+    socket: { remoteAddress },
+  });
+  await handle(req, res);
+  await done;
+  return { status: res.statusCode, headers: res.headers, bytes: Buffer.concat(chunks) };
+}
+
+test("editor previews list text snippets and media kinds for a folder's files", async () => {
+  const folder = path.join(project, "media-previews");
+  mkdirSync(path.join(folder, "nested"), { recursive: true });
+  const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+  lines[1] = "x".repeat(250);
+  lines[2] = "\tindented";
+  writeFileSync(path.join(folder, "notes.txt"), lines.join("\r\n"));
+  writeFileSync(path.join(folder, "empty.txt"), "");
+  writeFileSync(path.join(folder, "blob.bin"), Buffer.from([65, 0, 66]));
+  writeFileSync(path.join(folder, "pic.png"), Buffer.from([137, 80, 78, 71, 1, 2, 3]));
+  const result = await call("/api/editor/p1/previews?path=media-previews");
+  assert.equal(result.status, 200);
+  const { previews } = result.body;
+  assert.deepEqual(Object.keys(previews).sort(), [
+    "media-previews/blob.bin",
+    "media-previews/empty.txt",
+    "media-previews/notes.txt",
+    "media-previews/pic.png",
+  ]);
+  const notes = previews["media-previews/notes.txt"];
+  const noteLines = notes.text.split("\n");
+  assert.equal(noteLines.length, 16);
+  assert.equal(noteLines[0], "line 1");
+  assert.equal(noteLines[1], "x".repeat(120));
+  assert.equal(noteLines[2], "  indented");
+  assert.equal(notes.media, null);
+  assert.equal(notes.size, Buffer.byteLength(lines.join("\r\n")));
+  assert.equal(typeof notes.modifiedAt, "number");
+  assert.equal(previews["media-previews/empty.txt"].text, "");
+  assert.equal(previews["media-previews/blob.bin"].text, null);
+  assert.equal(previews["media-previews/pic.png"].media, "image");
+  assert.equal(previews["media-previews/pic.png"].text, null);
+  assert.equal(previews["media-previews/pic.png"].size, 7);
+  assert.equal((await call("/api/editor/p1/previews?path=src%2Fapp.ts")).status, 400);
+});
+
+test("editor raw streams media with ranges and rejects everything else", async () => {
+  const folder = path.join(project, "media-raw");
+  mkdirSync(folder, { recursive: true });
+  const bytes = Buffer.from([10, 11, 12, 13, 14, 15, 16, 17]);
+  writeFileSync(path.join(folder, "pic.png"), bytes);
+  writeFileSync(path.join(folder, "code.ts"), "export {};\n");
+  const full = await callRaw("/api/editor/p1/raw?path=media-raw%2Fpic.png&v=1");
+  assert.equal(full.status, 200);
+  assert.equal(full.headers["content-type"], "image/png");
+  assert.equal(full.headers["content-length"], 8);
+  assert.equal(full.headers["accept-ranges"], "bytes");
+  assert.equal(full.headers["x-content-type-options"], "nosniff");
+  assert.equal(
+    full.headers["content-security-policy"],
+    "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+  );
+  assert.deepEqual(full.bytes, bytes);
+
+  const ranged = await callRaw("/api/editor/p1/raw?path=media-raw%2Fpic.png", {
+    range: "bytes=2-5",
+  });
+  assert.equal(ranged.status, 206);
+  assert.equal(ranged.headers["content-range"], "bytes 2-5/8");
+  assert.deepEqual(ranged.bytes, bytes.subarray(2, 6));
+  const tail = await callRaw("/api/editor/p1/raw?path=media-raw%2Fpic.png", { range: "bytes=-3" });
+  assert.equal(tail.headers["content-range"], "bytes 5-7/8");
+  const open = await callRaw("/api/editor/p1/raw?path=media-raw%2Fpic.png", { range: "bytes=6-" });
+  assert.deepEqual(open.bytes, bytes.subarray(6));
+  const multi = await callRaw("/api/editor/p1/raw?path=media-raw%2Fpic.png", {
+    range: "bytes=0-1,3-4",
+  });
+  assert.equal(multi.status, 200);
+
+  const beyond = await callRaw("/api/editor/p1/raw?path=media-raw%2Fpic.png", {
+    range: "bytes=999-",
+  });
+  assert.equal(beyond.status, 416);
+  assert.equal(beyond.headers["content-range"], "bytes */8");
+  assert.equal(beyond.bytes.length, 0);
+
+  assert.equal((await callRaw("/api/editor/p1/raw?path=media-raw%2Fcode.ts")).status, 415);
+  assert.equal((await callRaw("/api/editor/p1/raw?path=..%2Foutside.txt")).status, 400);
+  assert.equal((await callRaw("/api/editor/p1/raw?path=media-raw")).status, 400);
+  assert.equal((await callRaw("/api/editor/p1/raw?path=.git%2Fx.png")).status, 400);
+  assert.equal(
+    (await callRaw("/api/editor/p1/raw?path=media-raw%2Fpic.png", {}, "203.0.113.5")).status,
+    403,
+  );
 });
 
 // On exit, not in test.after(): ADE's last workspace save can land after the tests end.
