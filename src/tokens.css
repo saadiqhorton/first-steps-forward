@@ -190,6 +190,34 @@
   --shadow-process-key-active: inset 0 1px 0 color-mix(in oklab, white 55%, transparent),
     0 1px 0 color-mix(in oklab, var(--ink) 5%, transparent);
   --shadow-process-key-disabled: inset 0 1px 0 color-mix(in oklab, white 35%, transparent);
+  --space-px-2: 2px;
+  --space-px-5: 5px;
+  --space-px-10: 10px;
+  --space-px-14: 14px;
+  --space-px-20: 20px;
+  --space-px-28: 28px;
+  --space-stage-claude: 67px;
+  --space-stage-codex: 96px;
+  --space-stage-opencode: 5px;
+  --text-workspace-10: 10px;
+  --text-workspace-11: 11px;
+  --text-workspace-13: 13px;
+  --text-workspace-20: 20px;
+  --radius-workspace-4: 4px;
+  --radius-workspace-6: 6px;
+  --radius-workspace-8: 8px;
+  --radius-workspace-10: 10px;
+  --size-workspace-dot: 6px;
+  --size-workspace-icon-sm: 14px;
+  --size-workspace-icon: 20px;
+  --size-workspace-avatar: 32px;
+  --size-workspace-avatar-lg: 40px;
+  --size-workspace-control: 36px;
+  --size-workspace-color: 52px;
+  --shadow-workspace-menu: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --z-workspace-menu: 5;
+  --opacity-workspace-pulse: 0.35;
+
 }
 
 :root[data-theme="dark"] {
