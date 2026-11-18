@@ -76,6 +76,10 @@ npm test
 
 While iterating, `node --test <changed test files>` is fine. Before claiming done, run the full set above. Do not invent a lighter local shortcut that can pass while the full suite fails. If you change these scripts or their selection logic, update this file in the same change.
 
+## Design tokens (UI)
+
+Before writing or modifying any UI code, read the relevant design file in `design/`. Use only tokens from `src/tokens.css` (Layer 2 aliases) and the documented Layer-2-by-convention tokens (`--space-*`, `--text-*`, `--radius-*`, `--shadow-resting|raised|floating`, `--duration-*`, `--ease-*`). Layer-2-by-convention also includes existing ADE/Arc semantic color names (`--foreground`, `--background`, `--border`, `--text-muted`, `--ink`, `--paper`, `--panel`, `--danger`, `--accent`, etc.) alongside `--color-*` aliases — components may use either, never raw color literals. Do not introduce raw hex/rgb/oklch, px spacing, bare font sizes/weights, radii, shadows, z-index, or transition durations in component CSS. Run `npm run token-audit` before committing. Zero errors required.
+
 ## 5. Test agent behavior
 
 When an agent makes a meaningful mistake, including one caused by a prompt or instruction, add a regression test (or an automated check) that would have failed. The next agent should hit that check, not a verbal reminder. Adapter/CLI decoding and `HOME` isolation mistakes are high-value checks here.

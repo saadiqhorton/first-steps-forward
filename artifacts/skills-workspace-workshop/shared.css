@@ -1,3 +1,5 @@
+@import url("../../src/components/arc/foundation.css");
+@import url("../../src/tokens.css");
 /* Mock ADE workspace: tokens and base components copied from src/styles.css and
  * src/components/arc/foundation.css, so every option renders inside the same
  * app chrome. The mock has its own light/dark theme, independent of the
@@ -36,7 +38,7 @@
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--text-sm);
   letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   text-align: left;
@@ -107,39 +109,39 @@
 /* ---- shared atoms ---- */
 .m-label-mono {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--dim);
 }
 .m-btn-amber {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   border-radius: var(--radius-control);
   background: var(--amber) !important;
   color: var(--accent-foreground) !important;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 .m-btn-quiet {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   border-radius: var(--radius-control);
   background: var(--panel) !important;
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: var(--shadow-resting);
 }
 .m-btn-quiet:hover {
   background: var(--surface-muted) !important;
 }
 .m-btn {
-  padding: 8px 14px;
-  font-size: 13px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
 }
 /* The mock's button reset zeroes padding, so the button atoms have to win it
  * back — and never let a flex parent squeeze their label. */
 .mock .m-btn-amber,
 .mock .m-btn-quiet,
 .mock .m-btn {
-  padding: 8px 14px;
+  padding: var(--space-2) var(--space-3);
   flex: none;
   white-space: nowrap;
 }
@@ -148,7 +150,7 @@
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--dim);
 }
 .m-icon-btn:hover {
@@ -158,7 +160,7 @@
 .m-card {
   border-radius: var(--radius-panel);
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: var(--border-width-hairline) solid var(--line);
 }
 .m-truncate {
   min-width: 0;
@@ -169,13 +171,13 @@
 .m-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   flex: none;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 8px;
+  border: var(--border-width-hairline) solid var(--line);
+  border-radius: var(--radius-surface);
+  padding: var(--space-0) var(--space-2);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--dim);
   white-space: nowrap;
 }
@@ -193,10 +195,10 @@
 .m-textarea {
   width: 100%;
   border-radius: var(--radius-control);
-  border: 1px solid var(--line);
+  border: var(--border-width-hairline) solid var(--line);
   background: var(--paper);
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: var(--space-2) var(--space-2);
+  font-size: var(--text-xs);
   color: var(--ink);
 }
 .m-input::placeholder,
@@ -210,26 +212,26 @@
 }
 .m-textarea-mono {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.6;
 }
 .m-field-label {
   display: block;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--dim);
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
 }
 .m-file-kind {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--dim);
   white-space: nowrap;
 }
 .m-empty {
-  padding: 28px 16px;
+  padding: var(--space-6) var(--space-4);
   text-align: center;
-  font-size: 13px;
+  font-size: var(--text-xs);
   color: var(--dim);
 }
 
@@ -237,50 +239,50 @@
 .m-topbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   height: 44px;
   flex: none;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 0 var(--space-3);
+  border-bottom: var(--border-width-hairline) solid var(--line);
   background: var(--paper);
 }
 .m-brand {
   font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 14px;
-  padding: 0 6px;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--text-sm);
+  padding: 0 var(--space-1);
 }
 .m-projects {
   display: flex;
   min-width: 0;
   flex: 1;
-  gap: 4px;
+  gap: var(--space-1);
   overflow: hidden;
 }
 .m-project {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   max-width: calc(18ch + 2.5rem);
   flex: none;
-  border-radius: 8px;
-  padding: 4px 8px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
   color: var(--dim);
 }
 .m-project[aria-current="page"] {
   background: color-mix(in oklab, var(--ink) 6%, transparent);
   color: var(--ink);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 .m-project-initial {
   display: grid;
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xs);
   background: color-mix(in oklab, var(--amber) 22%, transparent);
   color: var(--amber-deep);
 }
@@ -288,50 +290,50 @@
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   flex: none;
   color: var(--dim);
-  font-size: 13px;
+  font-size: var(--text-xs);
 }
 .m-topbar-right > * {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   height: 30px;
-  padding: 0 8px;
-  border-radius: 8px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
 }
 .m-sections {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   height: 36px;
   flex: none;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 0 var(--space-3);
+  border-bottom: var(--border-width-hairline) solid var(--line);
   background: var(--paper);
 }
 .m-section {
   position: relative;
-  padding: 4px 10px;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
   color: var(--dim);
 }
 .m-section[aria-current="page"] {
   color: var(--ink);
   background: color-mix(in oklab, var(--ink) 6%, transparent);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 /* ---- shared dialog + notice ---- */
 .m-scrim {
   position: absolute;
   inset: 0;
-  z-index: 20;
+  z-index: var(--z-raised);
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--space-6);
   background: var(--scrim);
 }
 .m-dialog {
@@ -339,7 +341,7 @@
   max-height: 100%;
   overflow: auto;
   border-radius: var(--radius-surface);
-  border: 1px solid var(--line);
+  border: var(--border-width-hairline) solid var(--line);
   background: var(--panel);
   box-shadow: var(--shadow-floating);
 }
@@ -347,45 +349,45 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px 18px 0;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) 0;
 }
 .m-dialog-head h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 500;
+  font-size: var(--text-base);
+  font-weight: var(--font-weight-medium);
 }
 .m-dialog-head p {
-  margin: 4px 0 0;
-  font-size: 12px;
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
   color: var(--dim);
 }
 .m-dialog-body {
-  padding: 14px 18px;
+  padding: var(--space-3) var(--space-4);
 }
 .m-dialog-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 18px 16px;
-  border-top: 1px solid var(--line);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: var(--border-width-hairline) solid var(--line);
 }
 .m-notice {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
-  z-index: 30;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: var(--z-dropdown);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   max-width: 340px;
   border-radius: var(--radius-control);
-  border: 1px solid var(--line);
+  border: var(--border-width-hairline) solid var(--line);
   background: var(--surface-raised);
   box-shadow: var(--shadow-floating);
-  padding: 10px 12px;
-  font-size: 12.5px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
   animation: m-rise 180ms ease-out;
   /* A toast is a status line, never a target: it must not swallow clicks. */
   pointer-events: none;

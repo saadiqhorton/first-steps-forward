@@ -1,0 +1,203 @@
+/**
+ * Layer 2 — project aliases.
+ * Components (Layer 3) must only use these names (or documented Layer-1-as-Layer-2
+ * spacing/type tokens like --space-* and --text-*).
+ * Layer 1 lives in foundation.css + ADE :root maps in styles.css.
+ *
+ * Layer 2 spacing, type scale, radius, elevation, and motion: use existing
+ * --space-*, --text-*, --radius-*, --shadow-resting|--raised|--floating,
+ * --duration-*, and --ease-* (treated as Layer 2 by convention).
+ */
+:root {
+  /* Colors */
+  --color-text: var(--foreground, oklch(0.18 0.006 70));
+  --color-text-secondary: var(--text-secondary, oklch(0.43 0.025 80));
+  --color-text-muted: var(--text-muted, oklch(0.59 0.03 85));
+  --color-bg: var(--background, oklch(0.945 0.02 90));
+  --color-surface: var(--surface, oklch(0.977 0.01 90));
+  --color-surface-raised: var(--surface-raised, oklch(0.977 0.01 90));
+  --color-surface-muted: var(--surface-muted, oklch(0.92 0.02 88));
+  --color-border: var(--border, oklch(0.86 0.03 85));
+  --color-border-subtle: var(--border-subtle, oklch(0.9 0.025 87));
+  --color-border-strong: var(--border-strong, oklch(0.78 0.035 82));
+  --color-link: var(--teal-deep, oklch(0.38 0.06 190));
+  --color-accent: var(--accent, oklch(0.69 0.15 65));
+  --color-accent-strong: var(--accent-strong, oklch(0.55 0.13 65));
+  --color-accent-subtle: var(--accent-subtle, transparent);
+  --color-accent-foreground: var(--accent-foreground, oklch(0.18 0.006 70));
+  --color-danger: var(--danger, oklch(0.55 0.18 28));
+  --color-danger-foreground: var(--danger-foreground, oklch(0.985 0.008 90));
+  --color-success: var(--success, oklch(0.47 0.07 190));
+  --color-warning: var(--warning, oklch(0.55 0.13 65));
+  --color-deck: var(--deck, oklch(0.18 0.006 70));
+  --color-deck-foreground: var(--deck-foreground, oklch(0.945 0.02 90));
+  --color-scrim: var(--scrim, oklch(0.18 0.006 70 / 0.45));
+  --color-focus-ring: var(--focus-ring, transparent);
+
+  /* Typography aliases */
+  --font-family-display: var(--font-display, "Geist", sans-serif);
+  --font-family-body: var(--font-body, "Inter", sans-serif);
+  --font-family-mono: var(--font-mono, "IBM Plex Mono", monospace);
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  /* Intentional host-editor / mono chrome size (between xs and nothing smaller). */
+  --text-editor: 11px;
+  /* Workshop option heading clamp max (exact prior 32px). */
+  --text-workshop-h2: 32px;
+  /* Markdown relative type (preserves prior em scale). */
+  --text-markdown-h1: 1.25em;
+  --text-markdown-h2: 1.12em;
+
+  /* Spacing zero (markdown / compact chrome) */
+  --space-0: 0;
+  /* Inline code padding (preserves prior em scale). */
+  --space-code-pad-y: 0.1em;
+  --space-code-pad-x: 0.25em;
+  /* Segmented control micro spacing (exact prior px). */
+  --space-segment-track: 3px;
+  --space-segment-gap: 2px;
+  --space-segment-label-gap: 6px;
+  --space-segment-pad-x: 13px;
+  --space-segment-pad-x-sm: 10px;
+  /* Workshop / harness micro spacing (exact prior px). */
+  --space-px-5: 5px;
+  --space-px-7: 7px;
+  --space-px-9: 9px;
+  --space-px-11: 11px;
+  --space-px-14: 14px;
+  --space-px-15: 15px;
+  --space-px-18: 18px;
+  --space-px-22: 22px;
+  --space-px-25: 25px;
+  --space-px-26: 26px;
+  --space-px-27: 27px;
+  --space-px-28: 28px;
+  --space-px-30: 30px;
+  --space-px-45: 45px;
+  --space-px-50: 50px;
+  --space-px-60: 60px;
+  --space-px-65: 65px;
+  --space-px-80: 80px;
+  --space-picker-claude: 67px;
+  --space-picker-codex: 96px;
+  /* Workshop mono / chrome type below --text-xs. */
+  --text-3xs: 9px;
+  --text-2xs: 10px;
+  /* Composer-reference workshop type (exact prior px). */
+  --text-composer-13: 13px;
+  --text-composer-15: 15px;
+  --text-composer-20: 20px;
+  --text-composer-25: 25px;
+  --text-composer-42: 42px;
+  --text-composer-50: 50px;
+
+  /* Terminal scrollbar chrome (command deck) — exact hex preserved */
+  --color-terminal-track: #171715;
+  --color-terminal-thumb: #5a8179;
+  --color-terminal-thumb-hover: #8dc4b7;
+
+  /* Inset hairline used as a quiet border (btn-quiet) */
+  --shadow-inset-hairline: inset 0 0 0 1px var(--border, oklch(0.86 0.03 85));
+
+  /* Segmented control item radius (track padding inset) */
+  --radius-segment: calc(var(--radius-control, 0.625rem) - 3px);
+
+  /* Border widths */
+  --border-width-hairline: 1px;
+  --border-width-thick: 2px;
+  --border-width-heavy: 3px;
+  /* Workshop rail / pane seam (exact prior 4px). */
+  --border-width-rail: 4px;
+
+  /* Radii mirrored from styles.css so workshops can import tokens without styles.css */
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  /* Composer-reference workshop radii (exact prior px). */
+  --radius-composer-4: 4px;
+  --radius-composer-7: 7px;
+  --radius-composer-9: 9px;
+  --radius-composer-14: 14px;
+  /* Speech-bubble tail corner (workshop callouts). */
+  --radius-bubble-tail: 2px;
+
+  /* Workshop mock chrome (computer / terminal / diff) — exact prior values */
+  --color-diff-add: oklch(0.77 0.08 180);
+  --color-diff-del: oklch(0.73 0.15 29);
+  --color-terminal-bg: #1d2928;
+  --color-terminal-fg: oklch(0.93 0.014 90);
+  --color-terminal-prompt: #e1ad61;
+  --color-screen-bg: #080909;
+  --color-desktop-from: #24302e;
+  --color-desktop-to: #121615;
+  --color-desktop-window: #f4efe2;
+  --color-desktop-titlebar: #ddd5c3;
+  --color-desktop-dock: rgb(255 255 255 / 0.14);
+  --shadow-desktop-window: 0 8px 30px rgb(0 0 0 / 0.45);
+  --shadow-desktop-note: 0 2px 6px rgb(0 0 0 / 0.18);
+
+  /* Workshop process-chip elevation (exact prior workshop values) */
+  --shadow-workshop-chip: inset 0 1px 0 color-mix(in oklab, white 55%, transparent),
+    0 1px 1px oklch(0% 0 0 / 0.05);
+  --shadow-workshop-chip-hover: inset 0 1px 0 color-mix(in oklab, white 60%, transparent),
+    0 2px 3px oklch(0% 0 0 / 0.08);
+  --shadow-workshop-chip-active: inset 0 1px 0 color-mix(in oklab, white 40%, transparent);
+
+  /* Z-index */
+  --z-recessed: -1;
+  --z-base: 0;
+  --z-raised: 1;
+  --z-dropdown: 50;
+  --z-sticky: 100;
+  --z-overlay: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+  --z-veil: 2147483647;
+
+  /* Opacity */
+  --opacity-disabled: 0.52;
+  --opacity-hover: 0.91;
+  --opacity-pressed: 0.84;
+  --opacity-muted: 0.3;
+  /* Host-editor chrome opacities (exact prior values). */
+  --opacity-host-idle: 0.45;
+  --opacity-host-search-icon: 0.65;
+  --opacity-host-placeholder: 0.55;
+
+  /* Hit / chrome sizes used by panel seams */
+  --size-hit-seam: 18px;
+  --size-hit-collapse: 20px;
+  /* Theme-switch icon-only control (Arc). */
+  --size-theme-switch: 38px;
+  --size-icon-md: 20px;
+  --size-icon-sm: 18px;
+  /* Focus ring offset used by Arc controls. */
+  --space-focus-offset: 3px;
+  /* Spinner stroke (between hairline and thick). */
+  --border-width-spinner: 1.5px;
+  /* Spinner rotation period. */
+  --duration-spin: 0.7s;
+
+  /* Process-key elevation (ADE) — values match current processes.css */
+  --shadow-process-key: inset 0 1px 0 color-mix(in oklab, white 80%, transparent),
+    0 2px 0 color-mix(in oklab, var(--ink) 6%, transparent),
+    0 2px 4px oklch(0.18 0.006 70 / 0.05);
+  --shadow-process-key-hover: inset 0 1px 0 color-mix(in oklab, white 85%, transparent),
+    0 3px 0 color-mix(in oklab, var(--ink) 6%, transparent),
+    0 4px 7px oklch(0.18 0.006 70 / 0.08);
+  --shadow-process-key-active: inset 0 1px 0 color-mix(in oklab, white 55%, transparent),
+    0 1px 0 color-mix(in oklab, var(--ink) 5%, transparent);
+  --shadow-process-key-disabled: inset 0 1px 0 color-mix(in oklab, white 35%, transparent);
+}
+
+:root[data-theme="dark"] {
+  --shadow-process-key: inset 0 1px 0 oklch(1 0 0 / 0.08),
+    0 2px 0 oklch(0 0 0 / 0.28),
+    0 2px 4px oklch(0 0 0 / 0.35);
+  --shadow-process-key-hover: inset 0 1px 0 oklch(1 0 0 / 0.12),
+    0 3px 0 oklch(0 0 0 / 0.3),
+    0 4px 8px oklch(0 0 0 / 0.4);
+  --shadow-process-key-active: inset 0 1px 0 oklch(1 0 0 / 0.06);
+}

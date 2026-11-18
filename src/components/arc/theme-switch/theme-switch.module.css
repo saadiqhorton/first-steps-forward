@@ -3,21 +3,21 @@
   width: auto;
   padding-inline: var(--space-3);
 }
-.iconOnly { width: 38px; min-width: 38px; height: 38px; min-height: 38px; border-radius: 12px; padding: 0; }
+.iconOnly { width: var(--size-theme-switch); min-width: var(--size-theme-switch); height: var(--size-theme-switch); min-height: var(--size-theme-switch); border-radius: var(--radius-md); padding: 0; }
 @media (hover: hover) and (pointer: fine) {
   .themeSwitch:hover:not(:disabled) { border-color: var(--border-strong); }
   .iconOnly:hover:not(:disabled) { background: var(--surface-muted); box-shadow: none; }
 }
-.themeSwitch:focus-visible { outline-offset: 3px; }
+.themeSwitch:focus-visible { outline-offset: var(--space-focus-offset); }
 .iconWrap {
   position: relative;
   display: inline-grid;
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
+  width: var(--size-icon-md);
+  height: var(--size-icon-md);
+  flex: 0 0 var(--size-icon-md);
   place-items: center;
 }
-.icon { position: absolute; display: grid; width: 18px; height: 18px; place-items: center; opacity: 0; }
+.icon { position: absolute; display: grid; width: var(--size-icon-sm); height: var(--size-icon-sm); place-items: center; opacity: 0; }
 /* A theme that arrives during hydration lands instantly; only later toggles crossfade. */
 .settled .icon { transition: opacity var(--duration-instant) var(--ease-standard); }
 .icon[data-on="true"] { opacity: 1; }

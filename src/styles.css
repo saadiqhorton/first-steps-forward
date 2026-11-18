@@ -2,6 +2,7 @@
 @source "../src";
 @import "tw-animate-css";
 @import "./components/arc/foundation.css";
+@import "./tokens.css";
 
 @font-face {
   font-family: "Geist";
@@ -245,13 +246,13 @@
   font-family: var(--font-body);
   font-size: var(--text-xs);
   line-height: 1rem;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--text-secondary);
 }
 
 @utility heading-display {
   font-family: var(--font-display);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   letter-spacing: var(--tracking-display);
   line-height: var(--leading-display);
 }
@@ -262,24 +263,24 @@
   border-radius: var(--radius-control);
   background: var(--accent);
   color: var(--accent-foreground);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   transition:
     opacity var(--duration-fast) var(--ease-standard),
     transform var(--duration-spring) var(--ease-spring);
   @media (hover: hover) and (pointer: fine) {
     &:hover {
-      opacity: 0.91;
+      opacity: var(--opacity-hover);
     }
   }
   &:active {
-    opacity: 0.84;
+    opacity: var(--opacity-pressed);
     transform: scale(0.97);
   }
   &:is([aria-haspopup], [aria-expanded], [data-state]):active {
     transform: none;
   }
   &:disabled {
-    opacity: 0.52;
+    opacity: var(--opacity-disabled);
     pointer-events: none;
   }
   @media (prefers-reduced-motion: reduce) {
@@ -294,7 +295,7 @@
   border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--foreground);
-  box-shadow: inset 0 0 0 1px var(--border);
+  box-shadow: var(--shadow-inset-hairline);
   transition:
     background-color var(--duration-fast) var(--ease-standard),
     transform var(--duration-spring) var(--ease-spring);
@@ -311,7 +312,7 @@
     transform: none;
   }
   &:disabled {
-    opacity: 0.52;
+    opacity: var(--opacity-disabled);
     pointer-events: none;
   }
   @media (prefers-reduced-motion: reduce) {
@@ -325,7 +326,7 @@
 @utility card-panel {
   border-radius: var(--radius-panel);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: var(--border-width-hairline) solid var(--border);
 }
 
 @layer base {
@@ -381,7 +382,7 @@
 .theme-veil {
   position: fixed;
   inset: 0;
-  z-index: 2147483647;
+  z-index: var(--z-veil);
   width: 100%;
   height: 100%;
   max-width: none;
@@ -425,7 +426,7 @@
     transition: background-color var(--duration-fast) var(--ease-standard);
   }
   .panel-seam[data-orientation="vertical"] {
-    width: 1px;
+    width: var(--border-width-hairline);
     cursor: col-resize;
   }
   /* Expand the pointer hit area beyond the visible line. */
@@ -435,11 +436,11 @@
     top: 0;
     bottom: 0;
     left: 50%;
-    width: 18px;
+    width: var(--size-hit-seam);
     transform: translateX(-50%);
   }
   .panel-seam[data-orientation="horizontal"] {
-    height: 1px;
+    height: var(--border-width-hairline);
     cursor: row-resize;
   }
   .panel-seam[data-orientation="horizontal"]::after {
@@ -448,7 +449,7 @@
     left: 0;
     right: 0;
     top: 50%;
-    height: 18px;
+    height: var(--size-hit-seam);
     transform: translateY(-50%);
   }
   .panel-seam:hover,
@@ -467,13 +468,13 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    z-index: 1;
-    width: 20px;
-    height: 20px;
+    z-index: var(--z-raised);
+    width: var(--size-hit-collapse);
+    height: var(--size-hit-collapse);
     border-radius: var(--radius-pill);
     background: var(--surface-raised);
     color: var(--text-muted);
-    border: 1px solid var(--border);
+    border: var(--border-width-hairline) solid var(--border);
     box-shadow: var(--shadow-resting);
     display: grid;
     place-items: center;
@@ -512,27 +513,27 @@
 .ade-markdown ol,
 .ade-markdown pre,
 .ade-markdown blockquote {
-  margin-block: 0.6em;
+  margin-block: var(--space-2);
 }
 .ade-markdown ul {
   list-style: disc;
-  padding-left: 1.5em;
+  padding-left: var(--space-6);
 }
 .ade-markdown ol {
   list-style: decimal;
-  padding-left: 1.5em;
+  padding-left: var(--space-6);
 }
 .ade-markdown h1,
 .ade-markdown h2,
 .ade-markdown h3 {
-  margin-block: 0.9em 0.4em;
-  font-weight: 500;
+  margin-block: var(--space-4) var(--space-1);
+  font-weight: var(--font-weight-medium);
 }
 .ade-markdown h1 {
-  font-size: 1.25em;
+  font-size: var(--text-markdown-h1);
 }
 .ade-markdown h2 {
-  font-size: 1.12em;
+  font-size: var(--text-markdown-h2);
 }
 .ade-markdown a {
   color: var(--teal-deep);
@@ -542,20 +543,20 @@
 .ade-markdown pre {
   max-width: 100%;
   overflow-x: auto;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--deck);
   color: var(--deck-foreground);
-  padding: 0.8em;
+  padding: var(--space-3);
   white-space: pre;
 }
 .ade-markdown :not(pre) > code {
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: color-mix(in oklab, var(--ink) 8%, transparent);
-  padding: 0.1em 0.25em;
+  padding: var(--space-code-pad-y) var(--space-code-pad-x);
 }
 .ade-markdown blockquote {
-  border-left: 2px solid var(--border);
-  padding-left: 0.9em;
+  border-left: var(--border-width-thick) solid var(--border);
+  padding-left: var(--space-4);
   color: var(--text-muted);
 }
 .ade-markdown table {
@@ -566,14 +567,14 @@
 }
 .ade-markdown th,
 .ade-markdown td {
-  border: 1px solid var(--border);
-  padding: 0.3em 0.5em;
+  border: var(--border-width-hairline) solid var(--border);
+  padding: var(--space-1) var(--space-2);
 }
 
 /* Command deck scrollback stays visible without the browser's bright scrollbar. */
 .host-terminal .xterm-viewport {
   scrollbar-width: thin;
-  scrollbar-color: #5a8179 #171715;
+  scrollbar-color: var(--color-terminal-thumb) var(--color-terminal-track);
 }
 
 .host-terminal .xterm-viewport::-webkit-scrollbar {
@@ -581,22 +582,22 @@
 }
 
 .host-terminal .xterm-viewport::-webkit-scrollbar-track {
-  background: #171715;
+  background: var(--color-terminal-track);
 }
 
 .host-terminal .xterm-viewport::-webkit-scrollbar-thumb {
-  border: 2px solid #171715;
-  border-radius: 999px;
-  background: #5a8179;
+  border: var(--border-width-thick) solid var(--color-terminal-track);
+  border-radius: var(--radius-pill);
+  background: var(--color-terminal-thumb);
 }
 
 .host-terminal .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: #8dc4b7;
+  background: var(--color-terminal-thumb-hover);
 }
 .agent-computer-screen:fullscreen {
   width: 100vw;
   height: 100vh;
   aspect-ratio: auto;
   border: 0;
-  background: #000;
+  background: black;
 }

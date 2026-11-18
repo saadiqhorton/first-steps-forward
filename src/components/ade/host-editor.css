@@ -2,24 +2,23 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 4px 0;
+  padding: var(--space-1) 0;
 }
 .ed-tree-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   width: 100%;
   min-width: 0;
   height: 26px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   text-align: left;
   white-space: nowrap;
   transition: background-color var(--duration-fast) var(--ease-standard);
   font:
-    11px "IBM Plex Mono",
-    monospace !important;
+    var(--text-editor) var(--font-family-mono) !important;
 }
 .ed-tree-row svg {
   flex: none;
@@ -30,11 +29,10 @@
   text-overflow: ellipsis;
 }
 .ed-tree-empty {
-  padding: 12px;
+  padding: var(--space-3);
   color: var(--text-muted);
   font:
-    11px "IBM Plex Mono",
-    monospace;
+    var(--text-editor) var(--font-family-mono);
 }
 .ed-dirty-dot {
   flex: none;
@@ -47,7 +45,7 @@
 .ed-tree-open {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   min-width: 0;
   flex: 1;
   height: 100%;
@@ -64,12 +62,12 @@
   flex: none;
   width: 18px;
   height: 18px;
-  margin-left: 4px;
+  margin-left: var(--space-1);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: inherit;
-  opacity: 0.45;
+  opacity: var(--opacity-host-idle);
 }
 .ed-tree-remove:hover,
 .ed-tree-remove:focus-visible {
@@ -80,16 +78,16 @@
   display: flex;
   align-items: center;
   flex: none;
-  gap: 6px;
+  gap: var(--space-1);
   height: 30px;
   min-width: 0;
-  padding: 0 10px;
-  border: 1px solid currentColor;
+  padding: 0 var(--space-2);
+  border: var(--border-width-hairline) solid currentColor;
   border-radius: var(--radius-control);
 }
 .ed-search svg {
   flex: none;
-  opacity: 0.65;
+  opacity: var(--opacity-host-search-icon);
 }
 .ed-search input {
   width: 100%;
@@ -99,12 +97,11 @@
   background: transparent;
   color: inherit;
   font:
-    11px "IBM Plex Mono",
-    monospace !important;
+    var(--text-editor) var(--font-family-mono) !important;
 }
 .ed-search input::placeholder {
   color: currentColor;
-  opacity: 0.55;
+  opacity: var(--opacity-host-placeholder);
 }
 .ed-search button {
   display: grid;
@@ -129,11 +126,10 @@
 }
 .ed-workbench-path {
   flex: none;
-  padding: 8px 12px 4px;
+  padding: var(--space-2) var(--space-3) var(--space-1);
   color: var(--text-muted);
   font:
-    11px "IBM Plex Mono",
-    monospace;
+    var(--text-editor) var(--font-family-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -144,16 +140,15 @@
 .ed-workbench-status {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   flex: none;
   height: 26px;
   align-items: center;
-  padding: 0 12px;
-  border-top: 1px solid var(--border);
+  padding: 0 var(--space-3);
+  border-top: var(--border-width-hairline) solid var(--border);
   color: var(--text-muted);
   font:
-    11px "IBM Plex Mono",
-    monospace;
+    var(--text-editor) var(--font-family-mono);
   white-space: nowrap;
 }
 .ed-workbench-status span:first-child {
@@ -164,15 +159,14 @@
 .host-editor-error {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex: none;
-  padding: 8px 12px;
-  border-top: 1px solid color-mix(in oklab, var(--danger) 40%, transparent);
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--border-width-hairline) solid color-mix(in oklab, var(--danger) 40%, transparent);
   background: color-mix(in oklab, var(--danger) 10%, var(--surface));
   color: var(--danger);
   font:
-    11px/1.35 "IBM Plex Mono",
-    monospace;
+    var(--text-editor)/1.35 var(--font-family-mono);
 }
 .host-editor-error span {
   flex: 1;
@@ -183,7 +177,7 @@
   border: 0;
   border-radius: var(--radius-control);
   background: var(--danger);
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-2);
   color: var(--danger-foreground);
   font: inherit;
 }
