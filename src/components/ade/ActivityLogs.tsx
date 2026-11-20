@@ -313,9 +313,9 @@ export function ActivityLogs({
 
   let content: ReactNode;
   if (!current.length) {
-    content = <p className="text-[13px] text-dim">No CLI output yet.</p>;
+    content = <p className="text-ui text-dim">No CLI output yet.</p>;
   } else if (!shown.length) {
-    content = <p className="text-[13px] text-dim">No activity events yet.</p>;
+    content = <p className="text-ui text-dim">No activity events yet.</p>;
   } else {
     content = (
       <div className="space-y-1.5">

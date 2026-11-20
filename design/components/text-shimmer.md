@@ -17,7 +17,7 @@
 
 ## 4. Tokens used
 - `--ts-highlight` ← `--text-shimmer-highlight` or `currentColor`
-- `--ts-base` ← `--text-shimmer-base` or mix of `currentColor` with `--text-muted` / `--color-text-muted`
+- `--ts-base` ← `--text-shimmer-base` or mix of `currentColor` with `--text-muted`
 - Motion durations/eases via Arc `motionTokens` (maps to `--duration-*`, `--ease-*`)
 
 ## 5. Props/API

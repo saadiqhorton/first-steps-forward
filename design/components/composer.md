@@ -19,7 +19,7 @@
 - Optional error alert strip
 
 ## 4. Tokens used
-- Panel/border utilities (`border-line` / `--color-border`, `text-dim` / `--color-text-muted`)
+- Panel/border utilities (`border-line` / `--border`, `text-dim` / `--text-muted`)
 - Focus ring: amber (`ring-amber/35` on panel when textarea focused)
 - Danger text for `error`; disabled opacity on controls
 

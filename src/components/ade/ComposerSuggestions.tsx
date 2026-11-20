@@ -119,7 +119,7 @@ export function ComposerSuggestions({
             aria-selected={index === active}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelect(option)}
-            className={`flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-ink/[0.06] ${index === active ? "bg-ink/[0.06]" : ""}`}
+            className={`flex w-full items-start gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-ink/[0.06] ${index === active ? "bg-ink/[0.06]" : ""}`}
           >
             <Icon className="mt-0.5 size-4 shrink-0 text-dim" aria-hidden />
             <span className="min-w-0">

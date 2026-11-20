@@ -54,8 +54,8 @@ export function ProjectsMenu({
       <DropdownMenuTrigger
         className={
           showActiveName
-            ? "inline-flex h-7 max-w-[14rem] items-center gap-1.5 rounded-md px-2 text-[13px] font-medium text-ink hover:bg-ink/[0.04] focus-visible:outline-2 focus-visible:outline-amber"
-            : "inline-flex h-7 max-w-[14rem] items-center gap-1.5 rounded-md px-2 text-[13px] text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+            ? "inline-flex h-7 max-w-[14rem] items-center gap-1.5 rounded-lg px-2 text-ui font-medium text-ink hover:bg-ink/[0.04] focus-visible:outline-2 focus-visible:outline-amber"
+            : "inline-flex h-7 max-w-[14rem] items-center gap-1.5 rounded-lg px-2 text-ui text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
         }
         aria-label="Projects menu"
       >
@@ -77,8 +77,8 @@ export function ProjectsMenu({
               });
             }}
           >
-            <span className="text-[13px] font-medium text-ink">{p.name}</span>
-            <span className="max-w-[18rem] break-all font-mono text-[10px] text-dim">
+            <span className="text-ui font-medium text-ink">{p.name}</span>
+            <span className="max-w-[18rem] break-all font-mono text-2xs text-dim">
               {p.path}
               {p.missing ? " · missing" : ""}
             </span>
@@ -86,7 +86,7 @@ export function ProjectsMenu({
         ))}
         {projects.length === 0 && (
           <DropdownMenuItem asChild>
-            <Link to="/projects/add" className="cursor-pointer text-[13px]">
+            <Link to="/projects/add" className="cursor-pointer text-ui">
               + Add project
             </Link>
           </DropdownMenuItem>
@@ -95,7 +95,7 @@ export function ProjectsMenu({
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              className="cursor-pointer text-[12px] text-danger focus:text-danger"
+              className="cursor-pointer text-(length:--text-xs) text-danger focus:text-danger"
               onSelect={() => {
                 window.setTimeout(() => void removeActive(), 0);
               }}

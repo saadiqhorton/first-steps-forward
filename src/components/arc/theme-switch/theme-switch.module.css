@@ -3,7 +3,7 @@
   width: auto;
   padding-inline: var(--space-3);
 }
-.iconOnly { width: var(--size-theme-switch); min-width: var(--size-theme-switch); height: var(--size-theme-switch); min-height: var(--size-theme-switch); border-radius: var(--radius-md); padding: 0; }
+.iconOnly { width: var(--size-theme-switch); min-width: var(--size-theme-switch); height: var(--size-theme-switch); min-height: var(--size-theme-switch); border-radius: var(--radius-lg); padding: 0; }
 @media (hover: hover) and (pointer: fine) {
   .themeSwitch:hover:not(:disabled) { border-color: var(--border-strong); }
   .iconOnly:hover:not(:disabled) { background: var(--surface-muted); box-shadow: none; }

@@ -37,7 +37,7 @@ function AttachmentChips({ attachments }: { attachments: MessageAttachment[] }) 
       {attachments.map((a) => (
         <div
           key={a.id}
-          className="flex max-w-56 items-center gap-2 rounded-lg border border-line bg-panel px-2 py-1"
+          className="flex max-w-56 items-center gap-2 rounded-md border border-line bg-panel px-2 py-1"
         >
           {a.kind === "image" ? (
             <img
@@ -68,7 +68,7 @@ function AttachmentVideos({ attachments }: { attachments: MessageAttachment[] })
         key={attachment.id}
         controls
         preload="metadata"
-        className="mt-2 max-h-80 w-full rounded-lg bg-black"
+        className="mt-2 max-h-80 w-full rounded-md bg-black"
         src={`/api/attachments/${attachment.id}`}
         aria-label={attachment.name}
       />
@@ -126,7 +126,7 @@ export function SessionMessage({
   );
 
   const content = structured ? (
-    <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-ink/5 p-3 font-mono text-xs leading-relaxed">
+    <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-ink/5 p-3 font-mono text-xs leading-relaxed">
       {text}
     </pre>
   ) : role === "agent" ? (
@@ -163,7 +163,7 @@ export function SessionMessage({
   // ADE's own notices sit in the margin of the conversation, quieter than replies.
   if (role === "system") {
     return (
-      <div className="min-w-0 max-w-[min(85%,100%)] border-l-2 border-line pl-3 text-[13px] leading-5 text-[color:var(--text-secondary)] [overflow-wrap:anywhere]">
+      <div className="min-w-0 max-w-[min(85%,100%)] border-l-2 border-line pl-3 text-ui leading-5 text-[color:var(--text-secondary)] [overflow-wrap:anywhere]">
         <div className="label-section mb-1 text-dim">ADE</div>
         {content}
         {attachmentRow}

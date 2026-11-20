@@ -89,17 +89,17 @@ export function SkillsWorkspace({ projectId }: { projectId: string }) {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
               <h1 className="heading-display text-2xl @lg/workflows:text-3xl">Skills</h1>
-              <p className="mt-3 max-w-[62ch] text-[13px] text-dim">
+              <p className="mt-3 max-w-[62ch] text-ui text-dim">
                 Instructions an agent loads on demand. ADE keeps its own skills in{" "}
-                <code className="font-mono text-[12px]">.ade/skills</code>, so nothing depends on
-                another client&apos;s folders. Import a <code>.skill</code> package or a zip of
-                skills, or write one here.
+                <code className="font-mono text-(length:--text-xs)">.ade/skills</code>, so nothing
+                depends on another client&apos;s folders. Import a <code>.skill</code> package or a
+                zip of skills, or write one here.
               </p>
             </div>
             <div className="flex shrink-0 gap-2">
               <button
                 type="button"
-                className="btn-quiet inline-flex items-center gap-1.5 px-3 py-2 text-[13px]"
+                className="btn-quiet inline-flex items-center gap-1.5 px-3 py-2 text-ui"
                 onClick={() => setImporting(true)}
               >
                 <Upload className="size-3.5" aria-hidden />
@@ -107,7 +107,7 @@ export function SkillsWorkspace({ projectId }: { projectId: string }) {
               </button>
               <button
                 type="button"
-                className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-[13px]"
+                className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-ui"
                 onClick={() => create.mutate()}
                 disabled={create.isPending}
               >
@@ -135,13 +135,13 @@ export function SkillsWorkspace({ projectId }: { projectId: string }) {
                 onChange={(event) => setQueryText(event.target.value)}
                 placeholder="Search skills"
                 aria-label="Search skills"
-                className="w-full rounded-md border border-line bg-paper py-2 pr-3 pl-9 text-[13px] text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
+                className="w-full rounded-lg border border-line bg-paper py-2 pr-3 pl-9 text-ui text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
               />
             </div>
           </div>
 
           {query.isPending ? (
-            <TextShimmer as="p" className="mt-8 text-[13px] text-dim">
+            <TextShimmer as="p" className="mt-8 text-ui text-dim">
               Loading skills…
             </TextShimmer>
           ) : shown.length ? (
@@ -156,7 +156,7 @@ export function SkillsWorkspace({ projectId }: { projectId: string }) {
               ))}
             </div>
           ) : (
-            <p className="mt-8 text-[13px] text-dim">
+            <p className="mt-8 text-ui text-dim">
               {skills.length === 0
                 ? "No skills yet. Import a package, or write one here."
                 : "No skills match this search."}
@@ -211,7 +211,7 @@ export function SkillsWorkspace({ projectId }: { projectId: string }) {
       {notice ? (
         <div
           role="status"
-          className="pointer-events-none absolute right-4 bottom-4 z-30 rounded-md border border-line bg-panel px-3 py-2 text-[12.5px] shadow-lg"
+          className="pointer-events-none absolute right-4 bottom-4 z-30 rounded-lg border border-line bg-panel px-3 py-2 text-ui shadow-lg"
         >
           {notice}
         </div>

@@ -14,7 +14,7 @@ import { readLastModel, writeLastModel } from "@/lib/ade/lastModels";
 const NO_WORKFLOWS: Workflow[] = [];
 
 /** Neutral notes above the composer: informational, not a call to action. */
-const noteClass = "rounded-lg border border-line bg-surface-muted px-4 py-3 text-[13px] leading-5";
+const noteClass = "rounded-md border border-line bg-surface-muted px-4 py-3 text-ui leading-5";
 
 export function NewTaskForm({
   projectId,
@@ -219,13 +219,13 @@ export function NewTaskForm({
             onChange={(e) => setCriteria(e.target.value)}
             rows={2}
             placeholder="How will you know it's done? Leave blank to let the agent choose a reasonable approach."
-            className="mt-2 w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 text-[13px] leading-relaxed placeholder:text-dim/70"
+            className="mt-2 w-full resize-y rounded-md border border-line bg-paper px-3 py-2 text-ui leading-relaxed placeholder:text-dim/70"
           />
         )}
       </div>
       {!!project.uncommittedFiles.length && (
-        <div className="rounded-lg border border-line bg-surface-muted p-4">
-          <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
+        <div className="rounded-md border border-line bg-surface-muted p-4">
+          <div className="flex items-center gap-2 text-ui font-medium text-ink">
             <TriangleAlert
               className="size-4 shrink-0 text-amber-deep"
               strokeWidth={1.5}
@@ -233,7 +233,7 @@ export function NewTaskForm({
             />
             Uncommitted changes in this project
           </div>
-          <p className="mt-1 text-[13px] leading-5 text-[color:var(--text-secondary)]">
+          <p className="mt-1 text-ui leading-5 text-[color:var(--text-secondary)]">
             The agent is told to work around these files and never revert, stash, commit or
             overwrite them. They're marked as yours in the diff, and ADE never stashes, resets or
             restores files on its own.
@@ -245,7 +245,7 @@ export function NewTaskForm({
               </li>
             ))}
           </ul>
-          <label className="mt-3 flex items-start gap-2 text-[13px] leading-5 text-ink">
+          <label className="mt-3 flex items-start gap-2 text-ui leading-5 text-ink">
             <input
               type="checkbox"
               checked={ackDirty}
@@ -291,14 +291,14 @@ export function NewTaskForm({
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto @container">
       <div className="flex w-full max-w-3xl flex-col px-4 py-6 @lg:px-7 @lg:py-10">
         <h1 className="heading-display text-2xl @lg:text-3xl">What are you working on?</h1>
-        <p className="mt-3 text-[13px] text-dim">Describe a change and an agent gets started</p>
+        <p className="mt-3 text-ui text-dim">Describe a change and an agent gets started</p>
         {preview.length > 0 && (
           <div className="mt-8">
             <div className="label-section">Start with a workflow</div>
             <div className="mt-3">
               <WorkflowCards workflows={preview} onSelect={applyWorkflow} />
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-4 text-[13px]">
+            <div className="mt-3 flex flex-wrap items-center gap-4 text-ui">
               <Link
                 to="/p/$projectId/workflows"
                 params={{ projectId }}

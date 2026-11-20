@@ -74,7 +74,7 @@ function ProcessOutput({ proc, active }: { proc: ProcessRecord; active: boolean 
   return (
     <div className="flex min-w-0 flex-col">
       <div className="flex items-center gap-2 pb-1.5">
-        <span className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-normal text-dim">
+        <span className="inline-flex items-center gap-1.5 font-mono text-caption tracking-normal text-dim">
           <Terminal className="size-3.5" strokeWidth={1.75} aria-hidden />
           {follow ? "Following log" : "Scrolled back"}
         </span>
@@ -87,7 +87,7 @@ function ProcessOutput({ proc, active }: { proc: ProcessRecord; active: boolean 
                 const el = ref.current;
                 if (el) el.scrollTop = el.scrollHeight;
               }}
-              className="inline-flex h-6 items-center gap-1 rounded-md border border-amber/45 bg-amber/[0.08] px-1.5 text-[11px] text-amber-deep transition-colors hover:bg-amber/[0.12]"
+              className="inline-flex h-6 items-center gap-1 rounded-lg border border-amber/45 bg-amber/[0.08] px-1.5 text-caption text-amber-deep transition-colors hover:bg-amber/[0.12]"
             >
               <ArrowDown className="size-3" strokeWidth={1.75} aria-hidden />
               Follow latest
@@ -97,7 +97,7 @@ function ProcessOutput({ proc, active }: { proc: ProcessRecord; active: boolean 
             type="button"
             aria-pressed={wrap}
             onClick={() => setWrap((value) => !value)}
-            className={`inline-flex h-6 items-center gap-1 rounded-md border px-1.5 text-[11px] transition-colors ${
+            className={`inline-flex h-6 items-center gap-1 rounded-lg border px-1.5 text-caption transition-colors ${
               wrap
                 ? "border-line bg-surface-muted text-ink"
                 : "border-transparent text-dim hover:bg-ink/[0.04] hover:text-ink"
@@ -113,7 +113,7 @@ function ProcessOutput({ proc, active }: { proc: ProcessRecord; active: boolean 
         onScroll={onScroll}
         tabIndex={0}
         aria-label={`Output of ${proc.name}`}
-        className={`h-[184px] overflow-auto rounded-lg bg-deck px-3 py-2 font-mono text-[11px] leading-[1.6] tracking-normal text-deck-foreground outline-none focus-visible:ring-2 focus-visible:ring-amber ${
+        className={`h-[184px] overflow-auto rounded-md bg-deck px-3 py-2 font-mono text-caption leading-[1.6] tracking-normal text-deck-foreground outline-none focus-visible:ring-2 focus-visible:ring-amber ${
           wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"
         }`}
       >
@@ -130,7 +130,7 @@ function ProcessOutput({ proc, active }: { proc: ProcessRecord; active: boolean 
             ? "Loading output…"
             : "No output recorded yet"}
       </pre>
-      <div className="flex justify-between gap-2 pt-1.5 font-mono text-[10.5px] tabular-nums text-dim">
+      <div className="flex justify-between gap-2 pt-1.5 font-mono text-caption tabular-nums text-dim">
         <span>{query.data?.total ?? 0} lines</span>
         {query.isError ? <span>Output is unavailable</span> : null}
       </div>
@@ -198,7 +198,7 @@ function ExpandedProcess({
             type="button"
             onClick={copy}
             title="Copy address"
-            className="inline-flex h-6 min-w-0 items-center gap-1.5 rounded-md border border-line bg-paper px-1.5 font-mono text-[11px] tracking-normal hover:border-amber"
+            className="inline-flex h-6 min-w-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-1.5 font-mono text-caption tracking-normal hover:border-amber"
           >
             <span className="truncate">
               {address.replace(/^https?:\/\//, "").replace(/\/$/, "")}
@@ -210,14 +210,14 @@ function ExpandedProcess({
             )}
           </button>
         ) : (
-          <span className="font-mono text-[11px] text-dim">No website</span>
+          <span className="font-mono text-caption text-dim">No website</span>
         )}
         <div className="ml-auto flex items-center gap-1">
           <button
             type="button"
             disabled={!address || proc.status !== "running"}
             onClick={() => address && requestPreviewOpen(address)}
-            className="btn-quiet inline-flex h-6 items-center gap-1 px-2 text-[11px] disabled:opacity-50"
+            className="btn-quiet inline-flex h-6 items-center gap-1 px-2 text-caption disabled:opacity-50"
           >
             Open
             <ExternalLink className="size-3" strokeWidth={1.75} aria-hidden />
@@ -226,7 +226,7 @@ function ExpandedProcess({
             type="button"
             onClick={stop}
             disabled={busy === "stop" || proc.status === "stopping"}
-            className="btn-quiet inline-flex h-6 items-center gap-1 px-2 text-[11px] disabled:opacity-60"
+            className="btn-quiet inline-flex h-6 items-center gap-1 px-2 text-caption disabled:opacity-60"
           >
             {busy === "stop" || proc.status === "stopping" ? (
               <Loader2 className="size-3 animate-spin" strokeWidth={1.75} aria-hidden />
@@ -243,13 +243,13 @@ function ExpandedProcess({
       </div>
 
       {proc.status === "unverified" ? (
-        <div className="flex items-center justify-between gap-2 rounded-md border-l-2 border-amber bg-surface-muted px-2 py-1.5 text-[11px] text-dim">
+        <div className="flex items-center justify-between gap-2 rounded-lg border-l-2 border-amber bg-surface-muted px-2 py-1.5 text-caption text-dim">
           <span>ADE can't confirm this is still running</span>
           <button
             type="button"
             onClick={acknowledge}
             disabled={busy === "ack"}
-            className="shrink-0 text-[11px] font-medium text-ink hover:text-amber-deep"
+            className="shrink-0 text-caption font-medium text-ink hover:text-amber-deep"
           >
             Mark as good
           </button>
@@ -257,13 +257,13 @@ function ExpandedProcess({
       ) : null}
 
       {proc.status === "failed" ? (
-        <div className="flex items-start gap-1.5 rounded-md border-l-2 border-danger bg-surface-muted px-2 py-1.5 text-[11px] text-danger">
+        <div className="flex items-start gap-1.5 rounded-lg border-l-2 border-danger bg-surface-muted px-2 py-1.5 text-caption text-danger">
           <AlertTriangle className="mt-0.5 size-3 shrink-0" strokeWidth={1.75} aria-hidden />
           <span>{proc.stopError ?? "ADE could not stop this process"}</span>
         </div>
       ) : null}
 
-      <div className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-dim">
+      <div className="flex min-w-0 items-center gap-1.5 font-mono text-caption text-dim">
         <span className={meta.text}>{meta.label}</span>
         <span aria-hidden>·</span>
         <span className="truncate">{proc.command}</span>
@@ -384,7 +384,7 @@ export function ProcessesPane({
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-panel">
       <div className="shrink-0 px-3 pb-2 pt-3">
-        <label className="flex h-8 items-center gap-1.5 rounded-lg border border-line bg-paper px-2 text-dim focus-within:border-amber">
+        <label className="flex h-8 items-center gap-1.5 rounded-md border border-line bg-paper px-2 text-dim focus-within:border-amber">
           <Search className="size-3.5" strokeWidth={1.75} aria-hidden />
           <input
             type="search"
@@ -392,13 +392,13 @@ export function ProcessesPane({
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search"
             aria-label="Search processes"
-            className="min-w-0 flex-1 bg-transparent py-1.5 text-[12px] tracking-normal text-ink outline-none placeholder:text-dim"
+            className="min-w-0 flex-1 bg-transparent py-1.5 text-(length:--text-xs) tracking-normal text-ink outline-none placeholder:text-dim"
           />
         </label>
       </div>
 
       {checks > 0 ? (
-        <div className="mx-2 mb-1 flex items-center gap-2 border-b border-line px-1.5 pb-2 text-[11.5px] text-dim">
+        <div className="mx-2 mb-1 flex items-center gap-2 border-b border-line px-1.5 pb-2 text-(length:--text-xs) text-dim">
           <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber" />
           <span>
             {checks === 1 ? "1 process needs checking" : `${checks} processes need checking`}
@@ -406,7 +406,7 @@ export function ProcessesPane({
           <button
             type="button"
             onClick={markAllGood}
-            className="ml-auto shrink-0 text-[11px] text-ink transition-colors hover:text-amber-deep"
+            className="ml-auto shrink-0 text-caption text-ink transition-colors hover:text-amber-deep"
           >
             Mark all as good
           </button>
@@ -415,24 +415,28 @@ export function ProcessesPane({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {query.isPending ? (
-          <p className="px-2 py-3 text-[12px] text-dim">Loading processes…</p>
+          <p className="px-2 py-3 text-(length:--text-xs) text-dim">Loading processes…</p>
         ) : query.isError ? (
-          <p className="px-2 py-3 text-[12px] text-danger">
+          <p className="px-2 py-3 text-(length:--text-xs) text-danger">
             {query.error instanceof Error ? query.error.message : "Processes are unavailable"}
           </p>
         ) : !processes.length ? (
           <div className="grid justify-items-center gap-2 px-4 py-10 text-center text-dim">
-            <span className="grid size-9 place-items-center rounded-lg border border-line bg-paper">
+            <span className="grid size-9 place-items-center rounded-md border border-line bg-paper">
               <Terminal className="size-4" strokeWidth={1.75} aria-hidden />
             </span>
-            <h2 className="font-display text-[14px] font-medium text-ink">Nothing running yet</h2>
-            <p className="max-w-[28ch] text-[12px] leading-relaxed">
+            <h2 className="font-display text-(length:--text-sm) font-medium text-ink">
+              Nothing running yet
+            </h2>
+            <p className="max-w-[28ch] text-xs leading-relaxed">
               When an agent starts a server or a watcher, it appears here with its output and a Stop
               button.
             </p>
           </div>
         ) : !groups.length ? (
-          <p className="px-2 py-3 text-[12px] text-dim">No processes match “{search}”</p>
+          <p className="px-2 py-3 text-(length:--text-xs) text-dim">
+            No processes match “{search}”
+          </p>
         ) : (
           groups.map((group, groupIndex) => {
             const conversation = sessions.find((session) => session.id === group.sessionId);
@@ -442,13 +446,13 @@ export function ProcessesPane({
                 aria-label="Processes by conversation"
                 className={groupIndex > 0 ? "mt-2 border-t border-line/70 pt-2" : ""}
               >
-                <div className="flex min-w-0 items-baseline gap-2 px-2 pb-1 pt-2 text-[11.5px] text-dim">
+                <div className="flex min-w-0 items-baseline gap-2 px-2 pb-1 pt-2 text-(length:--text-xs) text-dim">
                   <span className="min-w-0 truncate font-medium">
                     {conversation
                       ? sessionTitle(conversation.displayRequest ?? conversation.request)
                       : "Started outside a conversation"}
                   </span>
-                  <span className="ml-auto shrink-0 font-mono text-[10.5px] capitalize tracking-normal">
+                  <span className="ml-auto shrink-0 font-mono text-caption capitalize tracking-normal">
                     {conversation ? conversation.agentId : "ADE"}
                   </span>
                 </div>
@@ -458,23 +462,23 @@ export function ProcessesPane({
                   return (
                     <div
                       key={proc.id}
-                      className={`rounded-lg transition-colors ${expanded ? "bg-ink/[0.04]" : "hover:bg-ink/[0.03]"}`}
+                      className={`rounded-md transition-colors ${expanded ? "bg-ink/[0.04]" : "hover:bg-ink/[0.03]"}`}
                     >
                       <div className="flex min-h-12 items-stretch">
                         <button
                           type="button"
                           onClick={() => setSelectedId(expanded ? null : proc.id)}
                           aria-expanded={expanded}
-                          className="flex min-w-0 flex-1 items-start gap-2 rounded-lg px-2 py-2 text-left"
+                          className="flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left"
                         >
                           <span className="grid h-5 shrink-0 place-items-center">
                             <Dot proc={proc} />
                           </span>
                           <span className="grid min-w-0 flex-1 gap-0.5">
-                            <span className="truncate text-[12.5px] font-medium leading-[18px] tracking-normal">
+                            <span className="truncate text-ui font-medium leading-[18px] tracking-normal">
                               {proc.name}
                             </span>
-                            <span className="flex min-w-0 items-center justify-between gap-2 font-mono text-[10.5px] leading-4 tracking-normal text-dim">
+                            <span className="flex min-w-0 items-center justify-between gap-2 font-mono text-caption leading-4 tracking-normal text-dim">
                               <span className="truncate">
                                 {address
                                   ? address.replace(/^https?:\/\//, "").replace(/\/$/, "")
@@ -482,7 +486,7 @@ export function ProcessesPane({
                               </span>
                               {proc.status !== "running" ? (
                                 <span
-                                  className={`shrink-0 text-[10.5px] ${STATUS[proc.status].text}`}
+                                  className={`shrink-0 text-caption ${STATUS[proc.status].text}`}
                                 >
                                   {STATUS[proc.status].label}
                                 </span>
@@ -503,7 +507,7 @@ export function ProcessesPane({
                             onClick={() => requestPreviewOpen(address)}
                             aria-label={`Open ${address}`}
                             title={`Open ${address}`}
-                            className="my-auto mr-1 grid size-7 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.06] hover:text-ink"
+                            className="my-auto mr-1 grid size-7 shrink-0 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.06] hover:text-ink"
                           >
                             <ExternalLink className="size-3.5" strokeWidth={1.75} aria-hidden />
                           </button>
@@ -522,14 +526,14 @@ export function ProcessesPane({
       </div>
 
       <div className="flex shrink-0 items-center justify-between gap-2 border-t border-line px-3 py-2">
-        <span className="font-mono text-[10.5px] tabular-nums text-dim">
+        <span className="font-mono text-caption tabular-nums text-dim">
           {processes.length} in this project
         </span>
         <button
           type="button"
           onClick={stopAll}
           disabled={!processes.length || stoppingAll}
-          className="text-[11px] text-dim transition-colors hover:text-ink disabled:opacity-50"
+          className="text-caption text-dim transition-colors hover:text-ink disabled:opacity-50"
         >
           {stoppingAll ? "Stopping…" : "Stop all"}
         </button>
@@ -538,7 +542,7 @@ export function ProcessesPane({
       {error ? (
         <div
           role="status"
-          className="pointer-events-none absolute bottom-10 left-2 right-2 z-20 flex items-center gap-1.5 rounded-md border border-danger/40 bg-surface-raised px-2 py-1.5 text-[11px] text-danger shadow-lg"
+          className="pointer-events-none absolute bottom-10 left-2 right-2 z-20 flex items-center gap-1.5 rounded-lg border border-danger/40 bg-surface-raised px-2 py-1.5 text-caption text-danger shadow-lg"
         >
           <AlertTriangle className="size-3 shrink-0" strokeWidth={1.75} aria-hidden />
           {error}

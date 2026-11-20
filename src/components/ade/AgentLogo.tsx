@@ -59,7 +59,7 @@ export function AgentLogo({ agent, className = "size-4" }: { agent: Agent; class
     return (
       <span
         aria-hidden
-        className="grid size-4 shrink-0 place-items-center rounded bg-ink/10 text-[9px] font-bold"
+        className="grid size-4 shrink-0 place-items-center rounded bg-ink/10 text-3xs font-bold"
       >
         {agent.short.slice(0, 1)}
       </span>

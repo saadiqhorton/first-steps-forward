@@ -82,7 +82,7 @@ export function AgentCursor({
               strokeLinejoin="round"
             />
           </svg>
-          <span className="mt-3 rounded-full bg-teal px-1.5 py-0.5 text-[10px] leading-none font-semibold whitespace-nowrap text-paper">
+          <span className="mt-3 rounded-full bg-teal px-1.5 py-0.5 text-2xs leading-none font-semibold whitespace-nowrap text-paper">
             Agent
           </span>
         </div>

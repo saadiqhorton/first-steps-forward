@@ -20,7 +20,7 @@
 - `--text-sm`, `--leading-body`
 - `--duration-fast|instant`, `--ease-standard`
 - `--shadow-resting`
-- Color (CSS aliases → Layer 2): `--foreground` / `--color-text`, `--background` / `--color-bg`, `--surface` / `--color-surface`, `--surface-muted` / `--color-surface-muted`, `--border` / `--color-border`, `--text-secondary` / `--color-text-secondary`, `--danger` / `--color-danger`, `--focus-ring` / `--color-focus-ring`
+- Colour (semantic `:root` names): `--foreground`, `--background`, `--surface`, `--surface-muted`, `--border`, `--text-secondary`, `--danger`, `--focus-ring`
 - Disabled opacity uses `0.52` (matches `--opacity-disabled`)
 
 ## 5. Props/API
@@ -30,6 +30,12 @@
 - `loading?: boolean` (default `false`) — sets `aria-busy`, keeps focusable, swallows click
 - `disabled`, `className`, `children`, `ref` forwarded to button
 - Popup anchors (`aria-haspopup`, `data-state`, `role="combobox"`) skip press scale
+
+### Utility classes (`btn-amber`, `btn-quiet`)
+Most ADE actions use these CSS utilities from `src/styles.css`, not Arc Button. There are no `@/components/arc/button` imports under `src/`.
+- `btn-amber`: amber fill (`--accent`), dark ink label (`--accent-foreground`), `--radius-control`, hover `--opacity-hover`, press `scale(.97)`. Use for the one primary CTA per view and for composer send. 47 occurrences in `.tsx` files.
+- `btn-quiet`: surface fill (`--surface`), inset hairline (`--shadow-inset-hairline`), hover `--surface-muted`. 92 occurrences in `.tsx` files.
+- Common sizes: `px-3 py-1.5 text-xs` (28px) and `px-3 py-2 text-ui` (36px).
 
 ## 6. States
 - default, hover (fine pointer), active/press (scale + color), focus-visible, disabled, loading (`aria-busy`)

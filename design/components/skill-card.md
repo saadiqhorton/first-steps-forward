@@ -18,9 +18,9 @@
 - Footer: scope/root label + updated date
 
 ## 4. Tokens used
-- `card-panel`, `border-line` / `--color-border`
+- `card-panel`, `border-line` / `--border`
 - Selected: `border-amber` + `ring-amber/40`; hover `border-ink/25`
-- Amber icon wash (`bg-amber/15`, `text-amber-deep`); `text-dim` / `--color-text-muted`
+- Amber icon wash (`bg-amber/15`, `text-amber-deep`); `text-dim` / `--text-muted`
 
 ## 5. Props/API
 - `skill: Skill` (from `@/lib/ade/skillsApi`)

@@ -54,7 +54,7 @@ const MAX_FILES = 8;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TURN_BYTES = 20 * 1024 * 1024;
 const toolButtonClass =
-  "grid size-9 shrink-0 place-items-center rounded-lg bg-transparent text-dim transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/50 disabled:opacity-50 motion-reduce:transition-none";
+  "grid size-9 shrink-0 place-items-center rounded-md bg-transparent text-dim transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/50 disabled:opacity-50 motion-reduce:transition-none";
 
 type PickerBox = { left: number; bottom: number; width: number; maxHeight: number };
 type ContextItem = ContextReference & { prompt?: string };

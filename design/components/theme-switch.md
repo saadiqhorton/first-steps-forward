@@ -17,7 +17,7 @@
 
 ## 4. Tokens used
 - Inherits Button tokens; local: `--space-3`, `--duration-instant`, `--ease-standard`
-- `--border-strong` / `--color-border-strong`, `--surface-muted` / `--color-surface-muted`
+- `--border-strong`, `--surface-muted`
 
 ## 5. Props/API
 - `theme: Theme` (`"light" | "dark"` from `@/lib/theme`)

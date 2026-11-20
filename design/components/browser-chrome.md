@@ -18,8 +18,8 @@
 - Capture and annotation review dialogs (fixed bottom sheets)
 
 ## 4. Tokens used
-- `bg-panel` / `--color-surface`, `bg-paper` / `--color-bg`, `border-line` / `--color-border`
-- `text-ink` / `--color-text`, `text-dim` / `--color-text-muted`, `text-danger` / `--color-danger`
+- `bg-panel` / `--surface`, `bg-paper` / `--background`, `border-line` / `--border`
+- `text-ink` / `--foreground`, `text-dim` / `--text-muted`, `text-danger` / `--danger`
 - Icon button hover/focus amber outline; loading amber pulse bar
 - Elevation: `shadow-xl` on menus/dialogs → prefer `--shadow-floating` in new CSS
 

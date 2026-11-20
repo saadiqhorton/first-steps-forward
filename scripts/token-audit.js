@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Token audit — flag Layer 3 hardcoded visual values; suggest Layer 2 tokens.
+ * Token audit — flag Layer 3 hardcoded visual values in CSS and TSX/TS source; suggest Layer 2 tokens.
  * Exit 1 when any errors remain on enforce paths.
  */
 import fs from "node:fs";
@@ -26,12 +26,12 @@ const CUSTOM_PROP_DEF = /^\s*--[\w-]+\s*:/;
 /** @type {Record<string, Array<[string, string]>>} */
 const SUGGESTION_MAPS = {
   color: [
-    ["#7747ff", "--color-accent"],
-    ["#5528ce", "--color-accent-strong"],
-    ["#0562ef", "--color-link"],
-    ["#f15f55", "--color-danger"],
-    ["#0db879", "--color-success"],
-    ["#f3ad20", "--color-warning"],
+    ["#7747ff", "--accent"],
+    ["#5528ce", "--accent-strong"],
+    ["#0562ef", "--teal-deep"],
+    ["#f15f55", "--danger"],
+    ["#0db879", "--success"],
+    ["#f3ad20", "--warning"],
   ],
   spacing: [
     ["0", "--space-0"],
@@ -67,7 +67,7 @@ const SUGGESTION_MAPS = {
     ["0.375rem", "--radius-xs"],
     ["0.5rem", "--radius-sm"],
     ["0.625rem", "--radius-control"],
-    ["0.75rem", "--radius-md"],
+    ["0.75rem", "--radius-lg"],
     ["1rem", "--radius-panel"],
     ["1.125rem", "--radius-control"],
     ["1.25rem", "--radius-surface"],
@@ -89,13 +89,8 @@ const SUGGESTION_MAPS = {
     ["0.58s", "--duration-spring"],
   ],
   "z-index": [
-    ["0", "--z-base"],
     ["1", "--z-raised"],
     ["50", "--z-dropdown"],
-    ["100", "--z-sticky"],
-    ["200", "--z-overlay"],
-    ["300", "--z-modal"],
-    ["400", "--z-toast"],
     ["2147483647", "--z-veil"],
   ],
   "font-weight": [
@@ -138,6 +133,87 @@ const SUGGESTION_MAPS = {
 };
 
 const IGNORE_KEYWORDS = /\b(transparent|currentColor|none|inherit|initial|unset)\b/i;
+
+/** Tailwind text-size scale (px → class) for `text-[Npx]` suggestions. */
+const TSX_FONT_SIZE_SCALE = [
+  [9, "text-3xs"],
+  [10, "text-2xs"],
+  [11, "text-caption"],
+  [12, "text-xs"],
+  [13, "text-ui"],
+  [14, "text-sm"],
+  [16, "text-base"],
+  [18, "text-lg"],
+  [22, "text-xl"],
+  [28, "text-2xl"],
+];
+
+/**
+ * Hardcoded values in TSX/TS source (regex over text, no JSX parsing).
+ * Set `severity` to "error" to make a rule count toward the exit code.
+ * `describe(match)` returns `{ value, suggestion }`, or null to skip a match.
+ * @type {Array<{ id: string, severity: "error" | "warning", patterns: RegExp[], describe: (m: RegExpMatchArray) => { value: string, suggestion: string } | null }>}
+ */
+export const TSX_RULES = [
+  {
+    id: "tsx-arbitrary-font-size",
+    severity: "warning",
+    patterns: [/(?<![\w-])text-\[(?:length:)?(\d*\.?\d+)(px|rem)\]/g],
+    describe: (m) => {
+      const px = Number(m[1]) * (m[2] === "rem" ? 16 : 1);
+      let best = TSX_FONT_SIZE_SCALE[0];
+      for (const entry of TSX_FONT_SIZE_SCALE) {
+        if (Math.abs(entry[0] - px) < Math.abs(best[0] - px)) best = entry;
+      }
+      const exact = best[0] === px;
+      return {
+        value: m[0],
+        suggestion: exact ? best[1] : `${best[1]} (nearest to ${px}px)`,
+      };
+    },
+  },
+  {
+    id: "tsx-raw-color",
+    severity: "warning",
+    patterns: [
+      /(?<![\w-])(?:bg|text|border|ring|ring-offset|fill|stroke|from|to|via|outline|shadow|decoration|divide|caret|accent|placeholder)(?:-[trblxyse])?-\[((?:#[0-9a-fA-F]{3,8}\b|(?:rgba?|hsla?|oklch)\()[^\]]*)\]/g,
+      /(?<![\w-])(?:color|background|backgroundColor|borderColor|fill|stroke)\s*:\s*["'`]((?:#[0-9a-fA-F]{3,8}\b|(?:rgba?|hsla?|oklch)\()[^"'`]*)["'`]/g,
+    ],
+    describe: (m) => ({ value: m[0], suggestion: suggestToken("color", m[1]) }),
+  },
+  {
+    id: "tsx-arbitrary-radius",
+    severity: "warning",
+    patterns: [/(?<![\w-])rounded(?:-[trblse]{1,2})?-\[(\d*\.?\d+)(px|rem)\]/g],
+    describe: (m) => ({ value: m[0], suggestion: suggestToken("radius", `${m[1]}${m[2]}`) }),
+  },
+  {
+    id: "tsx-arbitrary-shadow",
+    severity: "warning",
+    patterns: [/(?<![\w-])shadow-\[([^\]]*)\]/g],
+    describe: (m) => {
+      // Only a literal (digits, hex, colour function) outside var() is a raw shadow.
+      const literal = m[1].replace(/var\([^)]*\)/g, "");
+      if (!/[\d#]|(?:rgba?|hsla?|oklch)\(/i.test(literal)) return null;
+      return {
+        value: m[0],
+        suggestion: "--shadow-resting | --shadow-raised | --shadow-floating",
+      };
+    },
+  },
+  {
+    id: "tsx-arbitrary-z",
+    severity: "warning",
+    patterns: [/(?<![\w-])z-\[(-?\d+)\]/g],
+    describe: (m) => ({ value: m[0], suggestion: suggestToken("z-index", m[1]) }),
+  },
+  {
+    id: "tsx-arbitrary-duration",
+    severity: "warning",
+    patterns: [/(?<![\w-])duration-\[(\d*\.?\d+)(ms|s)\]/g],
+    describe: (m) => ({ value: m[0], suggestion: suggestToken("duration", `${m[1]}${m[2]}`) }),
+  },
+];
 
 /**
  * @param {string} relPath
@@ -193,7 +269,17 @@ export function suggestToken(kind, rawValue) {
   }
 
   // Nearest numeric for spacing / duration / z-index / font-weight / border-width / font-size
-  if (["spacing", "duration", "z-index", "font-weight", "border-width", "font-size", "radius"].includes(kind)) {
+  if (
+    [
+      "spacing",
+      "duration",
+      "z-index",
+      "font-weight",
+      "border-width",
+      "font-size",
+      "radius",
+    ].includes(kind)
+  ) {
     const target = parseCssLength(raw);
     if (target != null) {
       let best = null;
@@ -212,8 +298,8 @@ export function suggestToken(kind, rawValue) {
   }
 
   if (kind === "color") {
-    if (raw.includes("7747ff") || raw === "#7747ff") return "--color-accent";
-    return "--color-accent";
+    if (raw.includes("7747ff") || raw === "#7747ff") return "--accent";
+    return "--accent";
   }
   if (kind === "shadow") return "--shadow-resting";
   return `--${kind.replaceAll(" ", "-")}-token`;
@@ -473,7 +559,11 @@ export function classifyLineAll(line, ctx) {
     new RegExp(`${propAt}border(?:-\\w+)*-width\\s*:\\s*([^;}]*)`, "gi"),
   )) {
     const value = borderWidth[1].trim();
-    if (!/^0(?:px)?$/i.test(value) && !IGNORE_KEYWORDS.test(value) && /^[\d.]+\s*px\b/i.test(value)) {
+    if (
+      !/^0(?:px)?$/i.test(value) &&
+      !IGNORE_KEYWORDS.test(value) &&
+      /^[\d.]+\s*px\b/i.test(value)
+    ) {
       const raw = value.match(/[\d.]+\s*px/i)?.[0] ?? value;
       findings.push({
         severity: "error",
@@ -565,6 +655,10 @@ export function auditFiles(rootDir) {
           continue;
         }
         walk(abs);
+        continue;
+      }
+      if (isTsxSourceFile(rel)) {
+        scanTsxFile(abs, rel, errors, warnings);
         continue;
       }
       if (!entry.name.endsWith(".css")) continue;
@@ -701,6 +795,80 @@ function scanFile(abs, rel, errors, warnings) {
 }
 
 /**
+ * TSX/TS source under src/, excluding tests and declaration files.
+ * @param {string} relPath
+ */
+export function isTsxSourceFile(relPath) {
+  const normalized = relPath.replaceAll("\\", "/");
+  if (isSkippedPath(normalized) || !normalized.startsWith("src/")) return false;
+  const base = path.posix.basename(normalized);
+  if (base.includes(".test.") || base.endsWith(".d.ts")) return false;
+  return base.endsWith(".tsx") || base.endsWith(".ts");
+}
+
+/**
+ * Apply TSX_RULES to source text; findings are routed like CSS findings.
+ * @param {string} relPath
+ * @param {string} text
+ * @param {object[]} errors
+ * @param {object[]} warnings
+ * @param {typeof TSX_RULES} [rules]
+ */
+export function scanTsxText(relPath, text, errors, warnings, rules = TSX_RULES) {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    for (const rule of rules) {
+      for (const pattern of rule.patterns) {
+        for (const match of lines[i].matchAll(pattern)) {
+          const described = rule.describe(match);
+          if (!described) continue;
+          const finding = {
+            file: relPath,
+            line: i + 1,
+            severity: rule.severity,
+            violation: `${rule.id} ${described.value}`,
+            suggestion: described.suggestion,
+            enforce: true,
+            rule: rule.id,
+          };
+          if (rule.severity === "error") errors.push(finding);
+          else warnings.push(finding);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * @param {string} abs
+ * @param {string} rel
+ * @param {object[]} errors
+ * @param {object[]} warnings
+ */
+function scanTsxFile(abs, rel, errors, warnings) {
+  let text;
+  try {
+    text = fs.readFileSync(abs, "utf8");
+  } catch {
+    return;
+  }
+  scanTsxText(rel, text, errors, warnings);
+}
+
+/**
+ * Finding count per TSX rule id (zero for rules with no findings).
+ * @param {{ rule?: string }[]} findings
+ * @returns {Record<string, number>}
+ */
+export function countTsxByRule(findings) {
+  const counts = Object.fromEntries(TSX_RULES.map((rule) => [rule.id, 0]));
+  for (const f of findings) {
+    if (f.rule && Object.hasOwn(counts, f.rule)) counts[f.rule]++;
+  }
+  return counts;
+}
+
+/**
  * @param {{ file: string, line: number, severity: string, violation: string, suggestion: string }} f
  */
 function formatFinding(f) {
@@ -718,6 +886,12 @@ function main() {
   } else {
     console.error(`token-audit: ${errors.length} error(s), ${warnings.length} warning(s)`);
   }
+  const tsxCounts = countTsxByRule([...errors, ...warnings]);
+  console.error(
+    `token-audit tsx: ${Object.entries(tsxCounts)
+      .map(([id, n]) => `${id}=${n}`)
+      .join(", ")}`,
+  );
   process.exit(errors.length ? 1 : 0);
 }
 

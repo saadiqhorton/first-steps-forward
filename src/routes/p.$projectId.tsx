@@ -28,7 +28,7 @@ function ProjectLayout() {
       <main className="grid flex-1 place-items-center">
         <div className="text-center">
           <h1 className="text-xl font-medium">Project not found</h1>
-          <Link to="/" className="btn-quiet mt-3 inline-block px-3 py-1.5 text-[12px]">
+          <Link to="/" className="btn-quiet mt-3 inline-block px-3 py-1.5 text-(length:--text-xs)">
             Back home
           </Link>
         </div>

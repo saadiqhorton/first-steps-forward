@@ -117,7 +117,7 @@ export function ConversationList() {
           params={{ projectId }}
           search={(prev) => prev}
           aria-label="New conversation"
-          className="ml-auto grid size-7 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+          className="ml-auto grid size-7 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
         >
           <Plus className="size-4" aria-hidden strokeWidth={1.5} />
         </Link>
@@ -130,7 +130,7 @@ export function ConversationList() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search conversations"
           aria-label="Search conversations"
-          className="h-8 w-full rounded-lg border border-line bg-paper px-3 text-[13px] text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
+          className="h-8 w-full rounded-md border border-line bg-paper px-3 text-ui text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
         />
       </div>
 
@@ -168,14 +168,14 @@ export function ConversationList() {
                   params={{ projectId, sessionId: session.id }}
                   search={(prev) => prev}
                   onClick={() => markViewed(session.id, session.updatedAt)}
-                  className={`relative isolate block w-full overflow-hidden rounded-lg px-3 py-2 text-left transition-colors ${
+                  className={`relative isolate block w-full overflow-hidden rounded-md px-3 py-2 text-left transition-colors ${
                     active ? "" : "hover:bg-ink/[0.04]"
                   }`}
                 >
                   {active && (
                     <GlideIndicator
                       id="conversation-active"
-                      className="absolute inset-0 -z-10 rounded-lg bg-surface-muted ring-1 ring-ink/[0.08] ring-inset"
+                      className="absolute inset-0 -z-10 rounded-md bg-surface-muted ring-1 ring-ink/[0.08] ring-inset"
                     />
                   )}
                   <div className="flex items-start gap-2">
@@ -187,7 +187,7 @@ export function ConversationList() {
                     )}
                     <div className="min-w-0 flex-1">
                       <p
-                        className="line-clamp-1 text-[13px] leading-5 text-ink"
+                        className="line-clamp-1 text-ui leading-5 text-ink"
                         title={session.displayRequest ?? session.request}
                       >
                         {titleOf(session)}

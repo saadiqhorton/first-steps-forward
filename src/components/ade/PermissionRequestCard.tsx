@@ -38,9 +38,9 @@ export function PermissionRequestCard({
       aria-label="Permission request"
     >
       <div className="label-section text-amber-deep">{agentName} is asking for permission</div>
-      <p className="mt-1 text-[13px] font-medium break-words">{request.title}</p>
+      <p className="mt-1 text-ui font-medium break-words">{request.title}</p>
       {request.detail && request.detail !== request.title && (
-        <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-deck p-2 font-mono text-xs whitespace-pre-wrap break-all text-deck-foreground">
+        <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-deck p-2 font-mono text-xs whitespace-pre-wrap break-all text-deck-foreground">
           {request.detail}
         </pre>
       )}

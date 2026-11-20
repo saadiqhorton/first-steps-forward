@@ -25,7 +25,7 @@ export function StatusPill({
   const m: (typeof MAP)[SessionStatus] = needsYou && status === "working" ? NEEDS_YOU : MAP[status];
   return (
     <span
-      className={`inline-flex items-center gap-1.5 font-medium ${m.cls} ${size === "md" ? "text-[13px]" : "text-xs"}`}
+      className={`inline-flex items-center gap-1.5 font-medium ${m.cls} ${size === "md" ? "text-ui" : "text-xs"}`}
       role="status"
     >
       <span

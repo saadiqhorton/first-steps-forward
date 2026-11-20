@@ -78,7 +78,7 @@ While iterating, `node --test <changed test files>` is fine. Before claiming don
 
 ## Design tokens (UI)
 
-Before writing or modifying any UI code, read the relevant design file in `design/`. Use only tokens from `src/tokens.css` (Layer 2 aliases) and the documented Layer-2-by-convention tokens (`--space-*`, `--text-*`, `--radius-*`, `--shadow-resting|raised|floating`, `--duration-*`, `--ease-*`). Layer-2-by-convention also includes existing ADE/Arc semantic color names (`--foreground`, `--background`, `--border`, `--text-muted`, `--ink`, `--paper`, `--panel`, `--danger`, `--accent`, etc.) alongside `--color-*` aliases — components may use either, never raw color literals. Do not introduce raw hex/rgb/oklch, px spacing, bare font sizes/weights, radii, shadows, z-index, or transition durations in component CSS. Run `npm run token-audit` before committing. Zero errors required.
+Before writing or modifying any UI code, read the relevant design file in `design/`. Use only tokens from `src/tokens.css` (Layer 2) and the documented Layer-2-by-convention tokens (`--space-*`, `--text-*`, `--radius-*`, `--shadow-*`, `--duration-*`, `--ease-*`). Colours are the semantic names on `:root` in `src/styles.css` (`--foreground`, `--background`, `--border`, `--accent`, `--danger`, etc.), not `--color-*` aliases; never raw colour literals. Do not introduce raw hex/rgb/oklch, px spacing, bare font sizes/weights, radii, shadows, z-index, or transition durations in component CSS or TSX. Run `npm run token-audit` before committing (scans CSS and TSX). Zero errors required.
 
 ## 5. Test agent behavior
 

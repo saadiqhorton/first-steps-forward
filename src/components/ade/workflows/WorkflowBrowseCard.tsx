@@ -25,15 +25,13 @@ export function WorkflowBrowseCard({
         selected ? "border-amber ring-1 ring-amber/40" : "hover:border-ink/25"
       }`}
     >
-      <div className={`grid size-8 shrink-0 place-items-center rounded-md ${accent}`} aria-hidden>
+      <div className={`grid size-8 shrink-0 place-items-center rounded-lg ${accent}`} aria-hidden>
         <WorkflowIcon className="size-4 text-ink/70" />
       </div>
       <div className="min-w-0 w-full pr-8">
-        <h3 className="min-w-0 break-words text-[14px] font-medium leading-snug">
-          {workflow.name}
-        </h3>
+        <h3 className="min-w-0 break-words text-sm font-medium leading-snug">{workflow.name}</h3>
         {workflow.description ? (
-          <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-dim">
+          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-dim">
             {workflow.description}
           </p>
         ) : null}
@@ -44,7 +42,7 @@ export function WorkflowBrowseCard({
         search={{ workflow: workflow.id } as never}
         onClick={(e) => e.stopPropagation()}
         aria-label={`Run ${workflow.name}`}
-        className="absolute right-3 bottom-3 grid size-7 place-items-center rounded-md text-dim transition hover:bg-ink/5 hover:text-ink"
+        className="absolute right-3 bottom-3 grid size-7 place-items-center rounded-lg text-dim transition hover:bg-ink/5 hover:text-ink"
       >
         <Play className="size-3.5" aria-hidden />
       </Link>

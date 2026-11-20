@@ -32,7 +32,7 @@ import type { RightDock, ComputerTone } from "./rightPaneTypes";
 const megabytes = (bytes: number) => Math.round(bytes / 1_000_000);
 
 const DETAIL_ROW = "flex h-9 items-center justify-between gap-3 px-4";
-const DETAIL_LABEL = "min-w-0 truncate text-[13px] text-[var(--text-secondary)]";
+const DETAIL_LABEL = "min-w-0 truncate text-ui text-[var(--text-secondary)]";
 const DETAIL_VALUE = "shrink-0 font-mono text-xs tabular-nums text-ink";
 type RecentBrowserUrl = { url: string; title?: string; favicon?: string; visitedAt?: number };
 
@@ -371,7 +371,7 @@ export function AgentComputerPane({
           <div className="mx-auto mb-3 grid place-items-center">
             {preparing || (!computer && !error) ? (
               <LoaderCircle
-                className="size-5 animate-spin text-amber"
+                className="size-5 animate-spin text-amber-deep"
                 strokeWidth={1.5}
                 aria-hidden
               />
@@ -409,7 +409,7 @@ export function AgentComputerPane({
             </div>
           )}
           {computer?.setupCommand && (
-            <div className="mx-auto mt-4 flex max-w-xs items-center gap-2 rounded-lg border border-deck-foreground/10 bg-deck-foreground/[0.04] py-1 pr-1 pl-3 text-left">
+            <div className="mx-auto mt-4 flex max-w-xs items-center gap-2 rounded-md border border-deck-foreground/10 bg-deck-foreground/[0.04] py-1 pr-1 pl-3 text-left">
               <code className="min-w-0 flex-1 truncate font-mono text-xs text-deck-foreground/85">
                 {computer.setupCommand}
               </code>
@@ -418,7 +418,7 @@ export function AgentComputerPane({
                 onClick={() => void copySetup()}
                 aria-label="Copy setup command"
                 title="Copy"
-                className="grid size-7 shrink-0 place-items-center rounded-md text-deck-foreground/60 transition-colors hover:bg-deck-foreground/10 hover:text-deck-foreground focus-visible:outline-2 focus-visible:outline-amber"
+                className="grid size-7 shrink-0 place-items-center rounded-lg text-deck-foreground/60 transition-colors hover:bg-deck-foreground/10 hover:text-deck-foreground focus-visible:outline-2 focus-visible:outline-amber"
               >
                 {copied ? (
                   <Check className="size-4" strokeWidth={1.5} aria-hidden />
@@ -470,7 +470,7 @@ export function AgentComputerPane({
   const browserScreen =
     placement.place !== "dock" ? (
       <div className="mx-3 flex flex-col items-start gap-3 rounded-xl border border-line bg-surface-muted p-4">
-        <p className="text-[13px] text-[var(--text-secondary)]">
+        <p className="text-ui text-[var(--text-secondary)]">
           {placement.place === "float" ? "Showing in floating window" : "Browser is hidden"}
         </p>
         <button
@@ -526,11 +526,11 @@ export function AgentComputerPane({
                       type="button"
                       onClick={() => void openPreviewUrl(server.url)}
                       title={server.url}
-                      className="flex min-w-0 items-center gap-2 rounded-md border border-line px-2 py-1.5 text-left text-xs text-ink hover:bg-surface-muted"
+                      className="flex min-w-0 items-center gap-2 rounded-lg border border-line px-2 py-1.5 text-left text-xs text-ink hover:bg-surface-muted"
                     >
                       <Globe className="size-4 shrink-0 text-dim" aria-hidden />
                       <span className="truncate">{server.title || `localhost:${server.port}`}</span>
-                      <span className="ml-auto shrink-0 font-mono text-[10px] text-dim">
+                      <span className="ml-auto shrink-0 font-mono text-2xs text-dim">
                         {server.processName ? `${server.processName} · ` : ""}
                         {server.port}
                       </span>
@@ -544,7 +544,7 @@ export function AgentComputerPane({
                   {recentUrls.slice(0, 8).map(({ url, title, favicon, visitedAt }) => (
                     <div
                       key={url}
-                      className="flex min-w-0 items-center rounded-md border border-line"
+                      className="flex min-w-0 items-center rounded-lg border border-line"
                     >
                       <button
                         type="button"
@@ -560,7 +560,7 @@ export function AgentComputerPane({
                         <span className="grid min-w-0 gap-0.5">
                           <span className="truncate">{title || url}</span>
                           {title || visitedAt ? (
-                            <span className="truncate text-[10px] text-dim">
+                            <span className="truncate text-2xs text-dim">
                               {title ? url : ""}
                               {title && visitedAt ? " · " : ""}
                               {visitedAt ? new Date(visitedAt).toLocaleDateString() : ""}

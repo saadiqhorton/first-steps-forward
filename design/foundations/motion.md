@@ -21,7 +21,6 @@ Source: `src/components/arc/foundation.css`. Opacity helpers that often accompan
 | `--opacity-disabled` | `0.52` | Disabled control opacity |
 | `--opacity-hover` | `0.91` | Hover dim on filled controls |
 | `--opacity-pressed` | `0.84` | Pressed opacity |
-| `--opacity-muted` | `0.3` | Strongly de-emphasized chrome |
 
 ## Light / dark
 

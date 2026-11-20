@@ -24,24 +24,24 @@ export function SkillCard({
     >
       <span className="flex w-full items-center gap-2">
         <span
-          className="grid size-8 shrink-0 place-items-center rounded-md bg-amber/15 text-amber-deep"
+          className="grid size-8 shrink-0 place-items-center rounded-lg bg-amber/15 text-amber-deep"
           aria-hidden
         >
           <Sparkles className="size-4" />
         </span>
         {skill.warnings.length > 0 && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-amber/50 px-2 py-0.5 font-mono text-[10px] text-amber-deep">
+          <span className="inline-flex items-center gap-1 rounded-full border border-amber/50 px-2 py-0.5 font-mono text-2xs text-amber-deep">
             <AlertTriangle className="size-3" aria-hidden />
             check
           </span>
         )}
-        <span className="ml-auto rounded-full border border-line px-2 py-0.5 font-mono text-[10px] text-dim">
+        <span className="ml-auto rounded-full border border-line px-2 py-0.5 font-mono text-2xs text-dim">
           {skill.files.length} {skill.files.length === 1 ? "file" : "files"}
         </span>
       </span>
       <span className="w-full min-w-0 pr-6">
-        <h3 className="break-words text-[14px] font-medium leading-snug">{skill.name}</h3>
-        <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-dim">
+        <h3 className="break-words text-sm font-medium leading-snug">{skill.name}</h3>
+        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-dim">
           {skill.description || "No description yet."}
         </p>
       </span>
@@ -50,23 +50,23 @@ export function SkillCard({
           extras.map((entry) => (
             <span
               key={entry.kind}
-              className="rounded-full border border-line px-2 py-0.5 font-mono text-[10px] text-dim"
+              className="rounded-full border border-line px-2 py-0.5 font-mono text-2xs text-dim"
             >
               {entry.count} {entry.label.toLowerCase()}
             </span>
           ))
         ) : (
-          <span className="rounded-full border border-line px-2 py-0.5 font-mono text-[10px] text-dim">
+          <span className="rounded-full border border-line px-2 py-0.5 font-mono text-2xs text-dim">
             name + description only
           </span>
         )}
       </span>
       <span className="absolute right-4 bottom-3 left-4 flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1 font-mono text-[10px] text-dim">
+        <span className="inline-flex items-center gap-1 font-mono text-2xs text-dim">
           {skill.scope === "detected" && <Folder className="size-3" aria-hidden />}
           {skillRootLabel(skill)}
         </span>
-        <span className="font-mono text-[10px] text-dim">
+        <span className="font-mono text-2xs text-dim">
           {new Date(skill.updatedAt).toLocaleDateString()}
         </span>
       </span>

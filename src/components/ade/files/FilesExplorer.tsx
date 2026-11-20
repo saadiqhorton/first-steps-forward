@@ -270,7 +270,7 @@ export function FilesExplorer({
           title="New file"
           aria-expanded={creating}
           onClick={() => setCreating((open) => !open)}
-          className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+          className="grid size-7 place-items-center rounded-lg text-dim hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
         >
           <Plus className="size-4" aria-hidden strokeWidth={2} />
         </button>
@@ -301,7 +301,7 @@ export function FilesExplorer({
           <button
             type="submit"
             disabled={saving || !fileName.trim()}
-            className="shrink-0 font-mono text-[11px] text-ink hover:underline disabled:opacity-40"
+            className="shrink-0 font-mono text-caption text-ink hover:underline disabled:opacity-40"
           >
             Create
           </button>
@@ -310,7 +310,7 @@ export function FilesExplorer({
       <button
         type="button"
         onClick={onGoHome}
-        className={`flex items-center gap-2 border-b border-line px-3 py-2 text-left font-mono text-[11px] ${
+        className={`flex items-center gap-2 border-b border-line px-3 py-2 text-left font-mono text-caption ${
           homeActive ? "bg-amber/10 text-ink" : "text-dim hover:bg-ink/5 hover:text-ink"
         }`}
       >
@@ -354,7 +354,7 @@ export function FilesExplorer({
       {error && (
         <div
           role="alert"
-          className="shrink-0 border-t border-line px-3 py-2 font-mono text-[10px] text-amber"
+          className="shrink-0 border-t border-line px-3 py-2 font-mono text-2xs text-amber-deep"
         >
           {error}
         </div>

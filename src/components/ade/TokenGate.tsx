@@ -32,7 +32,7 @@ export function TokenGate({ onUnlocked }: { onUnlocked: () => Promise<void> }) {
     <main className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-2xl border border-line bg-panel p-6">
         <h1 className="text-xl font-medium">Unlock with the access token</h1>
-        <p className="mt-2 text-[13px] leading-relaxed text-dim">
+        <p className="mt-2 text-ui leading-relaxed text-dim">
           This ADE is shared with your other devices. Open the sign-in link ADE printed when it
           started, or enter its access token here. This browser stays signed in.
         </p>
@@ -43,13 +43,15 @@ export function TokenGate({ onUnlocked }: { onUnlocked: () => Promise<void> }) {
             value={token}
             onChange={(e) => setToken(e.target.value)}
             placeholder="Access token"
-            className="w-full rounded-md border border-line bg-background px-3 py-2 font-mono text-[13px]"
+            className="w-full rounded-lg border border-line bg-background px-3 py-2 font-mono text-ui"
           />
-          {error && <p className="rounded bg-danger/10 p-2 text-[12px] text-danger">{error}</p>}
+          {error && (
+            <p className="rounded bg-danger/10 p-2 text-(length:--text-xs) text-danger">{error}</p>
+          )}
           <button
             type="submit"
             disabled={busy || !token.trim()}
-            className="btn-amber w-full px-4 py-2 text-[13px]"
+            className="btn-amber w-full px-4 py-2 text-ui"
           >
             {busy ? "Checking…" : "Unlock ADE"}
           </button>

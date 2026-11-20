@@ -106,10 +106,10 @@ export function FolderBrowser({
   return (
     <div className="flex w-full flex-col px-6 pb-6 pt-6 pr-12" aria-label="Choose a project folder">
       <div className="shrink-0 space-y-1 text-left">
-        <div className="label-mono text-[11px] font-normal tracking-wide text-dim">
+        <div className="label-mono text-caption font-normal tracking-wide text-dim">
           Choose a folder
         </div>
-        <p className="font-mono text-[12px] break-all text-ink">{current || "…"}</p>
+        <p className="font-mono text-(length:--text-xs) break-all text-ink">{current || "…"}</p>
       </div>
 
       <div className="mt-3 flex shrink-0 items-center gap-2">
@@ -117,7 +117,7 @@ export function FolderBrowser({
           type="button"
           disabled={!parent || loading}
           onClick={() => void load(parent ?? undefined)}
-          className="btn-quiet px-3 py-1.5 text-[12px]"
+          className="btn-quiet px-3 py-1.5 text-(length:--text-xs)"
         >
           ↑ Up one level
         </button>
@@ -125,11 +125,11 @@ export function FolderBrowser({
           type="button"
           disabled={!current || loading || !!error}
           onClick={() => setNaming(true)}
-          className="btn-quiet px-3 py-1.5 text-[12px]"
+          className="btn-quiet px-3 py-1.5 text-(length:--text-xs)"
         >
           New folder
         </button>
-        <label className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-dim">
+        <label className="ml-auto flex items-center gap-1.5 font-mono text-caption text-dim">
           <input
             type="checkbox"
             checked={showHidden}
@@ -158,29 +158,29 @@ export function FolderBrowser({
               onChange={(e) => setNewName(e.target.value)}
               aria-label="New folder name"
               placeholder="New folder name"
-              className="min-w-0 flex-1 rounded-md border border-line bg-panel px-3 py-1.5 font-mono text-[12.5px] placeholder:text-dim/70"
+              className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-3 py-1.5 font-mono text-ui placeholder:text-dim/70"
             />
             <button
               type="submit"
               disabled={!newName.trim() || making}
-              className="btn-amber shrink-0 px-3 py-1.5 text-[12px]"
+              className="btn-amber shrink-0 px-3 py-1.5 text-(length:--text-xs)"
             >
               {making ? "Creating…" : "Create"}
             </button>
           </div>
-          {nameError && <p className="mt-1.5 text-[11px] text-danger">{nameError}</p>}
+          {nameError && <p className="mt-1.5 text-caption text-danger">{nameError}</p>}
         </form>
       )}
 
       {/* Explicit max-height keeps Use/Cancel visible; flex-1 alone can push
           the footer past the parent dialog's max-height and clip it. */}
-      <div className="mt-2 max-h-[min(50vh,22rem)] min-h-[12rem] overflow-y-auto overscroll-contain rounded-md border border-line bg-paper">
+      <div className="mt-2 max-h-[min(50vh,22rem)] min-h-[12rem] overflow-y-auto overscroll-contain rounded-lg border border-line bg-paper">
         {loading ? (
-          <p className="px-3 py-3 text-[12px] text-dim">Reading folders…</p>
+          <p className="px-3 py-3 text-(length:--text-xs) text-dim">Reading folders…</p>
         ) : error ? (
-          <p className="px-3 py-3 text-[12px] text-danger">{error}</p>
+          <p className="px-3 py-3 text-(length:--text-xs) text-danger">{error}</p>
         ) : dirs.length === 0 ? (
-          <p className="px-3 py-3 text-[12px] text-dim">
+          <p className="px-3 py-3 text-(length:--text-xs) text-dim">
             No subfolders here — you can use this folder as-is.
           </p>
         ) : (
@@ -190,7 +190,7 @@ export function FolderBrowser({
                 <button
                   type="button"
                   onClick={() => void load(dir.path)}
-                  className="w-full truncate px-3 py-1.5 text-left font-mono text-[12.5px] hover:bg-ink/[0.04]"
+                  className="w-full truncate px-3 py-1.5 text-left font-mono text-ui hover:bg-ink/[0.04]"
                 >
                   {dir.name}/
                 </button>
@@ -201,7 +201,7 @@ export function FolderBrowser({
       </div>
 
       {error && !loading && current && (
-        <p className="mt-2 shrink-0 text-[11px] text-dim">
+        <p className="mt-2 shrink-0 text-caption text-dim">
           You can still use the folder shown above if it is the right one.
         </p>
       )}
@@ -211,11 +211,11 @@ export function FolderBrowser({
           type="button"
           disabled={loading || (!current && !error)}
           onClick={() => onPick(current)}
-          className="btn-amber px-4 py-2 text-[13px]"
+          className="btn-amber px-4 py-2 text-ui"
         >
           Use this folder
         </button>
-        <button type="button" onClick={onClose} className="btn-quiet px-4 py-2 text-[13px]">
+        <button type="button" onClick={onClose} className="btn-quiet px-4 py-2 text-ui">
           Cancel
         </button>
       </div>

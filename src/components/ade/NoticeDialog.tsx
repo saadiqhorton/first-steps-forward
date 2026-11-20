@@ -62,7 +62,7 @@ export function NoticeDialogHost() {
       <AlertDialogContent className="w-[calc(100%-2rem)] max-w-lg gap-0 rounded-2xl border bg-surface-raised p-6 text-ink shadow-lg sm:rounded-2xl">
         <AlertDialogTitle className="text-xl font-medium">{current?.title ?? ""}</AlertDialogTitle>
         {current?.description ? (
-          <AlertDialogDescription className="mt-3 text-[13px] leading-relaxed text-dim">
+          <AlertDialogDescription className="mt-3 text-ui leading-relaxed text-dim">
             {current.description}
           </AlertDialogDescription>
         ) : null}
@@ -70,7 +70,7 @@ export function NoticeDialogHost() {
           {current?.kind === "confirm" ? (
             <button
               type="button"
-              className="btn-amber px-4 py-2 text-[13px]"
+              className="btn-amber px-4 py-2 text-ui"
               onClick={() => finish(true)}
             >
               {current.confirmLabel}
@@ -78,7 +78,7 @@ export function NoticeDialogHost() {
           ) : null}
           <button
             type="button"
-            className="btn-quiet ml-auto px-4 py-2 text-[13px]"
+            className="btn-quiet ml-auto px-4 py-2 text-ui"
             onClick={() => finish(false)}
           >
             {current?.kind === "confirm" ? current.cancelLabel : "OK"}

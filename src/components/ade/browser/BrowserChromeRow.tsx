@@ -56,7 +56,7 @@ import { feedbackScope, usePersistentFeedbackNotes } from "./usePersistentFeedba
 import { useBrowserShortcuts } from "./useBrowserShortcuts";
 
 const ICON_BUTTON =
-  "grid size-7 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:pointer-events-none disabled:opacity-40";
+  "grid size-7 shrink-0 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:pointer-events-none disabled:opacity-40";
 
 const ZOOM_LEVELS = [
   0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5,
@@ -446,7 +446,7 @@ export function BrowserChromeRow({
             return (
               <div
                 key={tab.id}
-                className={`flex min-w-0 max-w-44 items-center rounded-t-md ${tabs.activeId === tab.id ? "bg-paper text-ink" : "text-dim"}`}
+                className={`flex min-w-0 max-w-44 items-center rounded-t-lg ${tabs.activeId === tab.id ? "bg-paper text-ink" : "text-dim"}`}
               >
                 <button
                   type="button"
@@ -468,7 +468,7 @@ export function BrowserChromeRow({
                   )}
                   <span className="truncate">{title}</span>
                   {tab.profileId && tab.profileId !== "default" ? (
-                    <span className="max-w-16 truncate text-[10px] text-dim">
+                    <span className="max-w-16 truncate text-2xs text-dim">
                       {profiles.find((profile) => profile.id === tab.profileId)?.name ??
                         tab.profileId}
                     </span>
@@ -593,7 +593,7 @@ export function BrowserChromeRow({
             onFocus={(event) => event.currentTarget.select()}
             onBlur={() => setDraft(null)}
             onKeyDown={handleKey}
-            className="h-7 w-full min-w-0 rounded-md bg-paper pr-9 pl-3 font-mono text-xs text-ink ring-1 ring-line ring-inset outline-none placeholder:text-dim read-only:text-dim focus-visible:outline-2 focus-visible:outline-amber"
+            className="h-7 w-full min-w-0 rounded-lg bg-paper pr-9 pl-3 font-mono text-xs text-ink ring-1 ring-line ring-inset outline-none placeholder:text-dim read-only:text-dim focus-visible:outline-2 focus-visible:outline-amber"
           />
           {/^https?:\/\//i.test(url) ? (
             <button
@@ -667,7 +667,7 @@ export function BrowserChromeRow({
           >
             <MoreVertical className="size-4" strokeWidth={1.5} aria-hidden />
           </summary>
-          <div className="absolute right-0 top-8 z-20 grid max-h-[min(32rem,80vh)] min-w-44 gap-1 overflow-y-auto rounded-lg border border-line bg-panel p-1.5 shadow-xl">
+          <div className="absolute right-0 top-8 z-20 grid max-h-[min(32rem,80vh)] min-w-44 gap-1 overflow-y-auto rounded-md border border-line bg-panel p-1.5 shadow-xl">
             <p className="px-2 py-1 text-xs text-dim">Page audio plays on the ADE host computer.</p>
             {devServer ? (
               <button
@@ -1066,7 +1066,7 @@ export function BrowserChromeRow({
             value={captureNote}
             onChange={(event) => setCaptureNote(event.target.value)}
             placeholder="What should the agent look at?"
-            className="min-h-16 w-full resize-y rounded-md border border-line bg-paper p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-amber"
+            className="min-h-16 w-full resize-y rounded-lg border border-line bg-paper p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-amber"
           />
           <div className="mt-2 flex flex-wrap justify-end gap-2">
             <button
@@ -1189,7 +1189,7 @@ export function BrowserChromeRow({
             value={feedback}
             onChange={(event) => setFeedback(event.target.value)}
             placeholder="What should the agent change here?"
-            className="min-h-16 w-full resize-y rounded-md border border-line bg-paper p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-amber"
+            className="min-h-16 w-full resize-y rounded-lg border border-line bg-paper p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-amber"
           />
           <div className="mt-2 flex justify-end">
             <button

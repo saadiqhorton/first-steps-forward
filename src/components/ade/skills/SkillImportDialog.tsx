@@ -138,13 +138,13 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
         <div className="flex shrink-0 items-start justify-between gap-3 px-4 pt-4">
           <div className="min-w-0">
             <h2 className="text-[15px] font-medium">Import skills</h2>
-            <p className="mt-0.5 text-[12px] text-dim">
+            <p className="mt-0.5 text-(length:--text-xs) text-dim">
               A package from disk, or a GitHub repository. Nothing is written until you choose.
             </p>
           </div>
           <button
             type="button"
-            className="grid size-7 shrink-0 place-items-center rounded-md text-dim transition hover:bg-ink/[0.04] hover:text-ink"
+            className="grid size-7 shrink-0 place-items-center rounded-lg text-dim transition hover:bg-ink/[0.04] hover:text-ink"
             onClick={onClose}
             aria-label="Close import"
           >
@@ -167,15 +167,15 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
               <button
                 type="button"
                 onClick={() => input.current?.click()}
-                className="flex w-full flex-col items-center gap-1.5 rounded-lg border border-dashed border-line px-4 py-6 text-[12.5px] text-dim transition hover:border-amber hover:text-ink"
+                className="flex w-full flex-col items-center gap-1.5 rounded-md border border-dashed border-line px-4 py-6 text-ui text-dim transition hover:border-amber hover:text-ink"
               >
                 <Upload className="size-5" aria-hidden />
                 {file ? (
-                  <span className="font-mono text-[12px] text-ink">{file.name}</span>
+                  <span className="font-mono text-(length:--text-xs) text-ink">{file.name}</span>
                 ) : (
                   <span>Choose a .skill file or a .zip archive</span>
                 )}
-                <span className="text-[11px]">
+                <span className="text-caption">
                   Every skill inside needs a SKILL.md with a name and a description.
                 </span>
               </button>
@@ -199,15 +199,15 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
                   </div>
                   <div className="grid gap-1.5">
                     {staged.map((skill) => (
-                      <div key={skill.folder} className="rounded-lg border border-line px-3 py-2">
+                      <div key={skill.folder} className="rounded-md border border-line px-3 py-2">
                         <div className="flex items-baseline justify-between gap-2">
-                          <span className="font-mono text-[12px]">{skill.name}</span>
-                          <span className="font-mono text-[10px] text-dim">
+                          <span className="font-mono text-(length:--text-xs)">{skill.name}</span>
+                          <span className="font-mono text-2xs text-dim">
                             {skill.files.length} file{skill.files.length === 1 ? "" : "s"}
                           </span>
                         </div>
                         {skill.description ? (
-                          <p className="mt-0.5 line-clamp-2 text-[11.5px] text-dim">
+                          <p className="mt-0.5 line-clamp-2 text-(length:--text-xs) text-dim">
                             {skill.description}
                           </p>
                         ) : null}
@@ -215,7 +215,7 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
                           {skill.files.map((entry) => (
                             <span
                               key={entry.path}
-                              className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[9.5px] text-dim"
+                              className="rounded-full border border-line px-1.5 py-0.5 font-mono text-2xs text-dim"
                             >
                               {entry.path}
                             </span>
@@ -224,7 +224,7 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
                         {skill.warnings.map((warning) => (
                           <p
                             key={warning}
-                            className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-deep"
+                            className="mt-1.5 flex items-start gap-1.5 text-caption text-amber-deep"
                           >
                             <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />
                             {warning}
@@ -259,31 +259,31 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
                     }}
                     placeholder="https://github.com/owner/repo, or owner/repo"
                     aria-label="GitHub repository or folder"
-                    className="w-full rounded-md border border-line bg-paper py-2 pr-3 pl-9 font-mono text-[12px] text-ink placeholder:font-sans placeholder:text-dim"
+                    className="w-full rounded-lg border border-line bg-paper py-2 pr-3 pl-9 font-mono text-(length:--text-xs) text-ink placeholder:font-sans placeholder:text-dim"
                   />
                 </div>
                 <button
                   type="submit"
-                  className="btn-quiet inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-[13px] disabled:opacity-50"
+                  className="btn-quiet inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-ui disabled:opacity-50"
                   disabled={!url.trim() || find.isPending}
                 >
                   <Search className="size-3.5" aria-hidden />
                   {find.isPending ? "Finding…" : "Find skills"}
                 </button>
               </form>
-              <p className="mt-1.5 text-[11px] text-dim">
+              <p className="mt-1.5 text-caption text-dim">
                 Paste a repository, or a link to one folder. ADE finds every SKILL.md, including in
                 monorepos and nested skill collections, then checks each one.
               </p>
 
               {find.isPending ? (
-                <p className="mt-4 text-[12px] text-dim">Reading the repository…</p>
+                <p className="mt-4 text-(length:--text-xs) text-dim">Reading the repository…</p>
               ) : null}
 
               {found ? (
                 <div className="mt-4">
                   <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                    <span className="font-mono text-[12px]">
+                    <span className="font-mono text-(length:--text-xs)">
                       {found.repo.owner}/{found.repo.name}
                       <span className="text-dim"> · {found.repo.ref}</span>
                     </span>
@@ -304,7 +304,7 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
                           disabled={disabled}
                           aria-pressed={selected}
                           onClick={() => toggle(skill.folder)}
-                          className={`rounded-lg border px-3 py-2 text-left transition ${
+                          className={`rounded-md border px-3 py-2 text-left transition ${
                             disabled
                               ? "cursor-default border-line opacity-70"
                               : selected
@@ -325,33 +325,35 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
                             </span>
                             <span className="min-w-0 flex-1">
                               <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                                <span className="font-mono text-[12px] text-ink">{skill.name}</span>
-                                <span className="font-mono text-[10px] text-dim">
+                                <span className="font-mono text-(length:--text-xs) text-ink">
+                                  {skill.name}
+                                </span>
+                                <span className="font-mono text-2xs text-dim">
                                   {skill.folder ? `${skill.folder}/` : "repository root"}
                                 </span>
                                 <span
-                                  className={`ml-auto inline-flex items-center gap-1 font-mono text-[10px] ${status.tone}`}
+                                  className={`ml-auto inline-flex items-center gap-1 font-mono text-2xs ${status.tone}`}
                                 >
                                   <StatusIcon className="size-3" aria-hidden />
                                   {status.label}
                                 </span>
                               </span>
                               {skill.description ? (
-                                <span className="mt-0.5 block line-clamp-2 text-[11.5px] text-dim">
+                                <span className="mt-0.5 block line-clamp-2 text-(length:--text-xs) text-dim">
                                   {skill.description}
                                 </span>
                               ) : null}
-                              <span className="mt-1 block font-mono text-[10px] text-dim">
+                              <span className="mt-1 block font-mono text-2xs text-dim">
                                 {skill.fileCount} file{skill.fileCount === 1 ? "" : "s"} ·{" "}
                                 {countLabel(skill.counts)}
                               </span>
-                              <span className="mt-0.5 block text-[10.5px] text-dim">
+                              <span className="mt-0.5 block text-caption text-dim">
                                 {skill.reason}
                               </span>
                               {[...skill.errors, ...skill.warnings].map((warning) => (
                                 <span
                                   key={warning}
-                                  className={`mt-1 flex items-start gap-1.5 text-[11px] ${
+                                  className={`mt-1 flex items-start gap-1.5 text-caption ${
                                     skill.errors.includes(warning)
                                       ? "text-danger"
                                       : "text-amber-deep"
@@ -380,24 +382,24 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
                   key={root.id}
                   type="button"
                   onClick={() => setRootId(root.id)}
-                  className={`rounded-lg border px-3 py-2 text-left transition ${
+                  className={`rounded-md border px-3 py-2 text-left transition ${
                     rootId === root.id
                       ? "border-amber bg-amber/10"
                       : "border-line hover:border-ink/25"
                   }`}
                 >
                   <span className="flex items-baseline justify-between gap-2">
-                    <span className="text-[13px]">{root.label}</span>
-                    <span className="font-mono text-[10.5px] text-dim">{root.path}</span>
+                    <span className="text-ui">{root.label}</span>
+                    <span className="font-mono text-caption text-dim">{root.path}</span>
                   </span>
-                  <span className="mt-0.5 block text-[11.5px] text-dim">{root.hint}</span>
+                  <span className="mt-0.5 block text-(length:--text-xs) text-dim">{root.hint}</span>
                 </button>
               ))}
             </div>
           </div>
 
           {error ? (
-            <p className="mt-3 flex items-start gap-2 rounded-md bg-danger/10 p-2 text-[12px] text-danger">
+            <p className="mt-3 flex items-start gap-2 rounded-lg bg-danger/10 p-2 text-(length:--text-xs) text-danger">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               {error.message}
             </p>
@@ -405,12 +407,12 @@ export function SkillImportDialog({ projectId, onClose, onImported }: Props) {
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-4 py-3">
-          <button type="button" className="btn-quiet px-3 py-2 text-[13px]" onClick={onClose}>
+          <button type="button" className="btn-quiet px-3 py-2 text-ui" onClick={onClose}>
             Cancel
           </button>
           <button
             type="button"
-            className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-[13px] disabled:opacity-50"
+            className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-ui disabled:opacity-50"
             disabled={!canImport || busy}
             onClick={() => (mode === "file" ? importPackage.mutate() : importFromGithub.mutate())}
           >

@@ -206,12 +206,12 @@ export function SkillDrawer({
     >
       <header className="flex shrink-0 items-start justify-between gap-3 border-b border-line px-4 py-3">
         <div className="min-w-0">
-          <h2 className="truncate font-mono text-[13px] font-medium">{skill.name}</h2>
-          <p className="mt-0.5 truncate font-mono text-[10.5px] text-dim">{skill.location}</p>
+          <h2 className="truncate font-mono text-ui font-medium">{skill.name}</h2>
+          <p className="mt-0.5 truncate font-mono text-caption text-dim">{skill.location}</p>
         </div>
         <button
           type="button"
-          className="grid size-7 shrink-0 place-items-center rounded-md text-dim transition hover:bg-ink/[0.04] hover:text-ink"
+          className="grid size-7 shrink-0 place-items-center rounded-lg text-dim transition hover:bg-ink/[0.04] hover:text-ink"
           onClick={onClose}
           aria-label="Close skill"
         >
@@ -220,7 +220,7 @@ export function SkillDrawer({
       </header>
 
       {error ? (
-        <p className="mx-4 mt-3 shrink-0 rounded bg-danger/10 p-2 text-[12px] text-danger">
+        <p className="mx-4 mt-3 shrink-0 rounded bg-danger/10 p-2 text-(length:--text-xs) text-danger">
           {error.message}
         </p>
       ) : null}
@@ -237,7 +237,7 @@ export function SkillDrawer({
           {skill.warnings.map((warning) => (
             <p
               key={warning}
-              className="mb-3 flex items-start gap-2 rounded-md bg-amber/12 p-2 text-[12px] text-amber-deep"
+              className="mb-3 flex items-start gap-2 rounded-lg bg-amber/12 p-2 text-(length:--text-xs) text-amber-deep"
             >
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               {warning}
@@ -245,7 +245,7 @@ export function SkillDrawer({
           ))}
 
           {skill.scope === "detected" && (
-            <p className="mb-3 flex items-start gap-2 rounded-md bg-ink/[0.04] p-2 text-[12px] text-dim">
+            <p className="mb-3 flex items-start gap-2 rounded-lg bg-ink/[0.04] p-2 text-(length:--text-xs) text-dim">
               <Folder className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               ADE only found this skill in {skillRootLabel(skill).toLowerCase()}. It is read-only
               here — copy it into this project&apos;s own ADE folder to change it.
@@ -262,12 +262,12 @@ export function SkillDrawer({
                   id="skill-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  className="mt-2 w-full rounded-md border border-line bg-paper px-3 py-2 font-mono text-[13px]"
+                  className="mt-2 w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-ui"
                 />
                 {nameError ? (
-                  <p className="mt-1 text-[11px] text-danger">{nameError}</p>
+                  <p className="mt-1 text-caption text-danger">{nameError}</p>
                 ) : (
-                  <p className="mt-1 text-[11px] text-dim">
+                  <p className="mt-1 text-caption text-dim">
                     Lowercase letters, numbers and single hyphens. The folder name follows it.
                   </p>
                 )}
@@ -282,12 +282,12 @@ export function SkillDrawer({
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
                   rows={4}
-                  className="mt-2 w-full resize-y rounded-md border border-line bg-paper px-3 py-2 text-[13px] leading-relaxed"
+                  className="mt-2 w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 text-ui leading-relaxed"
                 />
                 {descriptionError ? (
-                  <p className="mt-1 text-[11px] text-danger">{descriptionError}</p>
+                  <p className="mt-1 text-caption text-danger">{descriptionError}</p>
                 ) : (
-                  <p className="mt-1 text-[11px] text-dim">
+                  <p className="mt-1 text-caption text-dim">
                     Say what the skill does and when to use it. This is all an agent reads until the
                     skill turns on.
                   </p>
@@ -314,14 +314,14 @@ export function SkillDrawer({
                     onChange={(event) => setBody(event.target.value)}
                     rows={9}
                     placeholder="## Steps"
-                    className="mt-2 w-full resize-y rounded-md border border-line bg-paper px-3 py-2 font-mono text-[12px] leading-relaxed"
+                    className="mt-2 w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 font-mono text-xs leading-relaxed"
                   />
                 ) : (
-                  <div className="mt-2 min-h-40 rounded-md border border-line bg-paper px-4 py-3">
+                  <div className="mt-2 min-h-40 rounded-lg border border-line bg-paper px-4 py-3">
                     <MarkdownDocument content={body || "*Nothing written yet.*"} />
                   </div>
                 )}
-                <p className="mt-1 text-[11px] text-dim">
+                <p className="mt-1 text-caption text-dim">
                   The body of {SKILL_FILE}. Keep it short and move detail into references/.
                 </p>
               </section>
@@ -331,7 +331,7 @@ export function SkillDrawer({
                   <div className="label-section">Metadata</div>
                   <button
                     type="button"
-                    className="btn-quiet inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                    className="btn-quiet inline-flex items-center gap-1 px-2 py-1 text-caption"
                     onClick={addMetadataRow}
                     data-focus="add-metadata"
                   >
@@ -350,7 +350,7 @@ export function SkillDrawer({
                         onChange={(event) => updateMetadataRow(row.id, { key: event.target.value })}
                         placeholder="author"
                         aria-label="Metadata key"
-                        className="rounded-md border border-line bg-paper px-2 py-1.5 font-mono text-[11.5px]"
+                        className="rounded-lg border border-line bg-paper px-2 py-1.5 font-mono text-(length:--text-xs)"
                       />
                       <input
                         value={row.value}
@@ -359,11 +359,11 @@ export function SkillDrawer({
                         }
                         placeholder="ade"
                         aria-label="Metadata value"
-                        className="rounded-md border border-line bg-paper px-2 py-1.5 font-mono text-[11.5px]"
+                        className="rounded-lg border border-line bg-paper px-2 py-1.5 font-mono text-(length:--text-xs)"
                       />
                       <button
                         type="button"
-                        className="grid size-6 place-items-center rounded-md text-dim transition hover:bg-danger/10 hover:text-danger"
+                        className="grid size-6 place-items-center rounded-lg text-dim transition hover:bg-danger/10 hover:text-danger"
                         aria-label={`Remove ${row.key || "metadata key"}`}
                         onClick={() => removeMetadataRow(row.id)}
                       >
@@ -372,7 +372,7 @@ export function SkillDrawer({
                     </div>
                   ))
                 ) : (
-                  <p className="text-[11px] text-dim">
+                  <p className="text-caption text-dim">
                     Extra key and value pairs, like an author or a version. Any key another client
                     uses is kept as it is.
                   </p>
@@ -383,7 +383,7 @@ export function SkillDrawer({
             <>
               <section className="mb-5">
                 <div className="label-section mb-1">Description</div>
-                <p className="text-[13px] leading-relaxed">
+                <p className="text-ui leading-relaxed">
                   {skill.description || "No description yet."}
                 </p>
               </section>
@@ -393,19 +393,19 @@ export function SkillDrawer({
                   {skill.license ? (
                     <div>
                       <div className="label-mono">License</div>
-                      <div className="text-[12.5px]">{skill.license}</div>
+                      <div className="text-ui">{skill.license}</div>
                     </div>
                   ) : null}
                   {skill.compatibility ? (
                     <div>
                       <div className="label-mono">Compatibility</div>
-                      <div className="text-[12.5px]">{skill.compatibility}</div>
+                      <div className="text-ui">{skill.compatibility}</div>
                     </div>
                   ) : null}
                   {skill.allowedTools ? (
                     <div className="sm:col-span-2">
                       <div className="label-mono">Allowed tools</div>
-                      <div className="font-mono text-[11.5px]">{skill.allowedTools}</div>
+                      <div className="font-mono text-(length:--text-xs)">{skill.allowedTools}</div>
                     </div>
                   ) : null}
                 </section>
@@ -425,11 +425,11 @@ export function SkillDrawer({
                   />
                 </div>
                 {docMode === "document" ? (
-                  <div className="rounded-md border border-line bg-paper px-4 py-3">
+                  <div className="rounded-lg border border-line bg-paper px-4 py-3">
                     <MarkdownDocument content={mockBody(skill) || "*No instructions yet.*"} />
                   </div>
                 ) : (
-                  <pre className="max-h-72 overflow-auto rounded-md bg-deck p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap text-deck-foreground">
+                  <pre className="max-h-72 overflow-auto rounded-lg bg-deck p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-deck-foreground">
                     {mockBody(skill)}
                   </pre>
                 )}
@@ -440,7 +440,7 @@ export function SkillDrawer({
                   <div className="label-section mb-1">Metadata</div>
                   <dl className="grid gap-0.5">
                     {Object.entries(skill.metadata).map(([key, value]) => (
-                      <div key={key} className="flex gap-2 font-mono text-[11.5px]">
+                      <div key={key} className="flex gap-2 font-mono text-(length:--text-xs)">
                         <dt className="shrink-0 text-dim">{key}</dt>
                         <dd className="min-w-0">
                           <MetadataValue value={value} />
@@ -458,7 +458,7 @@ export function SkillDrawer({
                     <div className="label-mono mb-1">
                       {SKILL_FILE_KINDS[kind as keyof typeof SKILL_FILE_KINDS]} · {files.length}
                     </div>
-                    <ul className="overflow-hidden rounded-md border border-line">
+                    <ul className="overflow-hidden rounded-lg border border-line">
                       {files.map((file) => {
                         // SKILL.md is edited through the skill's own fields; a skill ADE
                         // only found has no fields to edit, so its row just reports itself.
@@ -471,10 +471,10 @@ export function SkillDrawer({
                               onClick={() =>
                                 file.path === SKILL_FILE ? onView("edit") : onOpenFile(file.path)
                               }
-                              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11.5px] transition not-disabled:hover:bg-ink/[0.04] disabled:cursor-default disabled:text-dim"
+                              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-(length:--text-xs) transition not-disabled:hover:bg-ink/[0.04] disabled:cursor-default disabled:text-dim"
                             >
                               <span className="min-w-0 flex-1 truncate">{file.path}</span>
-                              <span className="shrink-0 text-[10px] text-dim">
+                              <span className="shrink-0 text-2xs text-dim">
                                 {file.path === SKILL_FILE && skill.editable
                                   ? "edit"
                                   : `${file.bytes} B`}
@@ -487,9 +487,9 @@ export function SkillDrawer({
                   </div>
                 ))}
                 {skill.files.length === 0 ? (
-                  <p className="text-[12px] text-dim">This skill has no files yet.</p>
+                  <p className="text-(length:--text-xs) text-dim">This skill has no files yet.</p>
                 ) : null}
-                <p className="mt-3 text-[11px] text-dim">
+                <p className="mt-3 text-caption text-dim">
                   An agent loads the name and description first, the body when the task matches, and
                   these files only when the instructions ask for them.
                 </p>
@@ -503,7 +503,7 @@ export function SkillDrawer({
         {view === "files" ? (
           <button
             type="button"
-            className="btn-quiet px-3 py-2 text-[13px]"
+            className="btn-quiet px-3 py-2 text-ui"
             onClick={() => onView("details")}
           >
             Back to the skill
@@ -512,7 +512,7 @@ export function SkillDrawer({
           <>
             <button
               type="button"
-              className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-[13px] disabled:opacity-50"
+              className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-ui disabled:opacity-50"
               disabled={!dirty || Boolean(nameError) || Boolean(descriptionError) || save.isPending}
               onClick={() => save.mutate()}
             >
@@ -521,7 +521,7 @@ export function SkillDrawer({
             </button>
             <button
               type="button"
-              className="btn-quiet px-3 py-2 text-[13px]"
+              className="btn-quiet px-3 py-2 text-ui"
               onClick={() => onView("details")}
             >
               Cancel
@@ -531,7 +531,7 @@ export function SkillDrawer({
           <>
             <button
               type="button"
-              className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-[13px]"
+              className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-ui"
               onClick={() => onView("edit")}
             >
               <Pencil className="size-3.5" aria-hidden />
@@ -539,14 +539,14 @@ export function SkillDrawer({
             </button>
             <button
               type="button"
-              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-2 text-[13px]"
+              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-2 text-ui"
               onClick={() => onView("files")}
             >
               Edit files
             </button>
             <button
               type="button"
-              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-2 text-[13px]"
+              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-2 text-ui"
               onClick={() => setTransferring(true)}
             >
               <ArrowLeftRight className="size-3.5" aria-hidden />
@@ -554,7 +554,7 @@ export function SkillDrawer({
             </button>
             <button
               type="button"
-              className="ml-auto inline-flex items-center gap-1.5 px-2 py-2 text-[12px] text-danger transition hover:bg-danger/10"
+              className="ml-auto inline-flex items-center gap-1.5 px-2 py-2 text-(length:--text-xs) text-danger transition hover:bg-danger/10"
               onClick={() => remove.mutate()}
             >
               <Trash2 className="size-3.5" aria-hidden />
@@ -565,7 +565,7 @@ export function SkillDrawer({
           <>
             <button
               type="button"
-              className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-[13px]"
+              className="btn-amber inline-flex items-center gap-1.5 px-3 py-2 text-ui"
               onClick={() => setTransferring(true)}
             >
               <Copy className="size-3.5" aria-hidden />
@@ -573,12 +573,12 @@ export function SkillDrawer({
             </button>
             <button
               type="button"
-              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-2 text-[13px]"
+              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-2 text-ui"
               onClick={() => onView("files")}
             >
               View files
             </button>
-            <span className="ml-auto text-[11px] text-dim">Read-only</span>
+            <span className="ml-auto text-caption text-dim">Read-only</span>
           </>
         )}
       </footer>

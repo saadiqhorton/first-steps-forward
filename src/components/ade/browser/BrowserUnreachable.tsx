@@ -44,7 +44,7 @@ export function BrowserUnreachable({
           {ERROR_MESSAGES[code] ?? (code || "Network error")}.
         </p>
         {showDetails ? (
-          <div className="mt-5 rounded-lg border border-line bg-panel p-3 text-xs text-dim">
+          <div className="mt-5 rounded-md border border-line bg-panel p-3 text-xs text-dim">
             <p className="mb-2 font-medium text-ink">Try:</p>
             <ul className="list-disc space-y-1 pl-4">
               <li>Checking your connection</li>

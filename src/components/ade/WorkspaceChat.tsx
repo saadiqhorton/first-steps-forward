@@ -335,7 +335,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
             </Link>
             <span className="label-mono">/ Luna</span>
           </div>
-          <h1 className="mt-2 line-clamp-1 text-[18px] font-medium leading-snug">{title}</h1>
+          <h1 className="mt-2 line-clamp-1 text-lg font-medium leading-snug">{title}</h1>
           <div className="mt-3 flex items-center gap-3">
             <span
               className={`size-1.5 shrink-0 rounded-full ${running ? "animate-pulse-soft bg-teal" : thread?.status === "failed" ? "bg-danger" : "bg-line"}`}
@@ -499,7 +499,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
           ))}
 
           {running && (
-            <div className="flex flex-wrap items-center gap-3 text-[13px] text-dim">
+            <div className="flex flex-wrap items-center gap-3 text-ui text-dim">
               <span className="size-1.5 animate-pulse-soft rounded-full bg-teal" aria-hidden />
               <TextShimmer>Luna is working…</TextShimmer>
             </div>
@@ -521,7 +521,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
               </div>
               <ul className="mt-2 space-y-1.5">
                 {catchup.map((item, index) => (
-                  <li key={`${item.href ?? index}:${index}`} className="text-[13px] leading-5">
+                  <li key={`${item.href ?? index}:${index}`} className="text-ui leading-5">
                     {item.href ? (
                       <a className="text-teal-deep underline underline-offset-2" href={item.href}>
                         {item.text}
@@ -597,7 +597,7 @@ function HistoryRow({
   const client = useQueryClient();
   const unread = (thread.readAt ?? 0) < (thread.updatedAt ?? 0);
   return (
-    <div className={`flex items-center gap-1 rounded-lg px-1 ${active ? "bg-ink/[0.04]" : ""}`}>
+    <div className={`flex items-center gap-1 rounded-md px-1 ${active ? "bg-ink/[0.04]" : ""}`}>
       <button
         type="button"
         className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"
@@ -606,14 +606,14 @@ function HistoryRow({
         <span className={`size-1.5 shrink-0 rounded-full ${unread ? "bg-amber" : "bg-line"}`} />
         <span className="min-w-0">
           <span className="block truncate text-xs font-medium">{thread.title || "New chat"}</span>
-          <span className="block truncate text-[11px] text-dim">
+          <span className="block truncate text-caption text-dim">
             {thread.preview || "No reply yet"}
           </span>
         </span>
       </button>
       <button
         type="button"
-        className="grid size-8 shrink-0 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-ink"
+        className="grid size-8 shrink-0 place-items-center rounded-lg text-dim hover:bg-ink/[0.04] hover:text-ink"
         aria-label={
           unread ? `Mark ${thread.title || "chat"} read` : `Mark ${thread.title || "chat"} unread`
         }
@@ -630,7 +630,7 @@ function HistoryRow({
       </button>
       <button
         type="button"
-        className="grid size-8 shrink-0 place-items-center rounded-md text-dim hover:bg-ink/[0.04] hover:text-danger"
+        className="grid size-8 shrink-0 place-items-center rounded-lg text-dim hover:bg-ink/[0.04] hover:text-danger"
         aria-label={`Delete ${thread.title || "chat"}`}
         onClick={async () => {
           if (!window.confirm("Delete this chat? Delivered project work continues.")) return;
@@ -662,7 +662,7 @@ function ApprovalCard({ handoff, onDone }: { handoff: Handoff; onDone: () => voi
         <Sparkles className="size-4 text-amber-deep" strokeWidth={1.5} aria-hidden />
         Send to {handoff.targetProjectName || handoff.targetName || "project"}?
       </div>
-      <p className="mt-1 text-[13px] leading-5 text-[color:var(--text-secondary)]">
+      <p className="mt-1 text-ui leading-5 text-[color:var(--text-secondary)]">
         {handoff.approval?.reason === "chain"
           ? "This project-to-project chain is long. Confirm that it should continue."
           : `That project runs with ${handoff.permission || "more"} access. Edit the request or send it.`}
@@ -672,7 +672,7 @@ function ApprovalCard({ handoff, onDone }: { handoff: Handoff; onDone: () => voi
         onChange={(event) => setDraft(event.target.value)}
         rows={2}
         aria-label="Request draft"
-        className="mt-2 w-full resize-none rounded-lg border border-line bg-paper px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/40"
+        className="mt-2 w-full resize-none rounded-md border border-line bg-paper px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/40"
       />
       <div className="mt-2 flex flex-wrap gap-2">
         <button

@@ -11,7 +11,7 @@ export function MarkdownDocument({
 }) {
   return (
     <div
-      className={`ade-markdown break-words ${compact ? "text-[11px] leading-snug [&_*]:!my-1" : "text-[13.5px] leading-relaxed"} ${className}`}
+      className={`ade-markdown break-words ${compact ? "text-caption leading-snug [&_*]:!my-1" : "text-sm leading-relaxed"} ${className}`}
     >
       <Markdown>{content}</Markdown>
     </div>

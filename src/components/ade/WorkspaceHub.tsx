@@ -111,7 +111,7 @@ export function WorkspaceOverview() {
             <span className="label-mono">Workspace</span>
             <span className="label-mono">/ home</span>
           </div>
-          <h1 className="mt-2 text-[18px] font-medium leading-snug">Home</h1>
+          <h1 className="mt-2 text-lg font-medium leading-snug">Home</h1>
           <p className="mt-1 text-xs leading-5 text-dim">
             Projects, decisions and Luna in one local workspace.
           </p>
@@ -134,7 +134,7 @@ export function WorkspaceOverview() {
           className={`${card} workspace-stat flex items-center justify-between gap-3 p-5`}
         >
           <span className="grid gap-1">
-            <span className="text-[28px] font-medium leading-none tabular-nums">
+            <span className="text-2xl font-medium leading-none tabular-nums">
               {inboxQuery.isPending || inboxQuery.isError ? "—" : inboxCount}
             </span>
             <span className="text-xs text-dim">Inbox</span>
@@ -146,7 +146,7 @@ export function WorkspaceOverview() {
           className={`${card} workspace-stat flex items-center justify-between gap-3 p-5`}
         >
           <span className="grid gap-1">
-            <span className="text-[28px] font-medium leading-none tabular-nums">
+            <span className="text-2xl font-medium leading-none tabular-nums">
               {sessions.filter((s) => ["working", "verifying", "queued"].includes(s.status)).length}
             </span>
             <span className="text-xs text-dim">Active sessions</span>
@@ -158,7 +158,7 @@ export function WorkspaceOverview() {
           className={`${card} workspace-stat flex items-center justify-between gap-3 p-5`}
         >
           <span className="grid gap-1">
-            <span className="text-[28px] font-medium leading-none tabular-nums">
+            <span className="text-2xl font-medium leading-none tabular-nums">
               {assistantQuery.isPending || assistantQuery.isError
                 ? "—"
                 : (assistant?.threads?.length ?? 0)}
@@ -499,7 +499,7 @@ export function WorkspaceInbox() {
             <span className="label-mono">Workspace</span>
             <span className="label-mono">/ inbox</span>
           </div>
-          <h1 className="mt-2 text-[18px] font-medium leading-snug">Inbox</h1>
+          <h1 className="mt-2 text-lg font-medium leading-snug">Inbox</h1>
           <p className="mt-1 text-xs leading-5 text-dim">
             Decisions, updates and work that needs a look.
           </p>
@@ -601,7 +601,7 @@ export function WorkspaceInbox() {
         {inboxQuery.isError ? (
           <div className={`${card} workspace-empty`} role="alert">
             <span className="grid gap-0.5">
-              <b className="text-[13px] font-medium text-ink">Could not load the inbox</b>
+              <b className="text-ui font-medium text-ink">Could not load the inbox</b>
               <span className="text-danger">
                 {inboxQuery.error instanceof Error
                   ? inboxQuery.error.message
@@ -618,7 +618,7 @@ export function WorkspaceInbox() {
           <div className={`${card} workspace-empty`}>
             <Check className="size-4 shrink-0 text-teal-deep" strokeWidth={1.5} aria-hidden />
             <span className="grid gap-0.5">
-              <b className="text-[13px] font-medium text-ink">
+              <b className="text-ui font-medium text-ink">
                 {query || projectId ? "No conversations match" : "All caught up"}
               </b>
               <span>
@@ -787,7 +787,7 @@ function InboxRow({
           {menuOpen && (
             <div className="workspace-menu">
               {error && (
-                <span role="alert" className="px-2 py-1 text-[11px] text-danger">
+                <span role="alert" className="px-2 py-1 text-caption text-danger">
                   {error}
                 </span>
               )}
@@ -889,7 +889,7 @@ export function WorkspaceSettings() {
           </Link>
           <span className="label-mono">/ settings</span>
         </div>
-        <h1 className="mt-2 text-[18px] font-medium leading-snug">Luna settings</h1>
+        <h1 className="mt-2 text-lg font-medium leading-snug">Luna settings</h1>
         <p className="mt-1 text-sm leading-5 text-dim">
           Choose how Luna speaks and listens in this browser.
         </p>
@@ -1143,7 +1143,7 @@ export function WorkspaceProjects() {
             <span className="label-mono">Workspace</span>
             <span className="label-mono">/ projects</span>
           </div>
-          <h1 className="mt-2 text-[18px] font-medium leading-snug">Projects</h1>
+          <h1 className="mt-2 text-lg font-medium leading-snug">Projects</h1>
           <p className="mt-1 text-xs leading-5 text-dim">
             A home for every codebase and the work happening inside it.
           </p>

@@ -15,13 +15,8 @@ Sources: `--shadow-resting|raised|floating` in `src/components/arc/foundation.cs
 | `--shadow-process-key-hover` | taller shelf + stronger blur | Process-key hover |
 | `--shadow-process-key-active` | compressed inset + short shelf | Process-key pressed |
 | `--shadow-process-key-disabled` | muted inset only | Process-key disabled |
-| `--z-base` | `0` | Default stacking |
 | `--z-raised` | `1` | Slightly above siblings |
 | `--z-dropdown` | `50` | Menus / dropdowns |
-| `--z-sticky` | `100` | Sticky headers / rails |
-| `--z-overlay` | `200` | Dimmed overlays |
-| `--z-modal` | `300` | Modals |
-| `--z-toast` | `400` | Toasts |
 | `--z-veil` | `2147483647` | Full-screen veil / blocking layer |
 
 ## Light / dark
@@ -33,7 +28,7 @@ Sources: `--shadow-resting|raised|floating` in `src/components/arc/foundation.cs
 ## Do
 
 - Climb the resting → raised → floating ladder; don’t invent new shadow stacks for ordinary UI.
-- Pair floating shadows with `--z-dropdown` / `--z-modal` as appropriate.
+- Pair floating shadows with `--z-dropdown` for menus and popovers.
 - Keep process-key shadows on process-key components only.
 
 ## Don't

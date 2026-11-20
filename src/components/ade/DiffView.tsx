@@ -10,13 +10,16 @@ export function DiffView({
 }) {
   const [open, setOpen] = useState<string | null>(null);
   if (unavailable)
-    return <p className="text-[12px] text-dim">Changes unavailable for this earlier task.</p>;
-  if (!changes.length) return <p className="text-[12px] text-dim">No files changed yet.</p>;
+    return (
+      <p className="text-(length:--text-xs) text-dim">Changes unavailable for this earlier task.</p>
+    );
+  if (!changes.length)
+    return <p className="text-(length:--text-xs) text-dim">No files changed yet.</p>;
   const added = changes.reduce((n, c) => n + c.added, 0);
   const removed = changes.reduce((n, c) => n + c.removed, 0);
   return (
     <div>
-      <div className="mb-2 font-mono text-[11px] text-dim">
+      <div className="mb-2 font-mono text-caption text-dim">
         {changes.length} file{changes.length === 1 ? "" : "s"} ·{" "}
         <span className="text-teal">+{added}</span> /{" "}
         <span className="text-danger">−{removed}</span>
@@ -31,27 +34,27 @@ export function DiffView({
                 aria-expanded={isOpen}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-ink/[0.03]"
               >
-                <span className="font-mono text-[10px] text-dim" aria-hidden>
+                <span className="font-mono text-2xs text-dim" aria-hidden>
                   {isOpen ? "▾" : "▸"}
                 </span>
-                <span className="flex-1 truncate font-mono text-[12px]">
+                <span className="flex-1 truncate font-mono text-(length:--text-xs)">
                   {c.path}
                   {c.preExisting && (
                     <span
-                      className="ml-2 rounded bg-amber/15 px-1.5 py-0.5 font-mono text-[10px] text-amber-deep"
+                      className="ml-2 rounded bg-amber/15 px-1.5 py-0.5 font-mono text-2xs text-amber-deep"
                       title="Already dirty before the agent ran — your uncommitted work"
                     >
                       Yours
                     </span>
                   )}
                 </span>
-                <span className="font-mono text-[10px]">
+                <span className="font-mono text-2xs">
                   <span className="text-teal">+{c.added}</span>{" "}
                   <span className="text-danger">−{c.removed}</span>
                 </span>
               </button>
               {isOpen && (
-                <pre className="overflow-x-auto bg-deck px-4 py-3 font-mono text-[11.5px] leading-relaxed text-deck-foreground">
+                <pre className="overflow-x-auto bg-deck px-4 py-3 font-mono text-xs leading-relaxed text-deck-foreground">
                   {c.hunk.map((l, i) => (
                     <div
                       key={i}
@@ -61,7 +64,7 @@ export function DiffView({
                           : l.startsWith("-")
                             ? "bg-danger/30"
                             : l.startsWith("@@")
-                              ? "text-amber"
+                              ? "text-amber-deep"
                               : "text-deck-foreground/70"
                       }
                     >

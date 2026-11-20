@@ -13,12 +13,12 @@ import { useAppPathname } from "@/lib/ade/useAppPathname";
 import { useTheme } from "@/lib/theme";
 
 const ICON_BUTTON =
-  "grid size-7 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber";
+  "grid size-7 shrink-0 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber";
 
 // Arc's ThemeSwitch is a bordered 38px secondary button whose styles live in an unlayered CSS
 // module, so these overrides need `!` to win. They make it the same ghost icon button as Settings.
 const THEME_SWITCH =
-  "contents [&>button]:size-7! [&>button]:min-h-7! [&>button]:min-w-7! [&>button]:rounded-md! [&>button]:border-transparent! [&>button]:bg-transparent! [&>button]:text-dim! [&>button]:shadow-none! [&>button]:hover:bg-ink/[0.04]! [&>button]:hover:text-ink! [&>button]:focus-visible:outline-2! [&>button]:focus-visible:outline-offset-0! [&>button]:focus-visible:outline-amber! [&_svg]:size-4 [&_svg]:stroke-[1.5]";
+  "contents [&>button]:size-7! [&>button]:min-h-7! [&>button]:min-w-7! [&>button]:rounded-lg! [&>button]:border-transparent! [&>button]:bg-transparent! [&>button]:text-dim! [&>button]:shadow-none! [&>button]:hover:bg-ink/[0.04]! [&>button]:hover:text-ink! [&>button]:focus-visible:outline-2! [&>button]:focus-visible:outline-offset-0! [&>button]:focus-visible:outline-amber! [&_svg]:size-4 [&_svg]:stroke-[1.5]";
 
 export function TopBar({ isDesktop }: { isDesktop: boolean }) {
   const { activeProjectId, hydrated, projects, serviceAvailable, sessions } = useAdeState(
@@ -109,14 +109,14 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
                 to="/p/$projectId/conversations"
                 params={{ projectId: p.id }}
                 aria-current={active ? "page" : undefined}
-                className={`relative isolate flex max-w-[calc(18ch+2.5rem)] shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors ${
+                className={`relative isolate flex max-w-[calc(18ch+2.5rem)] shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-ui transition-colors ${
                   active ? "font-medium text-ink" : "text-dim hover:bg-ink/[0.04] hover:text-ink"
                 }`}
               >
                 {active && (
                   <GlideIndicator
                     id="top-bar-project"
-                    className="absolute inset-0 -z-10 rounded-md bg-ink/[0.06]"
+                    className="absolute inset-0 -z-10 rounded-lg bg-ink/[0.06]"
                   />
                 )}
                 {p.icon && /^(data:image\/|https?:)/i.test(p.icon) ? (

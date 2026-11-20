@@ -121,13 +121,13 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
               <button
                 type="button"
                 onClick={() => onOpenFile(item.path)}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] transition hover:bg-ink/[0.04] ${
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-caption transition hover:bg-ink/[0.04] ${
                   item.path === path ? "bg-amber/12 text-ink" : "text-dim"
                 }`}
                 title={item.path}
               >
                 <span className="min-w-0 flex-1 truncate">{item.path}</span>
-                <span className="shrink-0 text-[9.5px] opacity-70">
+                <span className="shrink-0 text-2xs opacity-70">
                   {item.image ? "image" : item.text === false ? "binary" : ""}
                 </span>
               </button>
@@ -136,7 +136,7 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
         </ul>
         <div className="shrink-0 border-t border-line p-2">
           {!editable ? (
-            <p className="flex items-start gap-1.5 px-1 text-[10.5px] text-dim">
+            <p className="flex items-start gap-1.5 px-1 text-caption text-dim">
               <Lock className="mt-0.5 size-3 shrink-0" aria-hidden />
               Read-only here.
             </p>
@@ -153,19 +153,19 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
                 onChange={(event) => setNewPath(event.target.value)}
                 placeholder="references/NOTE.md"
                 autoFocus
-                className="w-full rounded-md border border-line bg-paper px-2 py-1 font-mono text-[11px]"
+                className="w-full rounded-lg border border-line bg-paper px-2 py-1 font-mono text-caption"
               />
               <div className="flex gap-1">
                 <button
                   type="submit"
-                  className="btn-amber px-2 py-1 text-[11px]"
+                  className="btn-amber px-2 py-1 text-caption"
                   disabled={!newPath.trim() || create.isPending}
                 >
                   Add
                 </button>
                 <button
                   type="button"
-                  className="btn-quiet px-2 py-1 text-[11px]"
+                  className="btn-quiet px-2 py-1 text-caption"
                   onClick={() => setAdding(false)}
                 >
                   Cancel
@@ -175,7 +175,7 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
           ) : (
             <button
               type="button"
-              className="flex w-full items-center gap-1.5 px-1.5 py-1 text-[11.5px] text-dim transition hover:text-ink"
+              className="flex w-full items-center gap-1.5 px-1.5 py-1 text-(length:--text-xs) text-dim transition hover:text-ink"
               onClick={() => setAdding(true)}
             >
               <Plus className="size-3.5" aria-hidden />
@@ -187,7 +187,9 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-          <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-dim">{path}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-(length:--text-xs) text-dim">
+            {path}
+          </span>
           {entry && text && MARKDOWN.test(entry.path) ? (
             <SegmentedControl
               label="File view"
@@ -204,7 +206,7 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
               href={skillAssetUrl(projectId, skill.rootId, skill.folder, entry.path)}
               target="_blank"
               rel="noreferrer noopener"
-              className="btn-quiet inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+              className="btn-quiet inline-flex items-center gap-1 px-2 py-1 text-caption"
             >
               <ExternalLink className="size-3" aria-hidden />
               Open
@@ -215,7 +217,7 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
               {dirty ? (
                 <button
                   type="button"
-                  className="btn-quiet inline-flex items-center gap-1 px-2 py-1 text-[11px]"
+                  className="btn-quiet inline-flex items-center gap-1 px-2 py-1 text-caption"
                   onClick={() => setDraft(null)}
                 >
                   <RotateCcw className="size-3" aria-hidden />
@@ -224,7 +226,7 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
               ) : null}
               <button
                 type="button"
-                className="btn-amber inline-flex items-center gap-1 px-2 py-1 text-[11px] disabled:opacity-50"
+                className="btn-amber inline-flex items-center gap-1 px-2 py-1 text-caption disabled:opacity-50"
                 disabled={!dirty || save.isPending}
                 onClick={() => save.mutate()}
               >
@@ -233,7 +235,7 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
               </button>
               <button
                 type="button"
-                className="grid size-6 place-items-center rounded-md text-dim transition hover:bg-danger/10 hover:text-danger"
+                className="grid size-6 place-items-center rounded-lg text-dim transition hover:bg-danger/10 hover:text-danger"
                 aria-label={`Delete ${path}`}
                 onClick={() => remove.mutate()}
               >
@@ -244,13 +246,13 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
         </div>
 
         {error ? (
-          <p className="shrink-0 px-3 py-2 text-[12px] text-danger">
+          <p className="shrink-0 px-3 py-2 text-(length:--text-xs) text-danger">
             {error instanceof Error ? error.message : String(error)}
           </p>
         ) : null}
 
         {!path ? (
-          <div className="grid flex-1 place-items-center text-[12px] text-dim">
+          <div className="grid flex-1 place-items-center text-(length:--text-xs) text-dim">
             This skill has no bundled files.
           </div>
         ) : !text ? (
@@ -259,12 +261,12 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
               <img
                 src={skillAssetUrl(projectId, skill.rootId, skill.folder, entry.path)}
                 alt={entry.path}
-                className="mx-auto max-h-full max-w-full rounded-md border border-line bg-paper object-contain"
+                className="mx-auto max-h-full max-w-full rounded-lg border border-line bg-paper object-contain"
               />
             ) : (
               <div className="mx-auto mt-8 max-w-sm text-center">
                 <FileWarning className="mx-auto size-6 text-dim" aria-hidden />
-                <p className="mt-2 text-[12.5px] text-dim">
+                <p className="mt-2 text-ui text-dim">
                   {entry ? `${entry.bytes} bytes, not text` : "Not text"} — there is nothing to edit
                   here, but the file stays in the skill folder.
                 </p>
@@ -272,7 +274,7 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
             )}
           </div>
         ) : file.isLoading ? (
-          <div className="grid flex-1 place-items-center font-mono text-[12px] text-dim">
+          <div className="grid flex-1 place-items-center font-mono text-(length:--text-xs) text-dim">
             Opening file…
           </div>
         ) : preview && entry && MARKDOWN.test(entry.path) ? (
@@ -284,15 +286,15 @@ export function SkillFileEditor({ projectId, skill, openFile, onOpenFile }: Prop
             value={value}
             onChange={(event) => setDraft(event.target.value)}
             spellCheck={false}
-            className="min-h-0 flex-1 resize-none bg-[var(--code-background)] p-3 font-mono text-[12px] leading-relaxed text-[var(--code-foreground)] outline-none"
+            className="min-h-0 flex-1 resize-none bg-[var(--code-background)] p-3 font-mono text-xs leading-relaxed text-[var(--code-foreground)] outline-none"
           />
         ) : (
-          <pre className="min-h-0 flex-1 overflow-auto bg-[var(--code-background)] p-3 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-[var(--code-foreground)]">
+          <pre className="min-h-0 flex-1 overflow-auto bg-[var(--code-background)] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-[var(--code-foreground)]">
             {value}
           </pre>
         )}
 
-        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-line px-3 py-1.5 font-mono text-[10px] text-dim">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-line px-3 py-1.5 font-mono text-2xs text-dim">
           <span>{entry ? SKILL_FILE_KINDS[entry.kind] : ""}</span>
           <span>{!editable ? "Read-only" : dirty ? "Unsaved draft" : "Ready to edit"}</span>
         </div>

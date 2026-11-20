@@ -95,17 +95,17 @@ export function HarnessDialog({
 
         {!active ? (
           <>
-            <pre className="mt-4 overflow-x-auto rounded-md bg-deck px-3 py-2 font-mono text-[11px] leading-relaxed text-deck-foreground/80">
+            <pre className="mt-4 overflow-x-auto rounded-lg bg-deck px-3 py-2 font-mono text-caption leading-relaxed text-deck-foreground/80">
               {command || "(no command configured)"}
             </pre>
-            <p className="mt-3 text-[12px] leading-relaxed text-dim">
+            <p className="mt-3 text-xs leading-relaxed text-dim">
               This runs on your computer and may take a few minutes.
             </p>
-            {error && <p className="mt-3 text-[12px] text-danger">{error}</p>}
+            {error && <p className="mt-3 text-(length:--text-xs) text-danger">{error}</p>}
             <div className="mt-5 flex gap-2">
               <button
                 type="button"
-                className="btn-amber px-4 py-2 text-[13px]"
+                className="btn-amber px-4 py-2 text-ui"
                 disabled={busy || !command || jobQuery.isFetching}
                 onClick={() => void run()}
               >
@@ -113,7 +113,7 @@ export function HarnessDialog({
               </button>
               <button
                 type="button"
-                className="btn-quiet ml-auto px-4 py-2 text-[13px]"
+                className="btn-quiet ml-auto px-4 py-2 text-ui"
                 onClick={onClose}
                 disabled={busy}
               >
@@ -125,19 +125,19 @@ export function HarnessDialog({
           <>
             <pre
               ref={outputRef}
-              className="mt-4 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-deck px-3 py-2 font-mono text-[11px] leading-relaxed text-deck-foreground/80 [overflow-wrap:anywhere]"
+              className="mt-4 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-deck px-3 py-2 font-mono text-caption leading-relaxed text-deck-foreground/80 [overflow-wrap:anywhere]"
             >
               {(job?.output ?? []).join("\n") || "Waiting for output…"}
             </pre>
-            <p className="mt-3 font-mono text-[11px] text-dim">
+            <p className="mt-3 font-mono text-caption text-dim">
               Status: {job?.status ?? "running"}
               {typeof job?.exitCode === "number" ? ` · exit ${job.exitCode}` : ""}
             </p>
-            {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
+            {error && <p className="mt-2 text-(length:--text-xs) text-danger">{error}</p>}
             <div className="mt-5 flex gap-2">
               <button
                 type="button"
-                className="btn-quiet ml-auto px-4 py-2 text-[13px]"
+                className="btn-quiet ml-auto px-4 py-2 text-ui"
                 onClick={onClose}
                 disabled={!finished && job?.status === "running"}
               >

@@ -27,7 +27,7 @@ export function PageDialog({
           aria-label="Dialog response"
           value={text}
           onChange={(event) => setText(event.target.value)}
-          className="h-7 w-full min-w-0 rounded-md bg-paper px-2 ring-1 ring-line ring-inset outline-none focus-visible:outline-2 focus-visible:outline-amber"
+          className="h-7 w-full min-w-0 rounded-lg bg-paper px-2 ring-1 ring-line ring-inset outline-none focus-visible:outline-2 focus-visible:outline-amber"
         />
       ) : null}
       <div className="flex justify-end gap-2">

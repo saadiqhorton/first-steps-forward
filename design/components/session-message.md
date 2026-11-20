@@ -18,8 +18,8 @@
 - Collapsible long user prompt or structured agent dump
 
 ## 4. Tokens used
-- `bg-surface-muted` / `--color-surface-muted`, `card-panel`, `border-line` / `--color-border`
-- `text-ink` / `--color-text`, `text-dim` / `--color-text-muted`, `--text-secondary` / `--color-text-secondary`
+- `bg-surface-muted` / `--surface-muted`, `card-panel`, `border-line` / `--border`
+- `text-ink` / `--foreground`, `text-dim` / `--text-muted`, `--text-secondary`
 - Link focus teal; mono for structured blocks
 
 ## 5. Props/API

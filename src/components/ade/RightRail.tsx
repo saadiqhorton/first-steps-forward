@@ -41,7 +41,7 @@ export function RightRail(props: {
         aria-label="Show right panel"
         title="Show right panel (Ctrl+/)"
         onClick={onExpand}
-        className="grid size-7 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+        className="grid size-7 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
       >
         <ExpandIcon className="size-4" strokeWidth={1.5} aria-hidden />
       </button>
@@ -60,7 +60,7 @@ export function RightRail(props: {
                 aria-label={label}
                 title={label}
                 onClick={() => onSelect(id)}
-                className={`grid size-7 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-amber ${
+                className={`grid size-7 place-items-center rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-amber ${
                   isActive
                     ? "bg-ink/[0.06] text-ink"
                     : "text-dim hover:bg-ink/[0.04] hover:text-ink"

@@ -133,13 +133,15 @@ function WorkflowsPage() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-4 py-6 @lg/workflows:px-7 @lg/workflows:py-8">
           <h1 className="heading-display text-2xl @lg/workflows:text-3xl">Workflows</h1>
-          <p className="mt-3 text-[13px] text-dim">
+          <p className="mt-3 text-ui text-dim">
             Reusable prompts that attach to the start screen composer as a token. They never
             auto-send.
           </p>
 
           {error ? (
-            <p className="mt-6 rounded bg-danger/10 p-3 text-[12px] text-danger">{error}</p>
+            <p className="mt-6 rounded bg-danger/10 p-3 text-(length:--text-xs) text-danger">
+              {error}
+            </p>
           ) : null}
 
           <div className="mt-6 flex">
@@ -162,19 +164,19 @@ function WorkflowsPage() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search"
               aria-label="Search workflows"
-              className="w-full rounded-md border border-line bg-paper py-2 pr-3 pl-9 text-[13px] text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
+              className="w-full rounded-lg border border-line bg-paper py-2 pr-3 pl-9 text-ui text-ink placeholder:text-dim focus-visible:outline-2 focus-visible:outline-amber"
             />
           </div>
 
           <div className="mt-8 space-y-8">
             {loading ? (
-              <TextShimmer as="p" className="text-[13px] text-dim">
+              <TextShimmer as="p" className="text-ui text-dim">
                 Loading workflows…
               </TextShimmer>
             ) : null}
 
             {emptyResults ? (
-              <p className="text-[13px] text-dim">
+              <p className="text-ui text-dim">
                 {workflows.length === 0 ? "No workflows yet." : "No workflows match this filter."}
               </p>
             ) : null}
@@ -233,7 +235,7 @@ function WorkflowsPage() {
                 setSelectedId(null);
                 setEditor("new");
               }}
-              className="btn-amber px-4 py-2 text-[13px]"
+              className="btn-amber px-4 py-2 text-ui"
             >
               + New workflow
             </button>
@@ -251,7 +253,7 @@ function WorkflowsPage() {
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 <Suspense
                   fallback={
-                    <div className="grid place-items-center py-10 font-mono text-[12px] text-dim">
+                    <div className="grid place-items-center py-10 font-mono text-(length:--text-xs) text-dim">
                       Loading editor…
                     </div>
                   }

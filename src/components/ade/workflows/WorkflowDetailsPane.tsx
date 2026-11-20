@@ -70,26 +70,26 @@ export function WorkflowDetailsPane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <div className={`grid size-12 place-items-center rounded-lg ${accent}`} aria-hidden>
+        <div className={`grid size-12 place-items-center rounded-md ${accent}`} aria-hidden>
           <Sparkles className="size-5 text-ink/70" />
         </div>
         <h3 className="mt-4 text-xl font-medium leading-snug">{workflow.name}</h3>
         <p className="label-mono mt-1">{builtIn ? "Built-in" : "Yours"}</p>
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 py-1 text-[11px] text-dim">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 py-1 text-caption text-dim">
             <Sparkles className="size-3" aria-hidden />
             {agentTagLabel(workflow.agentId, agents)}
           </span>
           {permissionLabel ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 py-1 text-[11px] text-dim">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-2.5 py-1 text-caption text-dim">
               {permissionLabel}
             </span>
           ) : null}
         </div>
 
         {workflow.description ? (
-          <p className="mt-5 text-[13px] leading-relaxed text-dim">{workflow.description}</p>
+          <p className="mt-5 text-ui leading-relaxed text-dim">{workflow.description}</p>
         ) : null}
 
         <div className="mt-5">
@@ -98,7 +98,7 @@ export function WorkflowDetailsPane({
             <button
               type="button"
               onClick={() => void copyPrompt()}
-              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px]"
+              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-(length:--text-xs)"
             >
               {copied ? (
                 <Check className="size-3.5" aria-hidden />
@@ -108,7 +108,7 @@ export function WorkflowDetailsPane({
               {copied ? "Copied" : "Copy prompt"}
             </button>
           </div>
-          <pre className="whitespace-pre-wrap rounded-md border border-line bg-paper p-3 font-mono text-[12px] leading-relaxed text-ink">
+          <pre className="whitespace-pre-wrap rounded-lg border border-line bg-paper p-3 font-mono text-xs leading-relaxed text-ink">
             {workflow.prompt}
           </pre>
         </div>
@@ -118,7 +118,7 @@ export function WorkflowDetailsPane({
         <button
           type="button"
           onClick={() => onEdit(workflow)}
-          className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px]"
+          className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-(length:--text-xs)"
         >
           <FilePenLine className="size-3.5" aria-hidden />
           Edit workflow
@@ -127,7 +127,7 @@ export function WorkflowDetailsPane({
           <button
             type="button"
             onClick={() => onDelete(workflow)}
-            className="btn-quiet px-3 py-1.5 text-[12px]"
+            className="btn-quiet px-3 py-1.5 text-(length:--text-xs)"
           >
             Delete
           </button>
@@ -136,7 +136,7 @@ export function WorkflowDetailsPane({
           to="/p/$projectId/conversations"
           params={{ projectId }}
           search={{ workflow: workflow.id } as never}
-          className="btn-amber ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px]"
+          className="btn-amber ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-(length:--text-xs)"
         >
           <Play className="size-3.5" aria-hidden />
           Run workflow

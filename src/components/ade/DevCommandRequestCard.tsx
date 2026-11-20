@@ -33,8 +33,8 @@ export function DevCommandRequestCard({
       role="group"
       aria-label="Dev command request"
     >
-      <p className="text-[13px] font-medium">Run this dev command?</p>
-      <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-deck p-2 font-mono text-xs whitespace-pre-wrap break-all text-deck-foreground">
+      <p className="text-ui font-medium">Run this dev command?</p>
+      <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-deck p-2 font-mono text-xs whitespace-pre-wrap break-all text-deck-foreground">
         {request.command}
       </pre>
       <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">

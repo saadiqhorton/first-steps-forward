@@ -66,7 +66,7 @@ export function RightPaneTabs(props: {
                 {label}
               </span>
               {id === "processes" && processCount > 0 ? (
-                <span className="font-mono text-[10.5px] tabular-nums text-amber-deep">
+                <span className="font-mono text-caption tabular-nums text-amber-deep">
                   {processCount}
                 </span>
               ) : null}

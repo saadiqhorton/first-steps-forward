@@ -16,7 +16,7 @@ export function AgentsDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto border-line bg-paper p-0 sm:rounded-lg">
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto border-line bg-paper p-0 sm:rounded-md">
         <DialogHeader className="sr-only">
           <DialogTitle>Agents & accounts</DialogTitle>
           <DialogDescription>

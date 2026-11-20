@@ -18,8 +18,8 @@
 - Footer count + “Show completed” checkbox
 
 ## 4. Tokens used
-- `bg-panel` / `--color-surface`, `bg-paper` / `--color-bg`, `border-line` / `--color-border`
-- `text-ink` / `--color-text`, `text-dim` / `--color-text-muted`
+- `bg-panel` / `--surface`, `bg-paper` / `--background`, `border-line` / `--border`
+- `text-ink` / `--foreground`, `text-dim` / `--text-muted`
 - Active row: `bg-surface-muted` + GlideIndicator; unread amber; working elapsed teal
 - SegmentedControl call-site overrides for compact filter chrome
 

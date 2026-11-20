@@ -1,42 +1,15 @@
 /**
  * Layer 2 — project aliases.
- * Components (Layer 3) must only use these names (or documented Layer-1-as-Layer-2
- * spacing/type tokens like --space-* and --text-*).
+ * Components use the semantic colour names defined on :root in src/styles.css
+ * (--ink, --paper, --panel, --dim, --amber, --text-secondary, --text-muted,
+ * --foreground, --background, --surface, --border, --accent, --accent-strong,
+ * --danger, --success, --warning, --teal-deep) plus the --space-*, --text-*,
+ * --radius-*, --shadow-*, --duration-* and --ease-* tokens in this file.
+ * Never use raw colour, px spacing, font-size, radius, shadow or motion literals.
  * Layer 1 lives in foundation.css + ADE :root maps in styles.css.
- *
- * Layer 2 spacing, type scale, radius, elevation, and motion: use existing
- * --space-*, --text-*, --radius-*, --shadow-resting|--raised|--floating,
- * --duration-*, and --ease-* (treated as Layer 2 by convention).
  */
 :root {
-  /* Colors */
-  --color-text: var(--foreground, oklch(0.18 0.006 70));
-  --color-text-secondary: var(--text-secondary, oklch(0.43 0.025 80));
-  --color-text-muted: var(--text-muted, oklch(0.59 0.03 85));
-  --color-bg: var(--background, oklch(0.945 0.02 90));
-  --color-surface: var(--surface, oklch(0.977 0.01 90));
-  --color-surface-raised: var(--surface-raised, oklch(0.977 0.01 90));
-  --color-surface-muted: var(--surface-muted, oklch(0.92 0.02 88));
-  --color-border: var(--border, oklch(0.86 0.03 85));
-  --color-border-subtle: var(--border-subtle, oklch(0.9 0.025 87));
-  --color-border-strong: var(--border-strong, oklch(0.78 0.035 82));
-  --color-link: var(--teal-deep, oklch(0.38 0.06 190));
-  --color-accent: var(--accent, oklch(0.69 0.15 65));
-  --color-accent-strong: var(--accent-strong, oklch(0.55 0.13 65));
-  --color-accent-subtle: var(--accent-subtle, transparent);
-  --color-accent-foreground: var(--accent-foreground, oklch(0.18 0.006 70));
-  --color-danger: var(--danger, oklch(0.55 0.18 28));
-  --color-danger-foreground: var(--danger-foreground, oklch(0.985 0.008 90));
-  --color-success: var(--success, oklch(0.47 0.07 190));
-  --color-warning: var(--warning, oklch(0.55 0.13 65));
-  --color-deck: var(--deck, oklch(0.18 0.006 70));
-  --color-deck-foreground: var(--deck-foreground, oklch(0.945 0.02 90));
-  --color-scrim: var(--scrim, oklch(0.18 0.006 70 / 0.45));
-  --color-focus-ring: var(--focus-ring, transparent);
-
   /* Typography aliases */
-  --font-family-display: var(--font-display, "Geist", sans-serif);
-  --font-family-body: var(--font-body, "Inter", sans-serif);
   --font-family-mono: var(--font-mono, "IBM Plex Mono", monospace);
   --font-weight-regular: 400;
   --font-weight-medium: 500;
@@ -79,8 +52,6 @@
   --space-px-60: 60px;
   --space-px-65: 65px;
   --space-px-80: 80px;
-  --space-picker-claude: 67px;
-  --space-picker-codex: 96px;
   /* Workshop mono / chrome type below --text-xs. */
   --text-3xs: 9px;
   --text-2xs: 10px;
@@ -113,8 +84,8 @@
   /* Radii mirrored from styles.css so workshops can import tokens without styles.css */
   --radius-xs: 0.375rem;
   --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
   /* Composer-reference workshop radii (exact prior px). */
   --radius-composer-4: 4px;
   --radius-composer-7: 7px;
@@ -147,20 +118,14 @@
 
   /* Z-index */
   --z-recessed: -1;
-  --z-base: 0;
   --z-raised: 1;
   --z-dropdown: 50;
-  --z-sticky: 100;
-  --z-overlay: 200;
-  --z-modal: 300;
-  --z-toast: 400;
   --z-veil: 2147483647;
 
   /* Opacity */
   --opacity-disabled: 0.52;
   --opacity-hover: 0.91;
   --opacity-pressed: 0.84;
-  --opacity-muted: 0.3;
   /* Host-editor chrome opacities (exact prior values). */
   --opacity-host-idle: 0.45;
   --opacity-host-search-icon: 0.65;
@@ -191,14 +156,8 @@
     0 1px 0 color-mix(in oklab, var(--ink) 5%, transparent);
   --shadow-process-key-disabled: inset 0 1px 0 color-mix(in oklab, white 35%, transparent);
   --space-px-2: 2px;
-  --space-px-5: 5px;
   --space-px-10: 10px;
-  --space-px-14: 14px;
   --space-px-20: 20px;
-  --space-px-28: 28px;
-  --space-stage-claude: 67px;
-  --space-stage-codex: 96px;
-  --space-stage-opencode: 5px;
   --text-workspace-10: 10px;
   --text-workspace-11: 11px;
   --text-workspace-13: 13px;
@@ -207,13 +166,7 @@
   --radius-workspace-6: 6px;
   --radius-workspace-8: 8px;
   --radius-workspace-10: 10px;
-  --size-workspace-dot: 6px;
-  --size-workspace-icon-sm: 14px;
-  --size-workspace-icon: 20px;
   --size-workspace-avatar: 32px;
-  --size-workspace-avatar-lg: 40px;
-  --size-workspace-control: 36px;
-  --size-workspace-color: 52px;
   --shadow-workspace-menu: 0 8px 24px rgba(0, 0, 0, 0.12);
   --z-workspace-menu: 5;
   --opacity-workspace-pulse: 0.35;

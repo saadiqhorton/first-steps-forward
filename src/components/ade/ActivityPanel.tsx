@@ -38,7 +38,7 @@ export function ActivityPanel({ session }: { session: Session }) {
           <h2 className="label-section">Agent context</h2>
           {session.manifest ? (
             <details className="card-panel mt-2 px-4 py-3 text-xs">
-              <summary className="cursor-pointer text-[13px] text-[var(--text-secondary)] tabular-nums select-none">
+              <summary className="cursor-pointer text-ui text-[var(--text-secondary)] tabular-nums select-none">
                 Agent context · {session.manifest.relevantFiles.length} candidate files
               </summary>
               <dl className="mt-3 grid min-w-0 grid-cols-[minmax(90px,120px)_minmax(0,1fr)] gap-x-3 gap-y-2 [overflow-wrap:anywhere]">

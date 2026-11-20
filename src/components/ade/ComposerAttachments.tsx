@@ -53,14 +53,14 @@ export function ComposerAttachments({
             return (
               <div
                 key={draft.key}
-                className="flex max-w-[220px] items-center gap-2 rounded-lg border border-line bg-panel px-2 py-1.5"
+                className="flex max-w-[220px] items-center gap-2 rounded-md border border-line bg-panel px-2 py-1.5"
               >
                 {draft.previewUrl ? (
                   <img src={draft.previewUrl} alt="" className="size-10 rounded object-cover" />
                 ) : (
                   <File className="size-4 shrink-0 text-dim" aria-hidden />
                 )}
-                <span className="min-w-0 truncate text-[12px]" title={name}>
+                <span className="min-w-0 truncate text-(length:--text-xs)" title={name}>
                   {name}
                   {!draft.previewUrl ? (
                     <span className="text-dim">
@@ -84,7 +84,7 @@ export function ComposerAttachments({
         </div>
       ) : null}
       {dragging ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] border border-amber/40 bg-amber/10 text-[13px] text-ink">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] border border-amber/40 bg-amber/10 text-ui text-ink">
           Drop files to attach
         </div>
       ) : null}

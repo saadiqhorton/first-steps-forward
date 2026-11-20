@@ -77,7 +77,7 @@ export function ModelPicker({
       }}
       maxLength={256}
       placeholder="e.g. provider/model-id"
-      className="mt-2 w-full rounded-lg border border-line bg-panel px-3 py-2 font-mono text-[12.5px] placeholder:text-dim/70"
+      className="mt-2 w-full rounded-md border border-line bg-panel px-3 py-2 font-mono text-ui placeholder:text-dim/70"
     />
   );
   return (
@@ -86,7 +86,7 @@ export function ModelPicker({
         Model
       </label>
       {loading ? (
-        <p className="mt-2 font-mono text-[11px] text-dim">Reading {agentName}'s model list…</p>
+        <p className="mt-2 font-mono text-caption text-dim">Reading {agentName}'s model list…</p>
       ) : result?.available ? (
         <>
           <select
@@ -105,7 +105,7 @@ export function ModelPicker({
                 onChange(next);
               }
             }}
-            className="mt-2 w-full rounded-lg border border-line bg-panel px-3 py-2 text-[13px]"
+            className="mt-2 w-full rounded-md border border-line bg-panel px-3 py-2 text-ui"
           >
             <option value="">Default (agent's configured model)</option>
             {(result.models ?? []).map((m) => (
@@ -118,11 +118,11 @@ export function ModelPicker({
           </select>
           {selectValue === OTHER && manualInput}
           {result.source === "bundled" && (
-            <p className="mt-1 font-mono text-[10.5px] text-dim">
+            <p className="mt-1 font-mono text-caption text-dim">
               Served from the CLI's offline bundled catalog — it may omit newer models.
             </p>
           )}
-          <p className="mt-1 text-[11px] leading-relaxed text-dim">
+          <p className="mt-1 text-caption leading-relaxed text-dim">
             {result.note ??
               (result.completeCatalog ? (
                 <>
@@ -142,7 +142,7 @@ export function ModelPicker({
       ) : (
         <>
           {manualInput}
-          <p className="mt-2 rounded-md bg-amber/10 px-3 py-2 text-[12px] leading-relaxed">
+          <p className="mt-2 rounded-lg bg-amber/10 px-3 py-2 text-xs leading-relaxed">
             <span className="font-medium">
               {REASON_TEXT[result?.reason ?? ""] ?? "Model listing is unavailable."}
             </span>{" "}

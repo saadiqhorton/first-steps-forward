@@ -120,7 +120,7 @@ function RowButton({
       aria-pressed={selected}
       onClick={onClick}
       onFocus={onFocus}
-      className={`flex w-full items-start gap-2 rounded-md px-2 py-[5px] text-left text-[12.5px] leading-snug ${
+      className={`flex w-full items-start gap-2 rounded-lg px-2 py-[5px] text-left text-ui leading-snug ${
         selected ? "bg-amber/10" : "hover:bg-ink/5"
       } ${disabled ? "cursor-not-allowed text-dim opacity-60" : ""}`}
     >
@@ -463,7 +463,7 @@ export function AgentPicker({
             onFocusCapture={() => setFocusCol("agent")}
           >
             {agentLocked && (
-              <p className="mb-1 rounded-md bg-amber/10 px-2 py-1.5 text-[11px] leading-snug">
+              <p className="mb-1 rounded-lg bg-amber/10 px-2 py-1.5 text-caption leading-snug">
                 {agentLocked}
               </p>
             )}
@@ -474,7 +474,7 @@ export function AgentPicker({
               return (
                 <div
                   key={agent.id}
-                  className={`mb-0.5 rounded-md px-2 py-1.5 text-[12.5px] leading-snug ${
+                  className={`mb-0.5 rounded-lg px-2 py-1.5 text-ui leading-snug ${
                     selected ? "bg-amber/10" : "hover:bg-ink/5"
                   } ${locked ? "opacity-60" : ""}`}
                 >
@@ -494,13 +494,13 @@ export function AgentPicker({
                   >
                     <AgentLogo agent={agent} />
                     <span className="min-w-0 flex-1 font-medium">{agent.name}</span>
-                    {agent.version && <span className="text-[10px] text-dim">{agent.version}</span>}
+                    {agent.version && <span className="text-2xs text-dim">{agent.version}</span>}
                     {selected && (
                       <Check className="size-3.5 shrink-0 text-amber-deep" aria-hidden />
                     )}
                   </button>
                   {status.kind !== "ready" && (
-                    <div className="ml-[22px] mt-0.5 font-mono text-[10px] text-dim">
+                    <div className="ml-[22px] mt-0.5 font-mono text-2xs text-dim">
                       {status.kind === "signin" ? (
                         <button
                           type="button"
@@ -550,7 +550,7 @@ export function AgentPicker({
             onFocusCapture={() => setFocusCol("model")}
           >
             {modelsLoading ? (
-              <p className="px-3 py-2 font-mono text-[11px] text-dim">Reading model list…</p>
+              <p className="px-3 py-2 font-mono text-caption text-dim">Reading model list…</p>
             ) : models?.available ? (
               <>
                 <div className="shrink-0 border-b border-line p-1.5">
@@ -565,14 +565,14 @@ export function AgentPicker({
                       value={modelQuery}
                       onChange={(e) => setModelQuery(e.target.value)}
                       placeholder="Search models"
-                      className="w-full rounded-md border border-line bg-paper py-1.5 pr-2 pl-8 font-mono text-[11px] placeholder:text-dim/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/50"
+                      className="w-full rounded-lg border border-line bg-paper py-1.5 pr-2 pl-8 font-mono text-caption placeholder:text-dim/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber/50"
                     />
                   </label>
                 </div>
                 <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1.5">
                   {filteredModelRows.filter((row) => row.id !== OTHER).length === 0 &&
                   modelQuery.trim() ? (
-                    <p className="px-2 py-1.5 font-mono text-[11px] text-dim">No models match.</p>
+                    <p className="px-2 py-1.5 font-mono text-caption text-dim">No models match.</p>
                   ) : null}
                   {filteredModelRows.map((row, i) => (
                     <RowButton
@@ -610,16 +610,16 @@ export function AgentPicker({
                       }}
                       maxLength={256}
                       placeholder="e.g. provider/model-id"
-                      className="mt-1 w-full rounded-md border border-line bg-paper px-2 py-1.5 font-mono text-[11px] placeholder:text-dim/70"
+                      className="mt-1 w-full rounded-lg border border-line bg-paper px-2 py-1.5 font-mono text-caption placeholder:text-dim/70"
                     />
                   )}
                   {models.source === "bundled" && (
-                    <p className="mt-1 px-2 font-mono text-[10px] text-dim">
+                    <p className="mt-1 px-2 font-mono text-2xs text-dim">
                       Offline bundled catalog — may omit newer models.
                     </p>
                   )}
                   {models.completeCatalog && (
-                    <p className="mt-1 px-2 font-mono text-[10px] text-dim">
+                    <p className="mt-1 px-2 font-mono text-2xs text-dim">
                       The models this agent reports offering.
                     </p>
                   )}
@@ -645,9 +645,9 @@ export function AgentPicker({
                   }}
                   maxLength={256}
                   placeholder="e.g. provider/model-id"
-                  className="w-full rounded-md border border-line bg-paper px-2 py-1.5 font-mono text-[11px] placeholder:text-dim/70"
+                  className="w-full rounded-lg border border-line bg-paper px-2 py-1.5 font-mono text-caption placeholder:text-dim/70"
                 />
-                <p className="mt-2 rounded-md bg-amber/10 px-2 py-1.5 text-[11px] leading-relaxed">
+                <p className="mt-2 rounded-lg bg-amber/10 px-2 py-1.5 text-caption leading-relaxed">
                   <span className="font-medium">
                     {REASON_TEXT[models?.reason ?? ""] ?? "Model listing is unavailable."}
                   </span>{" "}
@@ -682,7 +682,7 @@ export function AgentPicker({
               </RowButton>
             ))}
             {caps?.effortNote ? (
-              <p className="mt-1 px-2 font-mono text-[10px] leading-snug text-dim">
+              <p className="mt-1 px-2 font-mono text-2xs leading-snug text-dim">
                 {caps.effortNote}
               </p>
             ) : null}
@@ -712,9 +712,7 @@ export function AgentPicker({
               </RowButton>
             ))}
             {caps?.speedNote ? (
-              <p className="mt-1 px-2 font-mono text-[10px] leading-snug text-dim">
-                {caps.speedNote}
-              </p>
+              <p className="mt-1 px-2 font-mono text-2xs leading-snug text-dim">{caps.speedNote}</p>
             ) : null}
           </div>
 
@@ -753,9 +751,7 @@ export function AgentPicker({
           }}
         />
         <div className="flex min-w-[720px] items-start gap-4 border-t border-line px-3 py-2.5">
-          <p className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-dim">
-            {updateError || note}
-          </p>
+          <p className="min-w-0 flex-1 text-xs leading-relaxed text-dim">{updateError || note}</p>
           <button
             type="button"
             disabled={checkingUpdates}
@@ -774,12 +770,12 @@ export function AgentPicker({
                 )
                 .finally(() => setCheckingUpdates(false));
             }}
-            className="flex shrink-0 items-center gap-1 text-[11.5px] text-dim hover:text-ink disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1 text-(length:--text-xs) text-dim hover:text-ink disabled:opacity-50"
           >
             <RefreshCw className={`size-3 ${checkingUpdates ? "animate-spin" : ""}`} aria-hidden />
             {checkingUpdates ? "Checking…" : "Check for updates"}
           </button>
-          <label className="flex shrink-0 items-center gap-2 text-[11.5px] text-dim">
+          <label className="flex shrink-0 items-center gap-2 text-(length:--text-xs) text-dim">
             <input
               type="checkbox"
               checked={closeAfter}

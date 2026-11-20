@@ -21,7 +21,8 @@ export function summarizeChecks(checks: Check[]) {
 }
 
 export function ChecksList({ checks }: { checks: Check[] }) {
-  if (!checks.length) return <p className="text-[12px] text-dim">Checks haven't run yet.</p>;
+  if (!checks.length)
+    return <p className="text-(length:--text-xs) text-dim">Checks haven't run yet.</p>;
   const s = summarizeChecks(checks);
   const sharedSkipDetail =
     checks.length > 1 &&
@@ -32,16 +33,16 @@ export function ChecksList({ checks }: { checks: Check[] }) {
 
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2 font-mono text-[11px] text-dim">
+      <div className="mb-2 flex items-center gap-2 font-mono text-caption text-dim">
         <span>{s.text}</span>
         <span
-          className={`ml-auto rounded-sm px-1.5 py-0.5 text-[11px] ${s.verified ? "bg-teal/15 text-teal-deep" : "bg-amber/15 text-amber-deep"}`}
+          className={`ml-auto rounded-sm px-1.5 py-0.5 text-caption ${s.verified ? "bg-teal/15 text-teal-deep" : "bg-amber/15 text-amber-deep"}`}
         >
           {s.verified ? "Verified by checks" : "Not fully verified"}
         </span>
       </div>
       {sharedSkipDetail ? (
-        <p className="mb-2 rounded-md border border-line bg-paper px-3 py-2 text-[12.5px] leading-relaxed text-dim">
+        <p className="mb-2 rounded-lg border border-line bg-paper px-3 py-2 text-ui leading-relaxed text-dim">
           {sharedSkipDetail}
         </p>
       ) : null}
@@ -50,14 +51,14 @@ export function ChecksList({ checks }: { checks: Check[] }) {
           const st = STYLE[c.status];
           return (
             <li key={c.name} className="flex items-center gap-3 px-3 py-2">
-              <span className={`w-5 font-mono text-[12px] ${st.cls}`} aria-hidden>
+              <span className={`w-5 font-mono text-(length:--text-xs) ${st.cls}`} aria-hidden>
                 {st.glyph}
               </span>
-              <span className="text-[13px]">{c.name}</span>
+              <span className="text-ui">{c.name}</span>
               <span className="ml-auto text-right">
-                <span className={`block text-[11px] font-medium ${st.cls}`}>{st.label}</span>
+                <span className={`block text-caption font-medium ${st.cls}`}>{st.label}</span>
                 {!sharedSkipDetail && c.detail ? (
-                  <span className="block max-w-[520px] whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-dim">
+                  <span className="block max-w-[520px] whitespace-pre-wrap break-words font-mono text-caption leading-snug text-dim">
                     {c.detail}
                   </span>
                 ) : null}

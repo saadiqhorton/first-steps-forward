@@ -17,10 +17,10 @@
 - Sliding selection highlight (`layoutId="selection"`)
 
 ## 4. Tokens used
-- `--border` / `--color-border`, `--surface-muted` / `--color-surface-muted`, `--surface` / `--color-surface`
-- `--text-muted` / `--color-text-muted`, `--foreground` / `--color-text`
+- `--border`, `--surface-muted`, `--surface`
+- `--text-muted`, `--foreground`
 - `--radius-control`, `--control-height-sm`, `--text-sm`
-- `--shadow-resting`, `--duration-fast`, `--ease-standard`, `--focus-ring` / `--color-focus-ring`
+- `--shadow-resting`, `--duration-fast`, `--ease-standard`, `--focus-ring`
 
 ## 5. Props/API
 - `options: Segment[]` where `Segment = { value: string; label: string; accessory?: ReactNode }`

@@ -153,7 +153,7 @@ export function AgentPresets({
       <div className="flex items-center justify-end gap-2">
         {presets.length > 0 && (
           <>
-            <label htmlFor="agent-preset" className="text-[11px] text-dim">
+            <label htmlFor="agent-preset" className="text-caption text-dim">
               Saved presets
             </label>
             <select
@@ -161,7 +161,7 @@ export function AgentPresets({
               value={selected}
               disabled={applying}
               onChange={(event) => setSelected(event.target.value)}
-              className="max-w-48 rounded-md border border-line bg-panel px-2 py-1 text-[11px]"
+              className="max-w-48 rounded-lg border border-line bg-panel px-2 py-1 text-caption"
             >
               <option value="">Choose a preset</option>
               {presets.map((preset) => (
@@ -178,7 +178,7 @@ export function AgentPresets({
               type="button"
               disabled={!selected || applying}
               onClick={() => void apply(selected)}
-              className="btn-quiet px-2 py-1 text-[11px] disabled:opacity-40"
+              className="btn-quiet px-2 py-1 text-caption disabled:opacity-40"
             >
               {applying ? "Applying…" : "Apply"}
             </button>
@@ -202,7 +202,7 @@ export function AgentPresets({
               setNaming(true);
               setError("");
             }}
-            className="btn-quiet flex items-center gap-1 px-2 py-1 text-[11px]"
+            className="btn-quiet flex items-center gap-1 px-2 py-1 text-caption"
           >
             <Plus className="size-3" aria-hidden />
             Save as preset
@@ -219,13 +219,13 @@ export function AgentPresets({
               onChange={(event) => setName(event.target.value)}
               maxLength={60}
               placeholder="Preset name"
-              className="w-36 rounded-md border border-line bg-panel px-2 py-1 text-[11px]"
+              className="w-36 rounded-lg border border-line bg-panel px-2 py-1 text-caption"
               autoFocus
             />
             <button
               type="submit"
               disabled={!name.trim()}
-              className="btn-amber px-2 py-1 text-[11px] disabled:opacity-40"
+              className="btn-amber px-2 py-1 text-caption disabled:opacity-40"
             >
               Save
             </button>
@@ -235,7 +235,7 @@ export function AgentPresets({
                 setNaming(false);
                 setError("");
               }}
-              className="btn-quiet px-2 py-1 text-[11px]"
+              className="btn-quiet px-2 py-1 text-caption"
             >
               Cancel
             </button>
@@ -243,7 +243,7 @@ export function AgentPresets({
         )}
       </div>
       {error && (
-        <p role="alert" className="mt-1 text-right text-[11px] text-danger">
+        <p role="alert" className="mt-1 text-right text-caption text-danger">
           {error}
         </p>
       )}

@@ -18,7 +18,7 @@
 
 ## 4. Tokens used
 - List: `bg-muted`, `text-muted-foreground`, `rounded-lg`
-- Active trigger: `bg-background` / `--color-bg`, `text-foreground` / `--color-text`, shadow
+- Active trigger: `bg-background` / `--background`, `text-foreground` / `--foreground`, shadow
 - Focus rings: `ring-ring`, `ring-offset-background`
 - Disabled opacity `50` / `--opacity-disabled`
 

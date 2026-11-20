@@ -18,8 +18,8 @@
 - Sibling chrome: `.process-key` in `processes.css` (raised keycap for inline process chips elsewhere in Processes UI)
 
 ## 4. Tokens used
-- AdeRow: Tailwind `text-dim` / `--color-text-muted`, teal dot, hover `bg-ink/[0.03]`
-- `.process-key`: `--panel` / `--color-surface`, `--line` / `--color-border`, `--ink` mixes; prefers `--shadow-process-key*` Layer 2 aliases when migrating styles
+- AdeRow: Tailwind `text-dim` / `--text-muted`, teal dot, hover `bg-ink/[0.03]`
+- `.process-key`: `--panel` / `--surface`, `--line` / `--border`, `--ink` mixes; prefers `--shadow-process-key*` Layer 2 aliases when migrating styles
 
 ## 5. Props/API
 - `name: string`

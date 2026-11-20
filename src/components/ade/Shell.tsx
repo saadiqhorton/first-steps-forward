@@ -549,7 +549,7 @@ function ShellInner({
       aria-label={dockPref === "side" ? "Dock to bottom" : "Dock to side"}
       title={dockPref === "side" ? "Dock to bottom" : "Dock to side"}
       onClick={() => setDock(dockPref === "side" ? "bottom" : "side")}
-      className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+      className="grid size-7 place-items-center rounded-lg text-dim hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
     >
       {dockPref === "side" ? (
         <PanelBottom className="size-3.5" aria-hidden />
@@ -564,7 +564,7 @@ function ShellInner({
       aria-label="Collapse right panel"
       title="Collapse right panel"
       onClick={collapseRight}
-      className="grid size-7 place-items-center rounded-md text-dim hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+      className="grid size-7 place-items-center rounded-lg text-dim hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
     >
       {effectiveDock === "side" ? (
         <PanelRightClose className="size-3.5" aria-hidden />
@@ -627,7 +627,7 @@ function ShellInner({
             onToneChange={setComputerTone}
           />
         ) : (
-          <div className="grid flex-1 place-items-center px-5 text-center font-mono text-[11px] text-dim">
+          <div className="grid flex-1 place-items-center px-5 text-center font-mono text-caption text-dim">
             Add a project to give agents a browser.
           </div>
         )}
@@ -642,7 +642,7 @@ function ShellInner({
         {activeProject ? (
           <ProcessesPane projectId={activeProject.id} active={rightTab === "processes"} />
         ) : (
-          <div className="grid flex-1 place-items-center px-5 text-center font-mono text-[11px] text-dim">
+          <div className="grid flex-1 place-items-center px-5 text-center font-mono text-caption text-dim">
             Add a project to keep its processes.
           </div>
         )}
@@ -658,7 +658,7 @@ function ShellInner({
           {terminalCloseError && (
             <div
               role="alert"
-              className="absolute bottom-10 left-3 right-3 z-10 border border-[#e1ad61]/40 bg-[#282320] px-2 py-1 font-mono text-[10px] text-[#e1ad61]"
+              className="absolute bottom-10 left-3 right-3 z-10 border border-(--color-terminal-prompt)/40 bg-[#282320] px-2 py-1 font-mono text-2xs text-(--color-terminal-prompt)"
             >
               {terminalCloseError}
             </div>
@@ -673,7 +673,7 @@ function ShellInner({
               registerClose={registerTerminalClose}
             />
           ) : (
-            <div className="grid flex-1 place-items-center bg-[#1d2928] px-5 text-center font-mono text-[11px] text-white/60">
+            <div className="grid flex-1 place-items-center bg-(--color-terminal-bg) px-5 text-center font-mono text-caption text-white/60">
               <TextShimmer active={!!activeProject}>
                 {activeProject ? "Opening terminal…" : "Add a project to open a terminal."}
               </TextShimmer>

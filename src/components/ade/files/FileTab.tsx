@@ -136,7 +136,7 @@ export function FileTab({ projectId, path, visible, onDirtyChange }: Props) {
               )}
               <button
                 type="button"
-                className="btn-amber inline-flex h-7 items-center gap-1.5 px-2.5 text-[12px] disabled:opacity-45"
+                className="btn-amber inline-flex h-7 items-center gap-1.5 px-2.5 text-(length:--text-xs) disabled:opacity-45"
                 disabled={!dirty || saving}
                 onClick={() => void saveFile()}
               >
@@ -168,7 +168,7 @@ export function FileTab({ projectId, path, visible, onDirtyChange }: Props) {
           )}
           <button
             type="button"
-            className="btn-amber inline-flex h-7 items-center gap-1.5 px-2.5 text-[12px] disabled:opacity-45"
+            className="btn-amber inline-flex h-7 items-center gap-1.5 px-2.5 text-(length:--text-xs) disabled:opacity-45"
             disabled={!dirty || saving}
             onClick={() => void saveFile()}
           >
@@ -183,11 +183,11 @@ export function FileTab({ projectId, path, visible, onDirtyChange }: Props) {
       </div>
 
       {opening && !doc ? (
-        <div className="grid flex-1 place-items-center font-mono text-[12px] text-dim">
+        <div className="grid flex-1 place-items-center font-mono text-(length:--text-xs) text-dim">
           Opening file…
         </div>
       ) : error && !doc ? (
-        <div className="grid flex-1 place-items-center px-6 text-center font-mono text-[12px] text-amber">
+        <div className="grid flex-1 place-items-center px-6 text-center font-mono text-(length:--text-xs) text-amber-deep">
           {error}
         </div>
       ) : doc && markdown && mode === "document" ? (
@@ -198,7 +198,7 @@ export function FileTab({ projectId, path, visible, onDirtyChange }: Props) {
         <div className="ed-code-area ed-code-workbench host-editor-code min-h-0 flex-1">
           <Suspense
             fallback={
-              <div className="grid h-full place-items-center font-mono text-[12px] text-dim">
+              <div className="grid h-full place-items-center font-mono text-(length:--text-xs) text-dim">
                 Loading editor…
               </div>
             }

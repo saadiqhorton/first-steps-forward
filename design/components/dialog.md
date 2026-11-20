@@ -17,8 +17,8 @@
 - `DialogHeader`, `DialogFooter`, `DialogTitle`, `DialogDescription`
 
 ## 4. Tokens used
-- Overlay: `bg-scrim` / `--color-scrim`, `z-50` (prefer `--z-modal` in new CSS)
-- Content: `bg-background` / `--color-bg`, border, `shadow-lg` → `--shadow-floating`
+- Overlay: `bg-scrim` / `--scrim`, `z-50`
+- Content: `bg-background` / `--background`, border, `shadow-lg` → `--shadow-floating`
 - Close: opacity hover, `ring-ring` focus; open accent wash utilities
 
 ## 5. Props/API

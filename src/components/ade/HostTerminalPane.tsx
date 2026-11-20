@@ -309,7 +309,7 @@ export function HostTerminalPane({
           {projectName}
         </div>
       </div>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2 font-mono text-[10px]">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2 font-mono text-2xs">
         <span className="truncate text-[#e1ad61]">›_ {shell || "Console"}</span>
         <div className="flex shrink-0 items-center gap-2">
           <span className={status === "connected" ? "text-[#8dc4b7]" : "text-white/50"}>
@@ -321,7 +321,7 @@ export function HostTerminalPane({
         <div ref={ref} className="h-full w-full min-w-0" aria-label="Interactive host terminal" />
       </div>
       <div className="shrink-0 border-t border-white/10 px-3 py-2">
-        <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
+        <div className="flex items-center justify-between gap-2 font-mono text-2xs">
           <span className="min-w-0 truncate text-white/45" title={projectPath}>
             {projectPath}
           </span>
@@ -338,7 +338,7 @@ export function HostTerminalPane({
           )}
         </div>
         {message && (
-          <div role="status" className="mt-1 font-mono text-[10px] text-[#e1ad61]">
+          <div role="status" className="mt-1 font-mono text-2xs text-[#e1ad61]">
             {message}
           </div>
         )}

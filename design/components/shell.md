@@ -20,7 +20,7 @@
 - Shell-owned dialogs (add project, agents) via `ShellContext`
 
 ## 4. Tokens used
-- Layout uses ADE utility classes: `bg-panel` / `--color-surface`, borders via `--line` / `--color-border`
+- Layout uses ADE utility classes: `bg-panel` / `--surface`, borders via `--line` / `--border`
 - Seam/collapse hit sizes: `--size-hit-seam`, `--size-hit-collapse` (global CSS)
 - Panel min sizes are pixel constants in source (`RIGHT_MIN_PX`, `BOTTOM_MIN_PX`), not tokens
 

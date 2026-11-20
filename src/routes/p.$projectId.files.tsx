@@ -353,7 +353,7 @@ function FilesPage() {
                       aria-selected={active}
                       title={path}
                       onClick={() => setTabs((previous) => ({ ...previous, active: path }))}
-                      className="flex items-center gap-1.5 pl-3 pr-1 font-mono text-[11px] hover:text-ink"
+                      className="flex items-center gap-1.5 pl-3 pr-1 font-mono text-caption hover:text-ink"
                     >
                       {editorFileIcon(path)}
                       <span>{path.split("/").at(-1)}</span>
@@ -397,7 +397,7 @@ function FilesPage() {
                 <Suspense
                   key={path}
                   fallback={
-                    <div className="grid min-h-0 flex-1 place-items-center font-mono text-[12px] text-dim">
+                    <div className="grid min-h-0 flex-1 place-items-center font-mono text-(length:--text-xs) text-dim">
                       Opening file…
                     </div>
                   }

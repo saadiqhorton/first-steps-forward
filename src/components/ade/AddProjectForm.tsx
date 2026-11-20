@@ -31,7 +31,7 @@ const joinPath = (parent: string, name: string) =>
   `${parent.replace(/[\\/]+$/, "")}${parent.includes("\\") ? "\\" : "/"}${name}`;
 
 const inputClass =
-  "w-full rounded-md border border-line bg-panel px-3 py-2.5 text-[13px] placeholder:text-dim/70";
+  "w-full rounded-lg border border-line bg-panel px-3 py-2.5 text-ui placeholder:text-dim/70";
 
 export function AddProjectForm({
   onDone,
@@ -151,7 +151,7 @@ export function AddProjectForm({
         <button
           type="button"
           onClick={() => void browse("parent")}
-          className="btn-quiet shrink-0 px-3 text-[12px]"
+          className="btn-quiet shrink-0 px-3 text-(length:--text-xs)"
         >
           Browse…
         </button>
@@ -195,7 +195,7 @@ export function AddProjectForm({
           </TabsTrigger>
         </TabsList>
       </Tabs>
-      <p className="mt-3 text-[13px] text-dim">{DESCRIPTIONS[mode]}</p>
+      <p className="mt-3 text-ui text-dim">{DESCRIPTIONS[mode]}</p>
 
       {mode === "folder" && (
         <>
@@ -215,7 +215,7 @@ export function AddProjectForm({
             <button
               type="button"
               onClick={() => void browse("folder")}
-              className="btn-quiet shrink-0 px-3 text-[12px]"
+              className="btn-quiet shrink-0 px-3 text-(length:--text-xs)"
             >
               Browse…
             </button>
@@ -262,11 +262,11 @@ export function AddProjectForm({
             className={`mt-2 ${inputClass}`}
           />
           {parent.trim() && cloneFolder && (
-            <p className="mt-3 break-all font-mono text-[11px] text-dim">
+            <p className="mt-3 break-all font-mono text-caption text-dim">
               → {joinPath(parent.trim(), cloneFolder)}
             </p>
           )}
-          <p className="mt-3 text-[11px] text-dim">
+          <p className="mt-3 text-caption text-dim">
             Private repository? Sign in once with <code className="font-mono">gh auth login</code>{" "}
             or use an SSH address — ADE never asks for or stores a password.
           </p>
@@ -289,11 +289,11 @@ export function AddProjectForm({
             className={`mt-2 ${inputClass}`}
           />
           {parent.trim() && newFolder && (
-            <p className="mt-3 break-all font-mono text-[11px] text-dim">
+            <p className="mt-3 break-all font-mono text-caption text-dim">
               → {joinPath(parent.trim(), newFolder)}
             </p>
           )}
-          <label className="mt-4 flex items-center gap-2 text-[13px]">
+          <label className="mt-4 flex items-center gap-2 text-ui">
             <input
               type="checkbox"
               checked={initGit}
@@ -305,16 +305,18 @@ export function AddProjectForm({
         </>
       )}
 
-      {error && <p className="mt-4 rounded bg-danger/10 p-3 text-[12px] text-danger">{error}</p>}
+      {error && (
+        <p className="mt-4 rounded bg-danger/10 p-3 text-(length:--text-xs) text-danger">{error}</p>
+      )}
       <div className="mt-6 flex gap-2">
         <button
           onClick={() => void submit()}
           disabled={!ready || busy}
-          className="btn-amber px-4 py-2 text-[13px]"
+          className="btn-amber px-4 py-2 text-ui"
         >
           {submitLabel}
         </button>
-        <button onClick={cancel} disabled={busy} className="btn-quiet px-4 py-2 text-[13px]">
+        <button onClick={cancel} disabled={busy} className="btn-quiet px-4 py-2 text-ui">
           Cancel
         </button>
       </div>

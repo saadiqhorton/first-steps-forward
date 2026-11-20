@@ -1436,7 +1436,7 @@ export function BrowserSurface({
             .map((item) => (
               <div
                 key={item.id}
-                className="flex items-center gap-2 rounded-lg border border-line bg-panel p-2 text-xs shadow-lg"
+                className="flex items-center gap-2 rounded-md border border-line bg-panel p-2 text-xs shadow-lg"
               >
                 <span className="min-w-0 flex-1 truncate" title={item.fileName}>
                   Downloaded {item.fileName}
@@ -1578,7 +1578,7 @@ export function BrowserSurface({
         <div
           role="toolbar"
           aria-label="Annotation tools"
-          className="absolute top-2 left-2 right-2 z-[10] flex items-center gap-1 overflow-x-auto rounded-lg border border-line bg-panel p-1 text-xs shadow-lg"
+          className="absolute top-2 left-2 right-2 z-[10] flex items-center gap-1 overflow-x-auto rounded-md border border-line bg-panel p-1 text-xs shadow-lg"
         >
           {(
             [
@@ -1635,7 +1635,7 @@ export function BrowserSurface({
           ref={editorRef}
           role="group"
           aria-label="Annotation feedback"
-          className="absolute z-[12] grid w-[min(25rem,calc(100%-1rem))] gap-2 rounded-lg border border-line bg-panel p-2 text-xs shadow-xl"
+          className="absolute z-[12] grid w-[min(25rem,calc(100%-1rem))] gap-2 rounded-md border border-line bg-panel p-2 text-xs shadow-xl"
           style={
             editorPosition
               ? { left: editorPosition.x, top: editorPosition.y }
@@ -1734,7 +1734,7 @@ export function BrowserSurface({
       {annotationMode !== "off" && styleOpen ? (
         <div
           data-annotation-style
-          className="absolute top-14 bottom-2 left-2 z-[11] grid h-fit max-h-[calc(100%-4rem)] w-[min(18rem,calc(100%-1rem))] gap-2 overflow-y-auto rounded-lg border border-line bg-panel p-2 text-xs shadow-lg"
+          className="absolute top-14 bottom-2 left-2 z-[11] grid h-fit max-h-[calc(100%-4rem)] w-[min(18rem,calc(100%-1rem))] gap-2 overflow-y-auto rounded-md border border-line bg-panel p-2 text-xs shadow-lg"
         >
           {marks.find((item) => item.element)?.element ? (
             <BrowserAnnotationStyles
@@ -1765,7 +1765,7 @@ export function BrowserSurface({
           {emptyState ?? (
             <div className="grid justify-items-center gap-2">
               <Globe className="size-5 text-dim" strokeWidth={1.5} aria-hidden />
-              <p className="m-0 text-[13px] text-[var(--text-secondary)]">No preview yet</p>
+              <p className="m-0 text-ui text-[var(--text-secondary)]">No preview yet</p>
             </div>
           )}
         </div>

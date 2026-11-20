@@ -1,15 +1,38 @@
 # Typography
 
-Type scale, families, leading, tracking, and weights. Font families exist as Arc/ADE names (`--font-display` / `--font-body` / `--font-mono`) and Layer 2 aliases (`--font-family-*`). Prefer the aliases in new component CSS; both are Layer 2 by convention.
+Type scale, families, leading, tracking, and weights. Font families exist as Arc/ADE names (`--font-display` / `--font-body` / `--font-mono`) and the Layer 2 alias `--font-family-mono`. Prefer these names in new component CSS.
 
-Sources: type scale / leading / tracking in `src/components/arc/foundation.css`; ADE overrides `--tracking-body: 0` and font face bindings in `src/styles.css`; weights + `--font-family-*` in `src/tokens.css`.
+Sources: type scale / leading / tracking in `src/components/arc/foundation.css`; ADE overrides `--tracking-body: 0` and font face bindings in `src/styles.css`; the Tailwind type-scale utilities (`text-3xs` … `text-2xl`) in the `@theme` block of `src/styles.css`; weights and `--font-family-mono` in `src/tokens.css`.
+
+## Type scale
+
+Use these Tailwind utilities for font size. They set font-size only (no line-height).
+
+| Utility | Size | When to use |
+| --- | --- | --- |
+| `text-3xs` | 9px | Workshop mono / tiny chrome labels |
+| `text-2xs` | 10px | Dense mono labels, badges |
+| `text-caption` | 11px | Captions, host-editor chrome, meta |
+| `text-xs` | 12px | Meta, mono labels, dense chrome |
+| `text-ui` | 13px | Workbench UI text between xs and sm |
+| `text-sm` | 14px | Default control / UI text |
+| `text-base` | 16px | Comfortable body reading |
+| `text-lg` | 18px | Emphasized body / small headings |
+| `text-xl` | 22px | Subsection titles |
+| `text-2xl` | 28px | Pane titles |
+
+Rules:
+
+- Use these utilities, never `text-[Npx]` or `text-[length:…]` literals. `npm run token-audit` flags them.
+- `text-xs` and `text-sm` carry the inherited line-height from the Arc scale. When you need the size without a `leading-*` class, write `text-(length:--text-xs)` or `text-(length:--text-sm)` so the line-height is kept.
+- `text-3xs`, `text-2xs`, `text-caption` and `text-ui` have no line-height companion. Pair them with an explicit `leading-*` class when the line box matters.
 
 ## Tokens
 
 | Name | Resolves to | When to use |
 | --- | --- | --- |
-| `--font-family-display` / `--font-display` | `"Geist", …` (via `--font-geist`) | Titles, display headings |
-| `--font-family-body` / `--font-body` | `"Inter", …` (via `--font-inter`) | UI body, labels, forms |
+| `--font-display` | `"Geist", …` (via `--font-geist`) | Titles, display headings |
+| `--font-body` | `"Inter", …` (via `--font-inter`) | UI body, labels, forms |
 | `--font-family-mono` / `--font-mono` | `"IBM Plex Mono", ui-monospace, monospace` | Paths, ids, code snippets, figures |
 | `--font-weight-regular` | `400` | Default body |
 | `--font-weight-medium` | `500` | Labels, buttons, section titles |
@@ -30,16 +53,16 @@ Sources: type scale / leading / tracking in `src/components/arc/foundation.css`;
 
 ## Light / dark
 
-Typography tokens do not change with theme. Contrast is handled by `--color-text*` / `--color-deck*`.
+Typography tokens do not change with theme. Contrast is handled by `--foreground` / `--text-muted` and `--deck` / `--deck-foreground`.
 
 ## Do
 
-- Use `--font-family-*` (or `--font-*`) with `--text-*` + `--leading-*` + `--tracking-*` together.
-- Keep workbench UI mostly `--text-xs` / `--text-sm` with `--font-weight-medium` for chrome.
+- Use `--font-display` / `--font-body` / `--font-family-mono` with `--text-*` + `--leading-*` + `--tracking-*` together.
+- Keep workbench UI mostly `text-xs` / `text-sm` / `text-ui` with `--font-weight-medium` for chrome.
 - Use mono for machine-readable strings (paths, model ids, hashes).
 
 ## Don't
 
 - Don't introduce new font families or hard-code `Inter` / `Geist` string literals in components.
 - Don't pair `--tracking-display` with body copy.
-- Don't jump to `--text-4xl` / `--text-5xl` inside dense ADE panes.
+- Don't use `text-4xl` / `text-5xl` inside dense ADE panes.

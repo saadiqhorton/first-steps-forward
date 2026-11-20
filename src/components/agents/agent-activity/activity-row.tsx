@@ -29,7 +29,7 @@ function StepRow({ item }: { item: AgentActivityStep }) {
   const state = item.status ?? "complete";
 
   return (
-    <div className="flex min-h-7 items-start gap-2.5 rounded-md px-1.5 py-1">
+    <div className="flex min-h-7 items-start gap-2.5 rounded-lg px-1.5 py-1">
       <span
         aria-hidden="true"
         className="mt-0.5 grid size-4 shrink-0 place-items-center text-muted-foreground/70"
@@ -66,7 +66,7 @@ function StepRow({ item }: { item: AgentActivityStep }) {
 
 function TextRow({ item }: { item: AgentActivityText }) {
   return (
-    <div className="rounded-md px-1.5 py-1 leading-5 text-muted-foreground">{item.content}</div>
+    <div className="rounded-lg px-1.5 py-1 leading-5 text-muted-foreground">{item.content}</div>
   );
 }
 
@@ -86,7 +86,7 @@ function SearchResultRow({ result }: { result: AgentSearchResult }) {
     </>
   );
   const className = cn(
-    "flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors",
+    "flex min-h-7 items-center gap-2 rounded-lg px-1.5 py-1 text-left outline-none transition-colors",
     result.url && "focus-visible:ring-2 focus-visible:ring-ring",
   );
 
@@ -114,7 +114,7 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
 
   return (
     <div className="space-y-0.5">
-      <div className="flex min-h-7 items-center gap-2.5 rounded-md px-1.5 py-1 text-muted-foreground">
+      <div className="flex min-h-7 items-center gap-2.5 rounded-lg px-1.5 py-1 text-muted-foreground">
         <Search aria-hidden="true" className="size-4 shrink-0" strokeWidth={1.7} />
         <span className="min-w-0 truncate">{item.query}</span>
       </div>
@@ -167,7 +167,7 @@ function ToolRow({ item }: { item: AgentActivityTool }) {
   const action = item.action.charAt(0).toUpperCase() + item.action.slice(1);
 
   return (
-    <div className="flex min-h-8 min-w-0 items-center gap-2.5 rounded-md px-1.5 py-0.5 leading-5">
+    <div className="flex min-h-8 min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-0.5 leading-5">
       <span
         aria-hidden="true"
         className="grid size-4 shrink-0 place-items-center text-muted-foreground/70"
@@ -175,7 +175,7 @@ function ToolRow({ item }: { item: AgentActivityTool }) {
         <ActionIcon action={item.action} />
       </span>
       <span className="shrink-0 font-medium text-foreground/90">{action}</span>
-      <span className="min-w-0 flex-1 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
+      <span className="min-w-0 flex-1 truncate rounded-md bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
         {item.target}
       </span>
       {typeof item.additions === "number" || typeof item.deletions === "number" ? (
@@ -203,13 +203,13 @@ function TraceIcon({ kind }: { kind: AgentActivityTrace["kind"] }) {
 
 function TraceRow({ item }: { item: AgentActivityTrace }) {
   return (
-    <div className="grid min-h-8 grid-cols-[1rem_auto_minmax(0,1fr)] items-center gap-2.5 rounded-md px-1.5 py-0.5">
+    <div className="grid min-h-8 grid-cols-[1rem_auto_minmax(0,1fr)] items-center gap-2.5 rounded-lg px-1.5 py-0.5">
       <span aria-hidden="true" className="grid size-4 place-items-center text-muted-foreground/70">
         {item.icon ?? <TraceIcon kind={item.kind} />}
       </span>
       <span className="font-medium text-foreground/90">{item.label}</span>
       {item.detail ? (
-        <span className="min-w-0 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
+        <span className="min-w-0 truncate rounded-md bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
           {item.detail}
         </span>
       ) : (

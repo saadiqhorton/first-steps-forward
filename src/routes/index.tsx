@@ -29,14 +29,14 @@ function ProjectHome() {
     return (
       <main className="flex min-w-0 flex-1 flex-col items-center justify-center px-8 text-center">
         <h1 className="heading-display text-4xl">A quieter place to build</h1>
-        <p className="mt-3 max-w-md text-[14px] leading-relaxed text-dim">
+        <p className="mt-3 max-w-md text-sm leading-relaxed text-dim">
           Add a local folder to see its Git status, start a real coding-agent CLI, review the
           working-tree diff, and run its development server.
         </p>
-        <Link to="/projects/add" className="btn-amber mt-6 px-5 py-2.5 text-[14px]">
+        <Link to="/projects/add" className="btn-amber mt-6 px-5 py-2.5 text-(length:--text-sm)">
           + Add your first project
         </Link>
-        <p className="mt-4 font-mono text-[10px] text-dim">
+        <p className="mt-4 font-mono text-2xs text-dim">
           Everything stays on this machine. No ADE account or hosted relay.
         </p>
       </main>

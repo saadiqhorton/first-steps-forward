@@ -60,7 +60,7 @@ export function ProjectFilesGrid({
                   />
                 )}
               </span>
-              <span className="line-clamp-2 max-w-full text-[12px] leading-4 text-ink [overflow-wrap:anywhere]">
+              <span className="line-clamp-2 max-w-full text-xs leading-4 text-ink [overflow-wrap:anywhere]">
                 {entry.name}
                 {folder && <span className="sr-only">, folder</span>}
               </span>
@@ -74,7 +74,7 @@ export function ProjectFilesGrid({
                 aria-label={`Delete ${entry.path}`}
                 title="Delete file"
                 onClick={() => onRemoveFile(entry.path)}
-                className="absolute top-1 right-1 grid size-6 place-items-center rounded-md text-dim opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 hover:bg-ink/[0.06] hover:text-danger focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none [@media(hover:none)]:opacity-100"
+                className="absolute top-1 right-1 grid size-6 place-items-center rounded-lg text-dim opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 hover:bg-ink/[0.06] hover:text-danger focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none [@media(hover:none)]:opacity-100"
               >
                 <Trash2 size={12} aria-hidden />
               </button>

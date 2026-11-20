@@ -25,7 +25,7 @@ type Props = {
 };
 
 const ICON_BUTTON =
-  "grid size-7 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none";
+  "grid size-7 shrink-0 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none";
 
 const NO_DOCUMENTS: ProjectDocument[] = [];
 const NO_ENTRIES: EditorEntry[] = [];
@@ -109,19 +109,19 @@ export function FilesHome({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 @lg:px-6 @container">
       {error && (
-        <p role="alert" className="mb-4 font-mono text-[12px] text-amber">
+        <p role="alert" className="mb-4 font-mono text-(length:--text-xs) text-amber-deep">
           {error}
         </p>
       )}
 
       <section>
-        <h2 className="text-[13px] font-medium text-ink">Documents</h2>
+        <h2 className="text-ui font-medium text-ink">Documents</h2>
         {loadingDocs ? (
-          <TextShimmer as="p" className="mt-3 text-[13px] text-dim">
+          <TextShimmer as="p" className="mt-3 text-ui text-dim">
             Loading documents…
           </TextShimmer>
         ) : documents.length === 0 ? (
-          <p className="mt-3 text-[13px] text-dim">No Markdown documents in this project yet.</p>
+          <p className="mt-3 text-ui text-dim">No Markdown documents in this project yet.</p>
         ) : (
           <div className="mt-3 grid gap-3 grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]">
             {documents.map((doc, i) => {
@@ -139,12 +139,12 @@ export function FilesHome({
                     {preview ? (
                       <MarkdownDocument content={preview} compact />
                     ) : (
-                      <p className="text-[11px] text-dim">No preview</p>
+                      <p className="text-caption text-dim">No preview</p>
                     )}
                   </div>
                   <div className="flex items-baseline justify-between gap-2 border-t border-line pt-2">
-                    <span className="truncate font-mono text-[11px] text-ink">{doc.name}</span>
-                    <span className="shrink-0 font-mono text-[10px] text-dim">
+                    <span className="truncate font-mono text-caption text-ink">{doc.name}</span>
+                    <span className="shrink-0 font-mono text-2xs text-dim">
                       {timeAgo(now, doc.modifiedAt)}
                     </span>
                   </div>
@@ -157,14 +157,14 @@ export function FilesHome({
 
       <section className="mt-8">
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="shrink-0 text-[13px] font-medium text-ink">Project files</h2>
+          <h2 className="shrink-0 text-ui font-medium text-ink">Project files</h2>
           <nav aria-label="Folder path" className="flex min-w-0 flex-wrap items-center gap-0.5">
             <button
               type="button"
               onClick={() => openFolder("")}
               aria-current={cwd === "" ? "location" : undefined}
               title={cwd ? `Back to ${projectName}` : projectName}
-              className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[13px] text-ink transition-colors hover:bg-ink/[0.04] focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none"
+              className="flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-0.5 text-ui text-ink transition-colors hover:bg-ink/[0.04] focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none"
             >
               <span
                 className={`grid size-5 shrink-0 place-items-center rounded-xs font-mono text-xs font-medium ${colors.bg} ${colors.fg}`}
@@ -186,7 +186,7 @@ export function FilesHome({
                     type="button"
                     onClick={() => openFolder(path)}
                     aria-current={last ? "location" : undefined}
-                    className={`max-w-[12rem] truncate rounded-md px-1.5 py-0.5 text-[13px] transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none ${
+                    className={`max-w-[12rem] truncate rounded-lg px-1.5 py-0.5 text-ui transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none ${
                       last ? "text-ink" : "text-dim"
                     }`}
                   >
@@ -238,23 +238,23 @@ export function FilesHome({
                   setFileName("");
                 }
               }}
-              className="min-w-0 flex-1 rounded-md border border-line bg-paper px-2.5 py-1.5 font-mono text-[12px] text-ink placeholder:text-dim focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none"
+              className="min-w-0 flex-1 rounded-lg border border-line bg-paper px-2.5 py-1.5 font-mono text-(length:--text-xs) text-ink placeholder:text-dim focus-visible:ring-2 focus-visible:ring-amber/50 focus-visible:outline-none"
             />
             <button
               type="submit"
               disabled={saving || !fileName.trim()}
-              className="shrink-0 font-mono text-[11px] text-ink hover:underline disabled:opacity-40"
+              className="shrink-0 font-mono text-caption text-ink hover:underline disabled:opacity-40"
             >
               Create
             </button>
           </form>
         )}
         {loadingDir ? (
-          <TextShimmer as="p" className="mt-4 text-[13px] text-dim">
+          <TextShimmer as="p" className="mt-4 text-ui text-dim">
             Loading files…
           </TextShimmer>
         ) : entries.length === 0 ? (
-          <p className="mt-4 text-[13px] text-dim">
+          <p className="mt-4 text-ui text-dim">
             {cwd ? "This folder is empty." : "This project folder is empty."}
           </p>
         ) : (

@@ -26,11 +26,11 @@ function AdeProcessesPage() {
         <div className="w-full">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="font-mono text-[12px] text-dim">ADE</div>
+              <div className="font-mono text-(length:--text-xs) text-dim">ADE</div>
               <h1 className="mt-2 font-display text-2xl tracking-normal @lg:text-[28px]">
                 ADE processes
               </h1>
-              <p className="mt-3 max-w-[56ch] text-[13px] leading-relaxed text-dim">
+              <p className="mt-3 max-w-[56ch] text-ui leading-relaxed text-dim">
                 The app you are in, and any other ADE running the ADE checkout. This page is the
                 same in every project; agent servers and watchers stay in the right-pane Processes
                 tab, with their output and controls.
@@ -45,7 +45,7 @@ function AdeProcessesPage() {
                   search: { pane: "processes" },
                 })
               }
-              className="btn-quiet inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-[12.5px]"
+              className="btn-quiet inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-ui"
             >
               <Terminal className="size-3.5" strokeWidth={1.75} aria-hidden />
               Agent processes
@@ -57,9 +57,9 @@ function AdeProcessesPage() {
             aria-label="ADE processes"
             className="mt-8 overflow-hidden rounded-xl border border-line bg-panel"
           >
-            <div className="flex items-baseline gap-2 border-b border-line px-4 py-2.5 text-[12px] text-dim">
+            <div className="flex items-baseline gap-2 border-b border-line px-4 py-2.5 text-(length:--text-xs) text-dim">
               <span className="font-medium">ADE on this machine</span>
-              <span className="ml-auto font-mono text-[11px]">Read only</span>
+              <span className="ml-auto font-mono text-caption">Read only</span>
             </div>
             <div className="p-1">
               {ade?.app ? <AdeRow name="ADE" note="This app" address={ade.app.address} /> : null}
@@ -72,20 +72,20 @@ function AdeProcessesPage() {
                 />
               ))}
               {!ade ? (
-                <p className="px-3 py-3 text-[12px] text-dim">
+                <p className="px-3 py-3 text-(length:--text-xs) text-dim">
                   {query.isPending
                     ? "Reading ADE processes…"
                     : "ADE isn't reporting its processes."}
                 </p>
               ) : !ade.unmanaged.length ? (
-                <p className="px-3 py-3 font-mono text-[11px] leading-relaxed text-dim">
+                <p className="px-3 py-3 font-mono text-caption leading-relaxed text-dim">
                   No other ADE servers are running the ADE checkout
                 </p>
               ) : null}
             </div>
           </section>
 
-          <p className="mt-3 max-w-[56ch] font-mono text-[11px] leading-relaxed text-dim">
+          <p className="mt-3 max-w-[56ch] font-mono text-caption leading-relaxed text-dim">
             Open uses ADE's browser; use Open in external browser there for a separate window.
             Nothing here is stoppable from this page, and Stop all never touches these rows.
           </p>

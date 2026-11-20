@@ -18,10 +18,10 @@
 - `HighlightedCodeEditor` mounts CodeMirror with syntax theme variables
 
 ## 4. Tokens used
-- `--text-muted` / `--color-text-muted`, `--accent` / `--color-accent`
+- `--text-muted`, `--accent`
 - `--radius-control`, `--duration-fast`, `--ease-standard`
-- `--border` / `--color-border`, `--border-subtle` / `--color-border-subtle`, `--border-strong` / `--color-border-strong`
-- `--danger` / `--color-danger`, `--danger-foreground` / `--color-danger-foreground`, `--surface` / `--color-surface`
+- `--border`, `--border-subtle`, `--border-strong`
+- `--danger`, `--danger-foreground`, `--surface`
 - Code: `--code-background`, `--code-foreground`, `--code-gutter*`, `--syntax-*` (editor-specific)
 
 ## 5. Props/API

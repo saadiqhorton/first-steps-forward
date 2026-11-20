@@ -75,7 +75,7 @@ export function WorkflowEditor({
         {editing ? "Edit workflow" : fromBuiltIn ? "Customize workflow" : "New workflow"}
       </h2>
       {fromBuiltIn && !editing ? (
-        <p className="text-[12px] text-dim">
+        <p className="text-(length:--text-xs) text-dim">
           Saving creates your own copy under Yours. The built-in stays unchanged.
         </p>
       ) : null}
@@ -90,7 +90,7 @@ export function WorkflowEditor({
           onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
           maxLength={80}
           required
-          className="mt-2 w-full rounded-md border border-line bg-paper px-3 py-2 text-[13px]"
+          className="mt-2 w-full rounded-lg border border-line bg-paper px-3 py-2 text-ui"
         />
       </div>
 
@@ -103,7 +103,7 @@ export function WorkflowEditor({
           value={draft.description}
           onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
           maxLength={200}
-          className="mt-2 w-full rounded-md border border-line bg-paper px-3 py-2 text-[13px]"
+          className="mt-2 w-full rounded-lg border border-line bg-paper px-3 py-2 text-ui"
         />
       </div>
 
@@ -117,7 +117,7 @@ export function WorkflowEditor({
           onChange={(e) => setDraft((d) => ({ ...d, prompt: e.target.value }))}
           rows={8}
           required
-          className="mt-2 w-full resize-y rounded-md border border-line bg-paper px-3 py-2 font-mono text-[12px] leading-relaxed"
+          className="mt-2 w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 font-mono text-xs leading-relaxed"
         />
       </div>
 
@@ -140,7 +140,7 @@ export function WorkflowEditor({
                 return { ...d, agentId: value as AgentId };
               });
             }}
-            className="mt-2 w-full rounded-md border border-line bg-paper px-3 py-2 text-[13px]"
+            className="mt-2 w-full rounded-lg border border-line bg-paper px-3 py-2 text-ui"
           >
             <option value="">Any / default</option>
             {agents.map((agent) => (
@@ -168,7 +168,7 @@ export function WorkflowEditor({
                 return { ...d, permission: value as Permission };
               });
             }}
-            className="mt-2 w-full rounded-md border border-line bg-paper px-3 py-2 text-[13px]"
+            className="mt-2 w-full rounded-lg border border-line bg-paper px-3 py-2 text-ui"
           >
             <option value="">Default</option>
             <option value="build">Build</option>
@@ -177,13 +177,15 @@ export function WorkflowEditor({
         </div>
       </div>
 
-      {error ? <p className="rounded bg-danger/10 p-3 text-[12px] text-danger">{error}</p> : null}
+      {error ? (
+        <p className="rounded bg-danger/10 p-3 text-(length:--text-xs) text-danger">{error}</p>
+      ) : null}
 
       <div className="flex gap-2">
-        <button type="submit" disabled={busy} className="btn-amber px-4 py-2 text-[13px]">
+        <button type="submit" disabled={busy} className="btn-amber px-4 py-2 text-ui">
           {busy ? "Saving…" : editing ? "Save changes" : "Create workflow"}
         </button>
-        <button type="button" onClick={onCancel} className="btn-quiet px-4 py-2 text-[13px]">
+        <button type="button" onClick={onCancel} className="btn-quiet px-4 py-2 text-ui">
           Cancel
         </button>
       </div>

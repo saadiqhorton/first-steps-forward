@@ -86,7 +86,7 @@ export function ConversationProcesses({ sessionId }: { sessionId: string }) {
               disabled={busy}
               title={label}
               aria-label={label}
-              className="process-key inline-flex h-8 max-w-full items-center gap-2 pl-2 pr-3 text-[11.5px] text-ink disabled:opacity-60"
+              className="process-key inline-flex h-8 max-w-full items-center gap-2 pl-2 pr-3 text-(length:--text-xs) text-ink disabled:opacity-60"
             >
               <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${tone(proc.status)}`} />
               {busy ? (
@@ -108,7 +108,7 @@ export function ConversationProcesses({ sessionId }: { sessionId: string }) {
                 onClick={() => requestPreviewOpen(address)}
                 title={`Open ${address}`}
                 aria-label={`Open ${address}`}
-                className="inline-flex h-8 max-w-[24ch] items-center gap-2 rounded-lg px-1.5 font-mono text-[11.5px] text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink"
+                className="inline-flex h-8 max-w-[24ch] items-center gap-2 rounded-md px-1.5 font-mono text-(length:--text-xs) text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink"
               >
                 <Globe className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
                 <span className="truncate tracking-normal">

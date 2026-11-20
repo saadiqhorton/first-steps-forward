@@ -20,7 +20,7 @@ export function AgentsPanel() {
     <>
       <div className="px-4 @lg:px-7 pt-6 pb-4 @container">
         <h1 className="heading-display text-2xl @lg:text-3xl">Agents & accounts</h1>
-        <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-dim">
+        <p className="mt-2 max-w-2xl text-xs leading-relaxed text-dim">
           ADE starts the installed agent CLIs in the selected project. Sign-in belongs to each agent
           and stays in its user-level credential store. ADE never stores provider tokens. Model
           usage may have provider costs.
@@ -28,7 +28,7 @@ export function AgentsPanel() {
         <button
           type="button"
           disabled={checking}
-          className="btn-quiet mt-3 px-3 py-1.5 text-[12px] disabled:opacity-50"
+          className="btn-quiet mt-3 px-3 py-1.5 text-(length:--text-xs) disabled:opacity-50"
           onClick={() => {
             setChecking(true);
             setCheckError("");
@@ -46,7 +46,7 @@ export function AgentsPanel() {
           {checking ? "Checking…" : "Check for updates"}
         </button>
         {checkError && (
-          <p role="alert" className="mt-2 text-[12px] text-danger">
+          <p role="alert" className="mt-2 text-(length:--text-xs) text-danger">
             {checkError}
           </p>
         )}
@@ -62,28 +62,28 @@ export function AgentsPanel() {
               <AgentLogo agent={a} className="size-8" />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <strong className="text-[14px]">{a.name}</strong>
-                  {a.version && <span className="font-mono text-[10px] text-dim">{a.version}</span>}
+                  <strong className="text-(length:--text-sm)">{a.name}</strong>
+                  {a.version && <span className="font-mono text-2xs text-dim">{a.version}</span>}
                   <span
-                    className={`rounded-sm px-1.5 py-0.5 font-mono text-[10px] ${!a.installed ? "bg-ink/5 text-dim" : a.signedIn ? "bg-teal/15 text-teal-deep" : "bg-amber/15 text-amber-deep"}`}
+                    className={`rounded-sm px-1.5 py-0.5 font-mono text-2xs ${!a.installed ? "bg-ink/5 text-dim" : a.signedIn ? "bg-teal/15 text-teal-deep" : "bg-amber/15 text-amber-deep"}`}
                   >
                     {!a.installed ? "Not installed" : a.signedIn ? "Ready" : "Sign-in needed"}
                   </span>
                 </div>
-                <p className="mt-1 text-[12px] text-dim">{a.authMethod}</p>
+                <p className="mt-1 text-(length:--text-xs) text-dim">{a.authMethod}</p>
                 {a.providers && a.providers.length > 0 && (
-                  <p className="mt-1 text-[12px]">
+                  <p className="mt-1 text-(length:--text-xs)">
                     <span className="text-dim">Connected providers: </span>
                     {a.providers.join(", ")}
                   </p>
                 )}
-                <p className="mt-2 text-[12px] leading-relaxed text-dim">{a.authNote}</p>
+                <p className="mt-2 text-xs leading-relaxed text-dim">{a.authNote}</p>
                 {!a.installed && (
                   <a
                     href={a.installHint.match(/https?:\/\/\S+/)?.[0]}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-2 inline-block text-[12px] text-teal underline"
+                    className="mt-2 inline-block text-(length:--text-xs) text-teal underline"
                   >
                     Installation instructions
                   </a>
@@ -94,7 +94,7 @@ export function AgentsPanel() {
                   <button
                     type="button"
                     onClick={() => setHarness({ agentId: a.id, kind: "install" })}
-                    className="btn-quiet px-3 py-1.5 text-[12px]"
+                    className="btn-quiet px-3 py-1.5 text-(length:--text-xs)"
                   >
                     Install
                   </button>
@@ -106,13 +106,13 @@ export function AgentsPanel() {
                     <button
                       type="button"
                       onClick={() => setHarness({ agentId: a.id, kind: "update" })}
-                      className="btn-quiet px-3 py-1.5 text-[12px]"
+                      className="btn-quiet px-3 py-1.5 text-(length:--text-xs)"
                     >
                       Update{a.latestVersion ? ` to ${a.latestVersion}` : ""}
                     </button>
                   )}
                 {a.updateAvailable && a.installMethod === "other" && (
-                  <span className="max-w-40 text-right text-[11px] text-dim">
+                  <span className="max-w-40 text-right text-caption text-dim">
                     Update available{a.latestVersion ? `: ${a.latestVersion}` : ""}. Update it where
                     it was installed.
                   </span>
@@ -120,7 +120,7 @@ export function AgentsPanel() {
                 {a.installed && !a.signedIn && (
                   <button
                     onClick={() => setSigning(a)}
-                    className="btn-amber px-3 py-1.5 text-[12px]"
+                    className="btn-amber px-3 py-1.5 text-(length:--text-xs)"
                   >
                     Set up
                   </button>
@@ -138,13 +138,13 @@ export function AgentsPanel() {
             </div>
           </section>
         ))}
-        <div className="card-panel p-4 text-[12px] leading-relaxed text-dim">
+        <div className="card-panel p-4 text-xs leading-relaxed text-dim">
           <strong className="text-ink">Sign-in limitations are explicit:</strong> Codex offers a
           browser/device sign-in that ADE can start. OpenCode's interactive provider selector and
           Pi's `/login` require their own terminal UI; ADE does not fake these flows. Claude Code
           signs in through its own CLI.
         </div>
-        <p className="font-mono text-[10px] text-dim">
+        <p className="font-mono text-2xs text-dim">
           Loopback only · No ADE account · No hosted service
         </p>
       </div>

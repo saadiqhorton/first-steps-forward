@@ -334,7 +334,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             </span>
           </div>
           <h1
-            className="mt-2 line-clamp-1 text-[18px] font-medium leading-snug"
+            className="mt-2 line-clamp-1 text-lg font-medium leading-snug"
             title={session.displayRequest ?? session.request}
           >
             {sessionTitle(session.displayRequest ?? session.request)}
@@ -411,7 +411,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             />
           ))}
           {running && (
-            <div className="flex flex-wrap items-center gap-3 text-[13px] text-dim">
+            <div className="flex flex-wrap items-center gap-3 text-ui text-dim">
               <span className="size-1.5 animate-pulse-soft rounded-full bg-teal" aria-hidden />
               <TextShimmer>
                 {session.status === "verifying" ? "Running checks" : currentActivity(session.logs)}
@@ -423,7 +423,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           )}
           {session.status === "blocked" && (
             <div
-              className={`rounded-lg border px-4 py-3 text-[13px] leading-5 [&_strong]:font-medium ${session.failureKind && session.failureKind !== "process" ? "border-amber/40 bg-amber/5" : "border-danger/30 bg-danger/5"}`}
+              className={`rounded-md border px-4 py-3 text-ui leading-5 [&_strong]:font-medium ${session.failureKind && session.failureKind !== "process" ? "border-amber/40 bg-amber/5" : "border-danger/30 bg-danger/5"}`}
             >
               {session.failureKind === "provider_quota" ? (
                 <>
@@ -473,7 +473,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
                 <span className="size-1.5 rounded-full bg-teal" aria-hidden />
                 Ready to review
               </div>
-              <p className="mt-1 text-[13px] leading-5 text-[color:var(--text-secondary)]">
+              <p className="mt-1 text-ui leading-5 text-[color:var(--text-secondary)]">
                 The CLI has exited. Inspect the project diff, then run checks explicitly — ADE does
                 not run them automatically.
               </p>
@@ -497,11 +497,11 @@ export function SessionView({ sessionId }: { sessionId: string }) {
 
         <div className="shrink-0 border-t border-line px-4 @lg:px-7 py-4">
           {(session.queuedMessages?.length ?? 0) > 0 && (
-            <div className="mb-3 rounded-lg border border-line bg-paper px-4 py-3">
+            <div className="mb-3 rounded-md border border-line bg-paper px-4 py-3">
               <p className="text-xs font-medium text-ink">Waiting to send</p>
               <ul className="mt-1 space-y-1">
                 {session.queuedMessages?.map((prompt, index) => (
-                  <li key={`${index}-${waitingPreview(prompt)}`} className="text-[13px] text-dim">
+                  <li key={`${index}-${waitingPreview(prompt)}`} className="text-ui text-dim">
                     {waitingPreview(prompt)}
                   </li>
                 ))}

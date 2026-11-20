@@ -157,7 +157,7 @@ function VideoThumb({ url, onFail }: { url: string; onFail: () => void }) {
             className={`${FRAME} bg-deck`}
           />
           {duration != null && Number.isFinite(duration) && (
-            <span className="absolute right-1 bottom-1 rounded-[3px] bg-deck/85 px-1 font-mono text-[9px] leading-[13px] text-deck-foreground">
+            <span className="absolute right-1 bottom-1 rounded-[3px] bg-deck/85 px-1 font-mono text-3xs leading-[13px] text-deck-foreground">
               {formatDuration(duration)}
             </span>
           )}
@@ -233,7 +233,7 @@ function AudioThumb({ url, size }: { url: string; size: number }) {
     <div
       ref={ref}
       className={`${PAGE} flex items-center justify-center gap-px bg-[var(--code-background)] ${
-        playing ? "text-amber" : "text-dim"
+        playing ? "text-amber-deep" : "text-dim"
       }`}
     >
       {bars.map((height, index) => (

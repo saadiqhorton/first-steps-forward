@@ -59,14 +59,14 @@ export function SectionTabs() {
   const needsInput = sessions.filter((s) => s.projectId === projectId && needsAttention(s)).length;
 
   const linkClass = (active: boolean) =>
-    `relative isolate inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] transition-colors ${
+    `relative isolate inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-ui transition-colors ${
       active ? "font-medium text-ink" : "text-dim hover:bg-ink/[0.04] hover:text-ink"
     }`;
   const highlight = (
     <GlideIndicator
       id="section-tab"
       spring="snappy"
-      className="absolute inset-0 -z-10 rounded-md bg-ink/[0.06]"
+      className="absolute inset-0 -z-10 rounded-lg bg-ink/[0.06]"
     />
   );
 
@@ -86,7 +86,7 @@ export function SectionTabs() {
         {activeSection === "conversations" && highlight}
         Conversations
         {needsInput > 0 && (
-          <span className="rounded bg-amber/20 px-1.5 py-0.5 font-mono text-[10px] text-amber-deep">
+          <span className="rounded bg-amber/20 px-1.5 py-0.5 font-mono text-2xs text-amber-deep">
             {needsInput}
           </span>
         )}

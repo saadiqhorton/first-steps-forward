@@ -65,7 +65,7 @@ export function SkillTransferDialog({ projectId, skill, onClose, onDone }: Props
       >
         <div className="px-4 pt-4">
           <h2 className="text-[15px] font-medium">Move or copy</h2>
-          <p className="mt-0.5 font-mono text-[11px] text-dim">{skill.location}</p>
+          <p className="mt-0.5 font-mono text-caption text-dim">{skill.location}</p>
         </div>
 
         <div className="px-4 py-4">
@@ -76,22 +76,22 @@ export function SkillTransferDialog({ projectId, skill, onClose, onDone }: Props
                 key={entry.id}
                 type="button"
                 onClick={() => setRootId(entry.id)}
-                className={`rounded-lg border px-3 py-2 text-left transition ${
+                className={`rounded-md border px-3 py-2 text-left transition ${
                   rootId === entry.id
                     ? "border-amber bg-amber/10"
                     : "border-line hover:border-ink/25"
                 }`}
               >
                 <span className="flex items-baseline justify-between gap-2">
-                  <span className="text-[13px]">{entry.label}</span>
-                  <span className="font-mono text-[10.5px] text-dim">{entry.path}</span>
+                  <span className="text-ui">{entry.label}</span>
+                  <span className="font-mono text-caption text-dim">{entry.path}</span>
                 </span>
-                <span className="mt-0.5 block text-[11.5px] text-dim">{entry.hint}</span>
+                <span className="mt-0.5 block text-(length:--text-xs) text-dim">{entry.hint}</span>
               </button>
             ))}
           </div>
 
-          <p className="mt-3 text-[11.5px] text-dim">
+          <p className="mt-3 text-(length:--text-xs) text-dim">
             {movable ? (
               <>
                 <ArrowRightLeft className="mr-1 inline size-3 align-[-1px]" aria-hidden />
@@ -106,7 +106,7 @@ export function SkillTransferDialog({ projectId, skill, onClose, onDone }: Props
           </p>
 
           {error ? (
-            <p className="mt-3 flex items-start gap-2 rounded-md bg-danger/10 p-2 text-[12px] text-danger">
+            <p className="mt-3 flex items-start gap-2 rounded-lg bg-danger/10 p-2 text-(length:--text-xs) text-danger">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               {error.message}
             </p>
@@ -114,12 +114,12 @@ export function SkillTransferDialog({ projectId, skill, onClose, onDone }: Props
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-line px-4 py-3">
-          <button type="button" className="btn-quiet px-3 py-2 text-[13px]" onClick={onClose}>
+          <button type="button" className="btn-quiet px-3 py-2 text-ui" onClick={onClose}>
             Cancel
           </button>
           <button
             type="button"
-            className="btn-quiet px-3 py-2 text-[13px] disabled:opacity-50"
+            className="btn-quiet px-3 py-2 text-ui disabled:opacity-50"
             onClick={() => copy.mutate()}
             disabled={!rootId || busy}
           >
@@ -127,7 +127,7 @@ export function SkillTransferDialog({ projectId, skill, onClose, onDone }: Props
           </button>
           <button
             type="button"
-            className="btn-amber px-3 py-2 text-[13px] disabled:opacity-50"
+            className="btn-amber px-3 py-2 text-ui disabled:opacity-50"
             onClick={() => move.mutate()}
             disabled={!rootId || busy || !movable}
             title={movable ? undefined : "ADE will not delete a folder it does not own"}

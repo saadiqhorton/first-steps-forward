@@ -53,34 +53,36 @@ export function SignInDialog({ agent, onClose }: { agent: Agent; onClose: () => 
         <h2 id="signin-title" className="text-xl font-medium">
           Sign in to {agent.name}
         </h2>
-        <p className="mt-3 text-[13px] leading-relaxed">{agent.authNote}</p>
-        <p className="mt-2 text-[12px] leading-relaxed text-dim">
+        <p className="mt-3 text-ui leading-relaxed">{agent.authNote}</p>
+        <p className="mt-2 text-xs leading-relaxed text-dim">
           ADE does not receive or store credentials. Provider/model usage may be billed by your
           provider.
         </p>
         {agent.signIn?.device ? (
           <>
             {output && (
-              <pre className="mt-4 max-h-40 overflow-auto rounded-md bg-deck p-3 font-mono text-[11px] text-deck-foreground">
+              <pre className="mt-4 max-h-40 overflow-auto rounded-lg bg-deck p-3 font-mono text-caption text-deck-foreground">
                 {output}
               </pre>
             )}
-            {running && <p className="mt-3 text-[12px] text-teal">{agent.signIn.waiting}</p>}
+            {running && (
+              <p className="mt-3 text-(length:--text-xs) text-teal">{agent.signIn.waiting}</p>
+            )}
           </>
         ) : (
-          <div className="mt-4 rounded-md bg-amber/10 p-3 text-[12px] leading-relaxed">
+          <div className="mt-4 rounded-lg bg-amber/10 p-3 text-xs leading-relaxed">
             <p>{agent.signIn?.note ?? agent.authNote}</p>
             {agent.signIn?.command && <p className="mt-2 font-mono">{agent.signIn.command}</p>}
           </div>
         )}
-        {error && <p className="mt-3 text-[12px] text-danger">{error}</p>}
+        {error && <p className="mt-3 text-(length:--text-xs) text-danger">{error}</p>}
         <div className="mt-5 flex gap-2">
           {agent.signIn?.device && !started && (
-            <button className="btn-amber px-4 py-2 text-[13px]" onClick={begin}>
+            <button className="btn-amber px-4 py-2 text-ui" onClick={begin}>
               Start device sign-in
             </button>
           )}
-          <button className="btn-quiet ml-auto px-4 py-2 text-[13px]" onClick={onClose}>
+          <button className="btn-quiet ml-auto px-4 py-2 text-ui" onClick={onClose}>
             {agent.signIn?.device && running ? "Close (continues)" : "Done"}
           </button>
         </div>

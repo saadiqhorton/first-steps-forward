@@ -4,39 +4,15 @@ Exhaustive list of tokens agents may use in component CSS.
 
 - **Canonical Layer 2:** defined in `src/tokens.css` (every custom property there is listed below).
 - **Layer 2 by convention:** Arc/ADE tokens (`--space-*`, `--text-*`, `--radius-*`, `--shadow-resting|raised|floating`, `--duration-*`, `--ease-*`, `--leading-*`, `--tracking-*`, `--control-height-*`, `--font-display|--font-body|--font-mono`) that components may reference even though they are declared in `foundation.css` / ADE `:root`.
-- **Semantic color vocabulary (Layer 2 by convention):** existing ADE/Arc names (`--foreground`, `--background`, `--border`, `--border-subtle`, `--border-strong`, `--text-muted`, `--text-secondary`, `--surface`, `--surface-raised`, `--surface-muted`, `--ink`, `--paper`, `--panel`, `--line`, `--dim`, `--danger`, `--danger-foreground`, `--accent`, `--accent-strong`, `--accent-subtle`, `--accent-foreground`, `--success`, `--warning`, `--deck`, `--deck-foreground`, `--scrim`, `--focus-ring`, `--teal`, `--teal-deep`, `--amber`, `--amber-deep`, etc.) sit alongside `--color-*` aliases. Components may use either form; never raw hex/rgb/oklch literals.
+- **Semantic color vocabulary (Layer 2 by convention):** existing ADE/Arc names (`--foreground`, `--background`, `--border`, `--border-subtle`, `--border-strong`, `--text-muted`, `--text-secondary`, `--surface`, `--surface-raised`, `--surface-muted`, `--ink`, `--paper`, `--panel`, `--line`, `--dim`, `--danger`, `--danger-foreground`, `--accent`, `--accent-strong`, `--accent-subtle`, `--accent-foreground`, `--success`, `--warning`, `--deck`, `--deck-foreground`, `--scrim`, `--focus-ring`, `--teal`, `--teal-deep`, `--amber`, `--amber-deep`, etc.) are the colour tokens. Components use them directly; never raw hex/rgb/oklch literals.
 
 Values below are **ADE-effective** (after `src/styles.css` overrides) unless noted. Dark values shown when they differ.
 
 ---
 
-## Color (`src/tokens.css` → ADE `:root`)
+## Color
 
-| Token | Value / source | Usage |
-| --- | --- | --- |
-| `--color-text` | light `oklch(0.18 0.006 70)`; dark `oklch(0.95 0.012 90)` via --foreground | Primary text |
-| `--color-text-secondary` | light `oklch(0.43 0.025 80)`; dark `oklch(0.78 0.016 85)` | Secondary labels |
-| `--color-text-muted` | light `oklch(0.59 0.03 85)`; dark `oklch(0.65 0.022 85)` via --dim | Muted / hint text |
-| `--color-bg` | light `oklch(0.945 0.02 90)`; dark `oklch(0.19 0.006 75)` via --paper | Page background |
-| `--color-surface` | light `oklch(0.977 0.01 90)`; dark `oklch(0.215 0.007 75)` via --panel | Panel surface |
-| `--color-surface-raised` | light same as surface; dark `oklch(0.24 0.008 75)` | Raised surface / popover |
-| `--color-surface-muted` | light `oklch(0.92 0.02 88)`; dark `oklch(0.26 0.009 75)` | Recessed / muted fill |
-| `--color-border` | light `oklch(0.86 0.03 85)`; dark `oklch(0.3 0.012 80)` via --line | Default border |
-| `--color-border-subtle` | light `oklch(0.9 0.025 87)`; dark `oklch(0.255 0.01 80)` | Subtle border |
-| `--color-border-strong` | light `oklch(0.78 0.035 82)`; dark `oklch(0.4 0.015 80)` | Strong border |
-| `--color-link` | light `oklch(0.38 0.06 190)`; dark `oklch(0.84 0.07 185)` via --teal-deep | Links |
-| `--color-accent` | light `oklch(0.69 0.15 65)`; dark `oklch(0.77 0.15 70)` via --amber | Brand accent |
-| `--color-accent-strong` | light `oklch(0.55 0.13 65)`; dark `oklch(0.85 0.11 78)` via --amber-deep | Strong accent |
-| `--color-accent-subtle` | light `color-mix(… amber 14%)`; dark `color-mix(… amber 18%)` | Accent wash |
-| `--color-accent-foreground` | `oklch(0.18 0.006 70)` (both themes) | Text on accent |
-| `--color-danger` | light `oklch(0.55 0.18 28)`; dark `oklch(0.72 0.17 28)` | Danger |
-| `--color-danger-foreground` | light `oklch(0.985 0.008 90)`; dark `oklch(0.18 0.006 70)` | Text on danger |
-| `--color-success` | light `oklch(0.47 0.07 190)`; dark `oklch(0.75 0.09 185)` via --teal | Success |
-| `--color-warning` | light `oklch(0.55 0.13 65)`; dark `oklch(0.85 0.11 78)` via --amber-deep | Warning |
-| `--color-deck` | light `oklch(0.18 0.006 70)`; dark `oklch(0.155 0.005 75)` | Code/log deck |
-| `--color-deck-foreground` | light `oklch(0.945 0.02 90)`; dark `oklch(0.93 0.014 90)` | Text on deck |
-| `--color-scrim` | light `oklch(0.18 0.006 70 / 0.45)`; dark `oklch(0.1 0.004 75 / 0.6)` | Overlay scrim |
-| `--color-focus-ring` | `transparent` | Focus ring (intentionally empty) |
+Colours are not declared in `src/tokens.css`. Use the semantic names on `:root` in `src/styles.css` (`--foreground`, `--background`, `--surface`, `--surface-muted`, `--border`, `--text-muted`, `--text-secondary`, `--accent`, `--accent-strong`, `--accent-foreground`, `--danger`, `--success`, `--warning`, `--deck`, `--scrim`, and the rest). Light and dark values, and when to use each, are in [../foundations/color.md](../foundations/color.md). Workshop and terminal colour one-offs are listed under "Exact / workshop one-offs".
 
 ---
 
@@ -44,8 +20,6 @@ Values below are **ADE-effective** (after `src/styles.css` overrides) unless not
 
 | Token | Value / source | Usage |
 | --- | --- | --- |
-| `--font-family-display` | `var(--font-display, "Geist", sans-serif)` | Display family alias |
-| `--font-family-body` | `var(--font-body, "Inter", sans-serif)` | Body family alias |
 | `--font-family-mono` | `var(--font-mono, "IBM Plex Mono", monospace)` | Mono family alias |
 | `--font-display` | `"Geist", …` via --font-geist (Arc/ADE) | Display family |
 | `--font-body` | `"Inter", …` via --font-inter (Arc/ADE) | Body family |
@@ -53,8 +27,10 @@ Values below are **ADE-effective** (after `src/styles.css` overrides) unless not
 | `--font-weight-regular` | `400` | Regular weight |
 | `--font-weight-medium` | `500` | Medium weight |
 | `--font-weight-semibold` | `600` | Semibold weight |
-| `--text-3xs` | `9px` | Workshop mono / chrome below xs |
-| `--text-2xs` | `10px` | Workshop mono / chrome below xs |
+| `--text-3xs` / `text-3xs` | `9px` | Tiny mono / workshop chrome (Tailwind utility: font-size only) |
+| `--text-2xs` / `text-2xs` | `10px` | Dense mono labels (utility: font-size only) |
+| `text-caption` | `11px` | Captions, host-editor chrome (utility: font-size only) |
+| `text-ui` | `13px` | Workbench UI between xs and sm (utility: font-size only) |
 | `--text-xs` | `0.75rem` | Extra-small type |
 | `--text-sm` | `0.875rem` | Small / default UI |
 | `--text-base` | `1rem` | Base body |
@@ -74,6 +50,10 @@ Values below are **ADE-effective** (after `src/styles.css` overrides) unless not
 | `--text-composer-25` | `25px` | Composer-reference workshop type |
 | `--text-composer-42` | `42px` | Composer-reference workshop type |
 | `--text-composer-50` | `50px` | Composer-reference workshop type |
+| `--text-workspace-10` | `10px` | Workspace chrome type |
+| `--text-workspace-11` | `11px` | Workspace chrome type |
+| `--text-workspace-13` | `13px` | Workspace chrome type |
+| `--text-workspace-20` | `20px` | Workspace chrome type |
 | `--leading-display` | `1.1` | Display line-height |
 | `--leading-body` | `1.4` | Body line-height |
 | `--tracking-display` | `-0.03em` | Display tracking |
@@ -114,6 +94,7 @@ Values below are **ADE-effective** (after `src/styles.css` overrides) unless not
 | `--size-theme-switch` | `38px` | Theme-switch icon-only control |
 | `--size-icon-md` | `20px` | Medium icon size |
 | `--size-icon-sm` | `18px` | Small icon size |
+| `--size-workspace-avatar` | `32px` | Workspace avatar |
 
 ---
 
@@ -125,13 +106,17 @@ Values below are **ADE-effective** (after `src/styles.css` overrides) unless not
 | `--radius-panel` | `1rem` (ADE; Arc `1.625rem`) | Panels |
 | `--radius-surface` | `1.25rem` (ADE; Arc `2.125rem`) | Large surfaces |
 | `--radius-pill` | `9999px` | Pill / capsule |
-| `--radius-xs` | `0.375rem` (`@theme` bridge / tokens.css) | Tiny radius utility |
-| `--radius-sm` | `0.5rem` (`@theme` bridge / tokens.css) | Small radius utility |
-| `--radius-md` | `0.75rem` (`@theme` bridge / tokens.css) | Medium radius utility |
-| `--radius-lg` | `1rem` in tokens.css; `@theme` → `--radius-control` | Large / → control |
-| `--radius-xl` | `var(--radius-panel)` | → panel |
-| `--radius-2xl` | `var(--radius-surface)` | → surface |
+| `--radius-xs` | `0.375rem` (6px); `rounded-xs` | Tiny corners |
+| `--radius-sm` | `0.5rem` (8px); `rounded-sm` | Small corners |
+| `rounded-md` | `var(--radius-control)` (10px) | Control radius (`@theme`) |
+| `--radius-lg` | `0.75rem` (12px); `rounded-lg` | Medium-large corners |
+| `--radius-xl` | `1rem` (16px); `rounded-xl` → `var(--radius-panel)` | Panel-sized corners |
+| `rounded-2xl` | `var(--radius-surface)` (20px) | Surface radius (`@theme`) |
 | `--radius-segment` | `calc(var(--radius-control) - 3px)` | Segmented control item |
+| `--radius-workspace-4` | `4px` | Workspace radius |
+| `--radius-workspace-6` | `6px` | Workspace radius (top-bar links) |
+| `--radius-workspace-8` | `8px` | Workspace radius |
+| `--radius-workspace-10` | `10px` | Workspace radius |
 
 ---
 
@@ -147,15 +132,12 @@ Values below are **ADE-effective** (after `src/styles.css` overrides) unless not
 | `--shadow-process-key-active` | Pressed keycap stack | Process-key active |
 | `--shadow-process-key-disabled` | Muted inset only | Process-key disabled |
 | `--shadow-inset-hairline` | `inset 0 0 0 1px var(--border)` | Quiet inset border (btn-quiet) |
+| `--shadow-workspace-menu` | `0 8px 24px rgba(0, 0, 0, 0.12)` | Workspace menu elevation |
 | `--z-recessed` | `-1` | Behind parent |
-| `--z-base` | `0` | Base stack |
 | `--z-raised` | `1` | Raised stack |
 | `--z-dropdown` | `50` | Dropdown |
-| `--z-sticky` | `100` | Sticky |
-| `--z-overlay` | `200` | Overlay |
-| `--z-modal` | `300` | Modal |
-| `--z-toast` | `400` | Toast |
 | `--z-veil` | `2147483647` | Veil |
+| `--z-workspace-menu` | `5` | Workspace menu |
 
 ---
 
@@ -177,10 +159,10 @@ Values below are **ADE-effective** (after `src/styles.css` overrides) unless not
 | `--opacity-disabled` | `0.52` | Disabled opacity |
 | `--opacity-hover` | `0.91` | Hover opacity |
 | `--opacity-pressed` | `0.84` | Pressed opacity |
-| `--opacity-muted` | `0.3` | Muted opacity |
 | `--opacity-host-idle` | `0.45` | Host-editor idle chrome |
 | `--opacity-host-search-icon` | `0.65` | Host-editor search icon |
 | `--opacity-host-placeholder` | `0.55` | Host-editor placeholder |
+| `--opacity-workspace-pulse` | `0.35` | Workspace pulse opacity |
 
 ---
 
@@ -196,32 +178,42 @@ Values below are **ADE-effective** (after `src/styles.css` overrides) unless not
 
 ---
 
+## Pixel spacing (`--space-px-*`)
+
+Defined in `src/tokens.css`. Exact prior px values for workshop and harness chrome; prefer `--space-*` scale tokens in product UI.
+
+| Token | Value |
+| --- | --- |
+| `--space-px-2` | `2px` |
+| `--space-px-5` | `5px` |
+| `--space-px-7` | `7px` |
+| `--space-px-9` | `9px` |
+| `--space-px-10` | `10px` |
+| `--space-px-11` | `11px` |
+| `--space-px-14` | `14px` |
+| `--space-px-15` | `15px` |
+| `--space-px-18` | `18px` |
+| `--space-px-20` | `20px` |
+| `--space-px-22` | `22px` |
+| `--space-px-25` | `25px` |
+| `--space-px-26` | `26px` |
+| `--space-px-27` | `27px` |
+| `--space-px-28` | `28px` |
+| `--space-px-30` | `30px` |
+| `--space-px-45` | `45px` |
+| `--space-px-50` | `50px` |
+| `--space-px-60` | `60px` |
+| `--space-px-65` | `65px` |
+| `--space-px-80` | `80px` |
+
+---
+
 ## Exact / workshop one-offs
 
 Preserved prior px/em values for workshops and harness chrome. Prefer scale tokens (`--space-*`, `--text-*`, `--radius-*`) in product UI; use these only where the exact prior measure is intentional.
 
 | Token | Value | Usage |
 | --- | --- | --- |
-| `--space-px-5` | `5px` | Workshop / harness micro spacing |
-| `--space-px-7` | `7px` | Workshop / harness micro spacing |
-| `--space-px-9` | `9px` | Workshop / harness micro spacing |
-| `--space-px-11` | `11px` | Workshop / harness micro spacing |
-| `--space-px-14` | `14px` | Workshop / harness micro spacing |
-| `--space-px-15` | `15px` | Workshop / harness micro spacing |
-| `--space-px-18` | `18px` | Workshop / harness micro spacing |
-| `--space-px-22` | `22px` | Workshop / harness micro spacing |
-| `--space-px-25` | `25px` | Workshop / harness micro spacing |
-| `--space-px-26` | `26px` | Workshop / harness micro spacing |
-| `--space-px-27` | `27px` | Workshop / harness micro spacing |
-| `--space-px-28` | `28px` | Workshop / harness micro spacing |
-| `--space-px-30` | `30px` | Workshop / harness micro spacing |
-| `--space-px-45` | `45px` | Workshop / harness micro spacing |
-| `--space-px-50` | `50px` | Workshop / harness micro spacing |
-| `--space-px-60` | `60px` | Workshop / harness micro spacing |
-| `--space-px-65` | `65px` | Workshop / harness micro spacing |
-| `--space-px-80` | `80px` | Workshop / harness micro spacing |
-| `--space-picker-claude` | `67px` | Agent picker Claude width |
-| `--space-picker-codex` | `96px` | Agent picker Codex width |
 | `--radius-composer-4` | `4px` | Composer-reference workshop radius |
 | `--radius-composer-7` | `7px` | Composer-reference workshop radius |
 | `--radius-composer-9` | `9px` | Composer-reference workshop radius |
@@ -248,6 +240,27 @@ Preserved prior px/em values for workshops and harness chrome. Prefer scale toke
 | `--shadow-workshop-chip-active` | inset only (see `tokens.css`) | Process-chip active |
 
 ---
+
+## Doop canvas names
+
+The Doop canvas "ADE Design System" uses Tailwind-namespace names, so its frames resolve like the app's `@theme` names. Values match `src/styles.css`; only the names differ from the Layer 2 names above.
+
+| Doop canvas token | Code name (`@theme`) | Layer 2 variable |
+| --- | --- | --- |
+| `--color-ink` | `--color-ink` | `--ink` / `--foreground` |
+| `--color-paper` | `--color-paper` | `--paper` / `--background` |
+| `--color-panel` | `--color-panel` | `--panel` / `--surface` |
+| `--color-line` | `--color-line` | `--line` / `--border` |
+| `--color-dim` | `--color-dim` | `--dim` / `--text-muted` |
+| `--color-amber` / `--color-amber-deep` | `--color-amber` / `--color-amber-deep` | `--accent` / `--accent-strong` |
+| `--color-primary-foreground` | `--color-primary-foreground` | `--accent-foreground` |
+| `--color-teal` / `--color-teal-deep` | `--color-teal` / `--color-teal-deep` | `--success` / `--teal-deep` |
+| `--color-destructive-foreground` | `--color-destructive-foreground` | `--danger-foreground` |
+
+- Code's `--color-accent` is the shadcn hover fill (`--surface-muted`), not amber, so the canvas does not use that name for amber.
+- Spacing: the canvas `--spacing-N` matches `--space-N` in value (for example `--spacing-4` = `--space-4` = 1rem).
+- Radius, type, leading, tracking and font names are the same on the canvas as in code.
+- The canvas `--color-focus-ring` has an amber value, but `--focus-ring` is `transparent` in code. Do not treat the canvas value as a real focus ring.
 
 ## Foundations map
 
