@@ -1,3 +1,4 @@
+import { isHiddenProject, isHiddenSession } from "./customize/paths.mjs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -54,6 +55,7 @@ export function createWorkspaceOrganization({
     const offset = Math.max(0, Number(options.cursor) || 0);
     const rows = state.sessions.filter(
       (s) =>
+        !isHiddenSession(state, s) &&
         (!projectId || s.projectId === projectId) &&
         (!q ||
           `${s.request} ${s.summary ?? ""} ${(s.messages ?? []).map((m) => m.text).join(" ")}`
@@ -124,6 +126,7 @@ export function createWorkspaceOrganization({
     // ADE can hold one dev-command approval at project scope when there is no
     // session attached to the proposal. It still belongs in the live queue.
     for (const project of state.projects) {
+      if (isHiddenProject(project)) continue;
       if (projectId && project.id !== projectId) continue;
       const approval = devApprovals?.unattached?.(project.id);
       if (!approval) continue;

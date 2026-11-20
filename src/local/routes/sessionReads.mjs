@@ -1,3 +1,4 @@
+import { isHiddenSession } from "../customize/paths.mjs";
 import { getDiff, projectInfo } from "../project-git.mjs";
 import { MODEL_ID } from "../models.mjs";
 import { resolveAttachments } from "../attachments.mjs";
@@ -52,6 +53,7 @@ export async function startProjectSession(ctx, data = {}) {
     criteria: String(data.criteria ?? ""),
     text: request,
     files,
+    ...(data.presentation ? { presentation: data.presentation } : {}),
     model: model || undefined,
     options: checked.value,
     baseline,
@@ -81,6 +83,7 @@ export async function sessionReads(ctx) {
     const projectId = url.searchParams.get("project");
     if (!query) return json(res, 200, { ids: [] });
     const ids = state.sessions
+      .filter((session) => !isHiddenSession(state, session))
       .filter((session) => !projectId || session.projectId === projectId)
       .filter((session) =>
         [

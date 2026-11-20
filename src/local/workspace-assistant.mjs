@@ -1,3 +1,4 @@
+import { isHiddenSession } from "./customize/paths.mjs";
 import { randomUUID } from "node:crypto";
 import { spawnCommand } from "./spawn.mjs";
 import { TOOLS, runWorkspaceTool } from "./workspace-tools.mjs";
@@ -428,6 +429,7 @@ export function createWorkspaceAssistant({
     const cutoff = Number(since ?? state.workspaceAssistant?.catchupAt ?? 0) || 0;
     const items = [];
     for (const s of state.sessions) {
+      if (isHiddenSession(state, s)) continue;
       const updatedAt = s.updatedAt ?? s.createdAt ?? 0;
       if (updatedAt <= cutoff) continue;
       const label = projectName(s.projectId);

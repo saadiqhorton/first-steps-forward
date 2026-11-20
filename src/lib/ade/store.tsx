@@ -400,8 +400,18 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       else if (scope.startsWith("harness:"))
         void queryClient.invalidateQueries({ queryKey: ["harness", scope.slice(8)] });
+      else if (scope === "customize")
+        void queryClient.invalidateQueries({ queryKey: ["customize"] });
     };
-    for (const type of ["bootstrap", "session", "logs", "computer", "agents", "harness"])
+    for (const type of [
+      "bootstrap",
+      "session",
+      "logs",
+      "computer",
+      "agents",
+      "harness",
+      "customize",
+    ])
       source.addEventListener(type, onEvent as EventListener);
     source.onerror = () => {
       errors += 1;

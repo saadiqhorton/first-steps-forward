@@ -1,3 +1,4 @@
+import { isHiddenProject } from "../customize/paths.mjs";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -147,7 +148,8 @@ export async function projects(ctx) {
   }
   if (req.method === "POST" && parts[0] === "projects" && parts[2] === "remove") {
     const idx = state.projects.findIndex((p) => p.id === parts[1]);
-    if (idx === -1) return json(res, 404, { error: "Project not found." });
+    if (idx === -1 || isHiddenProject(state.projects[idx]))
+      return json(res, 404, { error: "Project not found." });
     const busy =
       state.sessions.some((s) => s.projectId === parts[1] && turns.isBusy(s)) ||
       devServers.hasRunning(parts[1]);

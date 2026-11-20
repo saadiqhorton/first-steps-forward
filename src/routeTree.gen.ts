@@ -20,6 +20,7 @@ import { Route as SessionsSessionIdRouteImport } from './routes/sessions.$sessio
 import { Route as TasksNewRouteImport } from './routes/tasks.new'
 import { Route as WorkspaceIndexRouteImport } from './routes/workspace.index'
 import { Route as WorkspaceAssistantRouteImport } from './routes/workspace.assistant'
+import { Route as WorkspaceCustomizeRouteImport } from './routes/workspace.customize'
 import { Route as WorkspaceInboxRouteImport } from './routes/workspace.inbox'
 import { Route as WorkspaceProjectsRouteImport } from './routes/workspace.projects'
 import { Route as WorkspaceSettingsRouteImport } from './routes/workspace.settings'
@@ -31,6 +32,8 @@ import { Route as PProjectIdSkillsRouteImport } from './routes/p.$projectId.skil
 import { Route as PProjectIdWorkflowsRouteImport } from './routes/p.$projectId.workflows'
 import { Route as WorkspaceAssistantIndexRouteImport } from './routes/workspace.assistant.index'
 import { Route as WorkspaceAssistantThreadIdRouteImport } from './routes/workspace.assistant.$threadId'
+import { Route as WorkspaceCustomizeIndexRouteImport } from './routes/workspace.customize.index'
+import { Route as WorkspaceCustomizeChangeIdRouteImport } from './routes/workspace.customize.$changeId'
 import { Route as PProjectIdConversationsIndexRouteImport } from './routes/p.$projectId.conversations.index'
 import { Route as PProjectIdConversationsSessionIdRouteImport } from './routes/p.$projectId.conversations.$sessionId'
 
@@ -89,6 +92,11 @@ const WorkspaceAssistantRoute = WorkspaceAssistantRouteImport.update({
   path: '/assistant',
   getParentRoute: () => WorkspaceRoute,
 } as any)
+const WorkspaceCustomizeRoute = WorkspaceCustomizeRouteImport.update({
+  id: '/customize',
+  path: '/customize',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
 const WorkspaceInboxRoute = WorkspaceInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
@@ -145,6 +153,17 @@ const WorkspaceAssistantThreadIdRoute =
     path: '/$threadId',
     getParentRoute: () => WorkspaceAssistantRoute,
   } as any)
+const WorkspaceCustomizeIndexRoute = WorkspaceCustomizeIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => WorkspaceCustomizeRoute,
+} as any)
+const WorkspaceCustomizeChangeIdRoute =
+  WorkspaceCustomizeChangeIdRouteImport.update({
+    id: '/$changeId',
+    path: '/$changeId',
+    getParentRoute: () => WorkspaceCustomizeRoute,
+  } as any)
 const PProjectIdConversationsIndexRoute =
   PProjectIdConversationsIndexRouteImport.update({
     id: '/',
@@ -169,6 +188,7 @@ export interface FileRoutesByFullPath {
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/tasks/new': typeof TasksNewRoute
   '/workspace/assistant': typeof WorkspaceAssistantRouteWithChildren
+  '/workspace/customize': typeof WorkspaceCustomizeRouteWithChildren
   '/workspace/inbox': typeof WorkspaceInboxRoute
   '/workspace/projects': typeof WorkspaceProjectsRoute
   '/workspace/settings': typeof WorkspaceSettingsRoute
@@ -179,8 +199,10 @@ export interface FileRoutesByFullPath {
   '/p/$projectId/skills': typeof PProjectIdSkillsRoute
   '/p/$projectId/workflows': typeof PProjectIdWorkflowsRoute
   '/workspace/assistant/$threadId': typeof WorkspaceAssistantThreadIdRoute
+  '/workspace/customize/$changeId': typeof WorkspaceCustomizeChangeIdRoute
   '/p/$projectId/': typeof PProjectIdIndexRoute
   '/workspace/assistant/': typeof WorkspaceAssistantIndexRoute
+  '/workspace/customize/': typeof WorkspaceCustomizeIndexRoute
   '/p/$projectId/conversations/$sessionId': typeof PProjectIdConversationsSessionIdRoute
   '/p/$projectId/conversations/': typeof PProjectIdConversationsIndexRoute
 }
@@ -201,8 +223,10 @@ export interface FileRoutesByTo {
   '/p/$projectId/skills': typeof PProjectIdSkillsRoute
   '/p/$projectId/workflows': typeof PProjectIdWorkflowsRoute
   '/workspace/assistant/$threadId': typeof WorkspaceAssistantThreadIdRoute
+  '/workspace/customize/$changeId': typeof WorkspaceCustomizeChangeIdRoute
   '/p/$projectId': typeof PProjectIdIndexRoute
   '/workspace/assistant': typeof WorkspaceAssistantIndexRoute
+  '/workspace/customize': typeof WorkspaceCustomizeIndexRoute
   '/p/$projectId/conversations/$sessionId': typeof PProjectIdConversationsSessionIdRoute
   '/p/$projectId/conversations': typeof PProjectIdConversationsIndexRoute
 }
@@ -218,6 +242,7 @@ export interface FileRoutesById {
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/tasks/new': typeof TasksNewRoute
   '/workspace/assistant': typeof WorkspaceAssistantRouteWithChildren
+  '/workspace/customize': typeof WorkspaceCustomizeRouteWithChildren
   '/workspace/inbox': typeof WorkspaceInboxRoute
   '/workspace/projects': typeof WorkspaceProjectsRoute
   '/workspace/settings': typeof WorkspaceSettingsRoute
@@ -228,8 +253,10 @@ export interface FileRoutesById {
   '/p/$projectId/skills': typeof PProjectIdSkillsRoute
   '/p/$projectId/workflows': typeof PProjectIdWorkflowsRoute
   '/workspace/assistant/$threadId': typeof WorkspaceAssistantThreadIdRoute
+  '/workspace/customize/$changeId': typeof WorkspaceCustomizeChangeIdRoute
   '/p/$projectId/': typeof PProjectIdIndexRoute
   '/workspace/assistant/': typeof WorkspaceAssistantIndexRoute
+  '/workspace/customize/': typeof WorkspaceCustomizeIndexRoute
   '/p/$projectId/conversations/$sessionId': typeof PProjectIdConversationsSessionIdRoute
   '/p/$projectId/conversations/': typeof PProjectIdConversationsIndexRoute
 }
@@ -246,6 +273,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/tasks/new'
     | '/workspace/assistant'
+    | '/workspace/customize'
     | '/workspace/inbox'
     | '/workspace/projects'
     | '/workspace/settings'
@@ -256,8 +284,10 @@ export interface FileRouteTypes {
     | '/p/$projectId/skills'
     | '/p/$projectId/workflows'
     | '/workspace/assistant/$threadId'
+    | '/workspace/customize/$changeId'
     | '/p/$projectId/'
     | '/workspace/assistant/'
+    | '/workspace/customize/'
     | '/p/$projectId/conversations/$sessionId'
     | '/p/$projectId/conversations/'
   fileRoutesByTo: FileRoutesByTo
@@ -278,8 +308,10 @@ export interface FileRouteTypes {
     | '/p/$projectId/skills'
     | '/p/$projectId/workflows'
     | '/workspace/assistant/$threadId'
+    | '/workspace/customize/$changeId'
     | '/p/$projectId'
     | '/workspace/assistant'
+    | '/workspace/customize'
     | '/p/$projectId/conversations/$sessionId'
     | '/p/$projectId/conversations'
   id:
@@ -294,6 +326,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/tasks/new'
     | '/workspace/assistant'
+    | '/workspace/customize'
     | '/workspace/inbox'
     | '/workspace/projects'
     | '/workspace/settings'
@@ -304,8 +337,10 @@ export interface FileRouteTypes {
     | '/p/$projectId/skills'
     | '/p/$projectId/workflows'
     | '/workspace/assistant/$threadId'
+    | '/workspace/customize/$changeId'
     | '/p/$projectId/'
     | '/workspace/assistant/'
+    | '/workspace/customize/'
     | '/p/$projectId/conversations/$sessionId'
     | '/p/$projectId/conversations/'
   fileRoutesById: FileRoutesById
@@ -401,6 +436,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceAssistantRouteImport
       parentRoute: typeof WorkspaceRoute
     }
+    '/workspace/customize': {
+      id: '/workspace/customize'
+      path: '/customize'
+      fullPath: '/workspace/customize'
+      preLoaderRoute: typeof WorkspaceCustomizeRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
     '/workspace/inbox': {
       id: '/workspace/inbox'
       path: '/inbox'
@@ -478,6 +520,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceAssistantThreadIdRouteImport
       parentRoute: typeof WorkspaceAssistantRoute
     }
+    '/workspace/customize/': {
+      id: '/workspace/customize/'
+      path: '/'
+      fullPath: '/workspace/customize/'
+      preLoaderRoute: typeof WorkspaceCustomizeIndexRouteImport
+      parentRoute: typeof WorkspaceCustomizeRoute
+    }
+    '/workspace/customize/$changeId': {
+      id: '/workspace/customize/$changeId'
+      path: '/$changeId'
+      fullPath: '/workspace/customize/$changeId'
+      preLoaderRoute: typeof WorkspaceCustomizeChangeIdRouteImport
+      parentRoute: typeof WorkspaceCustomizeRoute
+    }
     '/p/$projectId/conversations/': {
       id: '/p/$projectId/conversations/'
       path: '/'
@@ -508,8 +564,22 @@ const WorkspaceAssistantRouteChildren: WorkspaceAssistantRouteChildren = {
 const WorkspaceAssistantRouteWithChildren =
   WorkspaceAssistantRoute._addFileChildren(WorkspaceAssistantRouteChildren)
 
+interface WorkspaceCustomizeRouteChildren {
+  WorkspaceCustomizeChangeIdRoute: typeof WorkspaceCustomizeChangeIdRoute
+  WorkspaceCustomizeIndexRoute: typeof WorkspaceCustomizeIndexRoute
+}
+
+const WorkspaceCustomizeRouteChildren: WorkspaceCustomizeRouteChildren = {
+  WorkspaceCustomizeChangeIdRoute: WorkspaceCustomizeChangeIdRoute,
+  WorkspaceCustomizeIndexRoute: WorkspaceCustomizeIndexRoute,
+}
+
+const WorkspaceCustomizeRouteWithChildren =
+  WorkspaceCustomizeRoute._addFileChildren(WorkspaceCustomizeRouteChildren)
+
 interface WorkspaceRouteChildren {
   WorkspaceAssistantRoute: typeof WorkspaceAssistantRouteWithChildren
+  WorkspaceCustomizeRoute: typeof WorkspaceCustomizeRouteWithChildren
   WorkspaceInboxRoute: typeof WorkspaceInboxRoute
   WorkspaceProjectsRoute: typeof WorkspaceProjectsRoute
   WorkspaceSettingsRoute: typeof WorkspaceSettingsRoute
@@ -518,6 +588,7 @@ interface WorkspaceRouteChildren {
 
 const WorkspaceRouteChildren: WorkspaceRouteChildren = {
   WorkspaceAssistantRoute: WorkspaceAssistantRouteWithChildren,
+  WorkspaceCustomizeRoute: WorkspaceCustomizeRouteWithChildren,
   WorkspaceInboxRoute: WorkspaceInboxRoute,
   WorkspaceProjectsRoute: WorkspaceProjectsRoute,
   WorkspaceSettingsRoute: WorkspaceSettingsRoute,

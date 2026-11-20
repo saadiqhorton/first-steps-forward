@@ -16,6 +16,7 @@ export default tseslint.config(
       ".agents/**",
       ".untangle/**",
       "tmp/**",
+      "cook/**",
       "cook-archive/**",
       "artifacts/**",
       "unslop/**",

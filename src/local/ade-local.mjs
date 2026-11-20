@@ -54,6 +54,9 @@ import { workspaceHandoffs as workspaceHandoffsRoute } from "./routes/workspaceH
 import { createWorkspaceOrganization } from "./workspace-organization.mjs";
 import { workspaceOrganization } from "./routes/workspaceOrganization.mjs";
 import { startProjectSession } from "./routes/sessionReads.mjs";
+import { createCustomize } from "./customize/index.mjs";
+import { customize as customizeRoute } from "./routes/customize.mjs";
+import { isHiddenProject, isHiddenSession } from "./customize/paths.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
@@ -135,13 +138,16 @@ const turns = createSessionTurns({
   logs: sessionLogs,
   isAgentUpdating: (agentId) => harnessJobs.get(agentId).status === "running",
   emit: (scope) => eventHub.emit(scope),
-  turnEnded: () => refreshBootstrapInBackground(eventHub.activeProjects()),
+  turnEnded: (session) => {
+    refreshBootstrapInBackground(eventHub.activeProjects());
+    customize.onTurnEnd(session);
+  },
   workspaceTools: (session) => sessionWorkspaceTools(session),
   turnContext: async (project, session) => {
     // The manifest says which dev command applies now, not as of the last bootstrap poll.
-    const { changed } = await devServers
-      .refreshDevProcess(project)
-      .catch(() => ({ changed: false }));
+    const { changed } = isHiddenProject(project)
+      ? { changed: false }
+      : await devServers.refreshDevProcess(project).catch(() => ({ changed: false }));
     if (changed) save().catch(() => {});
     return {
       computer: computerContext(project, session?.id),
@@ -378,6 +384,27 @@ handoffs = createWorkspaceHandoffs({
   },
 });
 sessionWorkspaceTools = (session) => handoffs.sessionCapability(session);
+// Customize ADE: a private copy of ADE's source an agent changes (a hidden project).
+const customize = createCustomize({
+  dataDir: DATA_DIR,
+  appState: state,
+  saveApp: () => save(),
+  emit: (scope) => eventHub.emit(scope),
+  deps: {
+    startSession: async (input) => {
+      const session = await startProjectSession(
+        { state, turns, DATA_DIR, resolveSessionOptions, UNSUPPORTED_RISK },
+        input,
+      );
+      await save();
+      return session;
+    },
+    sendMessage: (session, text) => turns.send(session, { text }, "later"),
+    stopSession: (session) => turns.stop(session),
+    getSession: (sessionId) => state.sessions.find((item) => item.id === sessionId),
+    isBusy: (session) => turns.isBusy(session),
+  },
+});
 // Viewers reach the stream through /preview-stream on the server that serves
 // the UI and API (see handleUpgrade); it never listens on its own.
 const browserStream = createBrowserStreamServer({
@@ -453,10 +480,13 @@ const summaryOf = (session) => {
     lastUserMessageAt,
   };
 };
+// The private ADE copy (a hidden project) and its sessions never show in project lists.
 const bootstrapPayload = () => ({
-  projects: state.projects.map(safeProject),
-  sessions: state.sessions.map(summaryOf),
-  processes: state.processes.map(({ output, ...process }) => process),
+  projects: state.projects.filter((p) => !isHiddenProject(p)).map(safeProject),
+  sessions: state.sessions.filter((s) => !isHiddenSession(state, s)).map(summaryOf),
+  processes: state.processes
+    .filter((p) => !isHiddenProject(state.projects.find((x) => x.id === p.projectId)))
+    .map(({ output, ...process }) => process),
   agents: state.agents,
 });
 async function save() {
@@ -581,7 +611,7 @@ function refreshBootstrapInBackground(activeProjectIds = []) {
         if (!p.missing) {
           // Re-scan scripts.dev after returning the saved workspace snapshot;
           // the next poll picks up any newly discovered dev process.
-          const { changed } = await refreshDevProcess(p);
+          const { changed } = isHiddenProject(p) ? { changed: false } : await refreshDevProcess(p);
           if (changed) devStateChanged = true;
         }
         if (p.missing || !needsDiff.has(p.id)) continue;
@@ -827,6 +857,7 @@ const routes = [
   agents,
   workflows,
   skills,
+  customizeRoute,
 ];
 // This browser's proof of the token: HttpOnly, sent on same-site navigations, kept for a year.
 function setAuthCookie(res) {
@@ -931,6 +962,7 @@ export async function handle(req, res) {
       refreshBootstrapInBackground,
       sessionLogs,
       turns,
+      customize,
       workspaceAssistant,
       handoffs,
       organization: workspaceOrganizationService,
@@ -1011,7 +1043,7 @@ let started = null;
  * first (Vite's dev/preview servers, or src/local/server.mjs). Idempotent.
  */
 export function start() {
-  started ??= load();
+  started ??= load().then(() => customize.init().catch(() => {}));
   void started.then(() => devServers.startMonitor());
   return started;
 }

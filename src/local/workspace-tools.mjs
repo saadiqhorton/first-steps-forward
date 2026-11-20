@@ -1,3 +1,4 @@
+import { isHiddenProject, isHiddenSession } from "./customize/paths.mjs";
 const clip = (value, limit = 1200) => String(value ?? "").slice(0, limit);
 export const TOOLS = [
   {
@@ -114,11 +115,15 @@ export const TOOLS = [
 export async function runWorkspaceTool(name, args = {}, context = {}) {
   const { state = { projects: [], sessions: [] } } = context;
   if (name === "workspace_list_projects")
-    return state.projects.map(({ id, name, path }) => ({ id, name, path })).slice(0, 100);
+    return state.projects
+      .filter((project) => !isHiddenProject(project))
+      .map(({ id, name, path }) => ({ id, name, path }))
+      .slice(0, 100);
   if (name === "workspace_search_sessions") {
     const q = clip(args.query, 160).trim().toLowerCase();
     if (!q) throw new Error("Enter a search phrase.");
     return state.sessions
+      .filter((s) => !isHiddenSession(state, s))
       .filter((s) =>
         [s.request, s.summary, ...(s.messages ?? []).map((m) => m.text)]
           .join(" ")

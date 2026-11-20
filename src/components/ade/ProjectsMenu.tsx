@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Inbox, MessageCircle, Wrench } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,6 +65,30 @@ export function ProjectsMenu({
         <ChevronDown className="size-3.5 shrink-0" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[16rem] border-line bg-panel">
+        {showActiveName && (
+          <>
+            {/* Phones hide the workspace links in the top bar; they live here instead. */}
+            <DropdownMenuItem asChild>
+              <Link to="/workspace/inbox" className="cursor-pointer gap-2 text-ui">
+                <Inbox className="size-4 text-dim" strokeWidth={1.5} aria-hidden />
+                Inbox
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/workspace/assistant" className="cursor-pointer gap-2 text-ui">
+                <MessageCircle className="size-4 text-dim" strokeWidth={1.5} aria-hidden />
+                Luna
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/workspace/customize" className="cursor-pointer gap-2 text-ui">
+                <Wrench className="size-4 text-dim" strokeWidth={1.5} aria-hidden />
+                Customize ADE
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         {projects.map((p) => (
           <DropdownMenuItem
             key={p.id}

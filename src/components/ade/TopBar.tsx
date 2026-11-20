@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Inbox, MessageCircle, Plus, Settings } from "lucide-react";
+import { Inbox, MessageCircle, Plus, Settings, Wrench } from "lucide-react";
 import { getAssistantThreads } from "@/lib/ade/workspaceApi";
+import { customizeDot, useCustomize } from "@/lib/ade/customizeApi";
 import { GlideIndicator } from "@/components/ade/motion";
 import { projectColor } from "@/components/ade/projectColor";
 import { ProjectsMenu } from "@/components/ade/ProjectsMenu";
@@ -46,6 +47,9 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
     (thread) => thread.status === "thinking",
   );
 
+  const customize = useCustomize();
+  const customizeState = customizeDot(customize.data);
+
   const activeFromRoute = projectIdFromPath(pathname);
   const activeId = activeFromRoute ?? activeProjectId;
 
@@ -88,6 +92,25 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
                 assistantWorking
                   ? "Luna is working"
                   : `${unreadChats} unseen assistant ${unreadChats === 1 ? "reply" : "replies"}`
+              }
+            />
+          )}
+        </Link>
+        <Link
+          to="/workspace/customize"
+          className="topbar-workspace-link"
+          activeProps={{ className: "topbar-workspace-link active" }}
+          suppressHydrationWarning
+        >
+          <Wrench className="size-4" strokeWidth={1.5} aria-hidden /> Customize ADE
+          {customizeState && (
+            <span
+              className={`topbar-assistant-dot ${customizeState === "working" ? "working" : ""}`}
+              title={
+                customizeState === "working" ? "A change is being built" : "A change needs you"
+              }
+              aria-label={
+                customizeState === "working" ? "A change is being built" : "A change needs you"
               }
             />
           )}

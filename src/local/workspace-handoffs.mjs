@@ -6,6 +6,7 @@
 // key makes a retried request idempotent, and the target message/turn marks
 // which reply belongs to this request. A pre-existing turn finishing in the
 // same session can never satisfy a handoff.
+import { isHiddenProject } from "./customize/paths.mjs";
 import { randomUUID } from "node:crypto";
 
 const TERMINAL = new Set(["replied", "declined", "cancelled", "missing_target", "interrupted"]);
@@ -80,6 +81,10 @@ export function createWorkspaceHandoffs({
   const records = () => (state.handoffs ??= []);
 
   const projectOf = (projectId) => state.projects.find((item) => item.id === projectId) ?? null;
+  const visibleProject = (projectId) => {
+    const project = projectOf(projectId);
+    return project && !isHiddenProject(project) ? project : null;
+  };
   const sessionOf = (sessionId) => state.sessions.find((item) => item.id === sessionId) ?? null;
   const targetLabel = (record) =>
     record.targetProjectName || projectOf(record.targetProjectId)?.name || "Project";
@@ -298,7 +303,7 @@ export function createWorkspaceHandoffs({
     deliveryKey,
     { confirmed = false, attempt = 1 } = {},
   ) {
-    const project = target.projectId ? projectOf(target.projectId) : null;
+    const project = target.projectId ? visibleProject(target.projectId) : null;
     const existing = records().find(
       (record) =>
         record.deliveryKey === deliveryKey &&
