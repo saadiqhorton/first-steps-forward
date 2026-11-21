@@ -115,6 +115,8 @@ export function superviseAde({
         ...env,
         ADE_SUPERVISED: "1",
         ADE_RUNNING_SHA: target ?? "",
+        // The version `ade` was installed with: what a kept build is updated to.
+        ADE_STOCK_ROOT: path.dirname(path.dirname(stockBin)),
         ...(quiet ? { ADE_LAUNCH_QUIET: "1" } : {}),
       },
       stdio: ["inherit", "pipe", "pipe", "ipc"],

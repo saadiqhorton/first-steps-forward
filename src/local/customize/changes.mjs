@@ -1,7 +1,7 @@
 import path from "node:path";
 import { createGit } from "./git.mjs";
 import { pendingChecks, runChecks } from "./checks.mjs";
-import { SELF_PROJECT_ID } from "./paths.mjs";
+import { SELF_PROJECT_ID, SELF_UPDATE_PROJECT_ID } from "./paths.mjs";
 
 export class CustomizeError extends Error {
   constructor(status, message) {
@@ -34,6 +34,7 @@ const titleOf = (request) =>
 const branchOf = (change) => `change/${change.id}`;
 const isoNow = (ctx) => new Date(ctx.now()).toISOString();
 const inProgress = (change) => ACTIVE.includes(change.status) && !change.commit;
+export const hasChangeInProgress = (ctx) => ctx.data.changes.some(inProgress);
 
 export const findChange = (ctx, id) => {
   const change = ctx.data.changes.find((item) => item.id === id);
@@ -78,6 +79,11 @@ export async function createChange(ctx, input) {
     throw new CustomizeError(400, "Describe the change in at least four characters.");
   if (ctx.data.changes.some(inProgress))
     throw new CustomizeError(409, "Finish or undo the change in progress before starting another.");
+  if (ctx.data.update?.status === "applying" || ctx.data.update?.status === "needs-you")
+    throw new CustomizeError(
+      409,
+      "ADE is updating your changes to the new version. Start a new change when that is done.",
+    );
   const id = ctx.id();
   const branch = `change/${id}`;
   await ctx.git.must(["checkout", "-f", "mine"]);
@@ -123,6 +129,7 @@ export async function createChange(ctx, input) {
 
 /** Session machinery tells us a turn finished; advance that change. */
 export function onTurnEnd(ctx, session) {
+  if (ctx.updater?.onTurnEnd(session)) return;
   const change = ctx.data.changes.find((item) => item.sessionId === session.id);
   if (!change) {
     if (session.projectId === SELF_PROJECT_ID) ctx.orphans.add(session.id);

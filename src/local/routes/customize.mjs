@@ -17,6 +17,27 @@ export async function customize(ctx) {
     }
     if (parts.length === 2 && parts[1] === "restart" && method === "POST")
       return json(res, 202, { switch: await service.restart() });
+    if (parts[1] === "update" && parts.length === 3 && method === "POST") {
+      const action = parts[2];
+      if (action === "check") {
+        const result = await service.checkForUpdate();
+        return json(res, 202, { ...result, update: (await service.status()).update });
+      }
+      if (action === "stay") {
+        await service.stayOnCurrent();
+        return json(res, 200, { update: null });
+      }
+      if (action === "retry" || action === "skip") {
+        const { changeId } = await body(req);
+        if (typeof changeId !== "string" || !changeId)
+          return json(res, 400, { error: "Say which change." });
+        const update =
+          action === "retry"
+            ? await service.retryUpdate(changeId)
+            : await service.skipUpdate(changeId);
+        return json(res, 202, { update });
+      }
+    }
     if (parts[1] === "changes") {
       if (parts.length === 2 && method === "POST") {
         const data = await body(req);

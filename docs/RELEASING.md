@@ -13,6 +13,9 @@ manifest), and contains only what the Node server needs at runtime.
    ```
 
    This builds the app, stages it in `.pack/stage`, and writes `.pack/dezignerdrugz-ade-<version>.tgz`.
+   The package also ships ADE's own tracked source as `self-source/` (about +0.9 MB packed), which
+   Customize ADE copies and later re-applies kept changes onto; packaging fails if it holds a
+   `.env*`, `.pem`, `.key`, `settings.local.json` or `remote-token` file (`scripts/self-source.mjs`).
 
 3. Optionally try the tarball the way users will run it:
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AgentSelection } from "@/components/ade/AgentPicker";
@@ -10,7 +10,13 @@ import { ChangePanel, usePanelTab } from "@/components/ade/customize/ChangePanel
 import { CustomizeFrame, CustomizeGate } from "@/components/ade/customize/CustomizeGate";
 import { paneVisibility, useCustomizePane } from "@/components/ade/customize/paneContext";
 import { checkLabel } from "@/components/ade/customize/customizeText";
-import { CUSTOMIZE_KEY, NEEDS_YOU, type Change, type CustomizeState } from "@/lib/ade/customizeApi";
+import {
+  CUSTOMIZE_KEY,
+  NEEDS_YOU,
+  previewRunning,
+  type Change,
+  type CustomizeState,
+} from "@/lib/ade/customizeApi";
 import { useAde, useSession } from "@/lib/ade/store";
 
 export const Route = createFileRoute("/workspace/customize/$changeId")({
@@ -70,11 +76,36 @@ function ChangeView({ change, state }: { change: Change; state: CustomizeState }
   const { pane, setPane } = useCustomizePane();
   const [tab, setTab] = usePanelTab(change);
   const [reveal, setReveal] = useState(0);
+  // Expand preview: the running preview covers the conversation; Esc or Back returns.
+  const [expanded, setExpandedState] = useState(false);
+  const running = previewRunning(change);
+  const setExpanded = useCallback(
+    (next: boolean) => {
+      setExpandedState(next);
+      if (next) setTab("preview");
+      // Phones: back lands on the conversation, not on a second, smaller preview.
+      else if (window.matchMedia("(max-width: 1023px)").matches) setPane("conversation");
+    },
+    [setTab, setPane],
+  );
+  useEffect(() => {
+    if (!running) setExpandedState(false);
+  }, [running]);
+  // Try it opens the panel on Preview; once the preview runs, the same button expands it.
   const showPreview = () => {
     setTab("preview");
     setReveal((n) => n + 1);
     setPane("details");
+    if (running) setExpanded(true);
   };
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) setExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded, setExpanded]);
   const { steer } = useAde();
   const client = useQueryClient();
   const session = useSession(change.sessionId);
@@ -121,7 +152,7 @@ function ChangeView({ change, state }: { change: Change; state: CustomizeState }
   return (
     <>
       <main
-        className={`min-h-0 min-w-0 flex-1 flex-col overflow-hidden @container ${paneVisibility(pane === "conversation")}`}
+        className={`min-h-0 min-w-0 flex-1 flex-col overflow-hidden @container ${expanded ? "hidden" : paneVisibility(pane === "conversation")}`}
       >
         <ChangeHeader change={change} state={state} />
         <ChangeConversation change={change} />
@@ -163,6 +194,8 @@ function ChangeView({ change, state }: { change: Change; state: CustomizeState }
         tab={tab}
         onTabChange={setTab}
         reveal={reveal}
+        expanded={expanded && running}
+        onExpand={setExpanded}
       />
     </>
   );

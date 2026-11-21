@@ -13,8 +13,22 @@ const exists = (p) =>
  * the tracked files at HEAD of a git checkout. Reasons are written for users.
  * @returns {Promise<{ available: boolean, kind?: "packaged"|"checkout", dir?: string, version: string, reason?: string }>}
  */
-export async function resolveStock({ sourceRoot, run }) {
+export async function resolveStock({ sourceRoot, run, env = process.env }) {
   let version = "";
+  // Test and dev hook: a folder with a newer package.json stands in for the stock source and version.
+  const override = env.ADE_SELF_STOCK_SOURCE;
+  if (override) {
+    try {
+      const manifest = JSON.parse(await fs.readFile(path.join(override, "package.json"), "utf8"));
+      return { available: true, kind: "packaged", dir: override, version: manifest.version ?? "" };
+    } catch {
+      return {
+        available: false,
+        version,
+        reason: "ADE_SELF_STOCK_SOURCE does not hold a readable package.json.",
+      };
+    }
+  }
   try {
     version =
       JSON.parse(await fs.readFile(path.join(sourceRoot, "package.json"), "utf8")).version ?? "";
@@ -38,11 +52,16 @@ export async function resolveStock({ sourceRoot, run }) {
   };
 }
 
+const SKIPPED = new Set(["node_modules", ".git", ".output"]);
+
 /** Put the stock source into `dest` (created here). Throws with the real failure text. */
 export async function exportStock(stock, dest, { run }) {
   await fs.mkdir(dest, { recursive: true, mode: 0o700 });
   if (stock.kind === "packaged") {
-    await fs.cp(stock.dir, dest, { recursive: true });
+    await fs.cp(stock.dir, dest, {
+      recursive: true,
+      filter: (file) => !SKIPPED.has(path.basename(file)),
+    });
     return;
   }
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ade-stock-"));

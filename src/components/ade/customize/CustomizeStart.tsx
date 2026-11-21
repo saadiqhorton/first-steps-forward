@@ -112,9 +112,9 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
 
   return (
     <div className="flex w-full max-w-3xl flex-col px-4 py-6 @lg:px-7 @lg:py-10">
-      {state.update && state.update.status !== "done" && (
-        <div className="mb-8">
-          <UpdateNotice update={state.update} />
+      {state.update && (
+        <div className="mb-8 empty:hidden">
+          <UpdateNotice state={state} />
         </div>
       )}
       <h1 className="heading-display text-2xl @lg:text-3xl">What should ADE do differently?</h1>

@@ -1,9 +1,10 @@
 // Agent-proposed dev commands through ADE's API (docs/adr/0005): the agent proposes, the user
 // approves once in the session, and ADE runs the command itself. Real spawns, real ports.
-import test from "node:test";
+import test, { after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -28,17 +29,45 @@ const posixOnly = process.platform === "win32" ? "uses POSIX shims and symlinks"
 const node = JSON.stringify(process.execPath);
 // Records how it was launched into launched.json in its working folder, then serves on the
 // port from --listen <n>, or PORT.
+// It also logs its pid (so the tests can prove it is gone) and ends itself after two minutes:
+// ADE starts it detached, in its own process group, so nothing that kills the test run reaches it.
 const recorder = path.join(home, "recorder.cjs");
+const pidLog = path.join(home, "recorder-pids.txt");
 writeFileSync(
   recorder,
   `const fs = require("node:fs");
 const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(pidLog)}, process.pid + "\\n");
+setTimeout(() => process.exit(0), 120000);
 fs.writeFileSync("launched.json", JSON.stringify({ argv: args, PORT: process.env.PORT, HOST: process.env.HOST, PATH: process.env.PATH, cwd: process.cwd() }));
 const at = args.indexOf("--listen");
 const port = at >= 0 ? Number(args[at + 1]) : Number(process.env.PORT);
 require("node:http").createServer((q, s) => s.end("ok")).listen(port, "127.0.0.1");
 `,
 );
+
+const recorderPids = () =>
+  existsSync(pidLog) ? readFileSync(pidLog, "utf8").split("\n").filter(Boolean).map(Number) : [];
+const isAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const liveRecorders = () => recorderPids().filter(isAlive);
+const killRecorders = () => {
+  for (const pid of liveRecorders()) {
+    for (const target of [-pid, pid]) {
+      try {
+        process.kill(target, "SIGKILL");
+      } catch {}
+    }
+  }
+};
+// Whatever else happens (a failed assertion, a timeout, Ctrl+C), no recorder outlives this run.
+process.once("exit", killRecorders);
 
 const projects = [];
 const sessions = [];
@@ -100,6 +129,14 @@ seed("script", {
 });
 const nosessionDir = seed("nosession");
 seed("wait");
+// Takes 400 ms to exit after SIGTERM, so its exit arrives after a stop (and a restart) returned.
+seed("slowstop", {
+  "server.js": `require("node:fs").appendFileSync(${JSON.stringify(pidLog)}, process.pid + "\\n");
+setTimeout(() => process.exit(0), 120000);
+process.on("SIGTERM", () => setTimeout(() => process.exit(0), 400));
+require("node:http").createServer((q, s) => s.end("ok")).listen(Number(process.env.PORT), "127.0.0.1");
+`,
+});
 seed("e2e", {
   "server.js":
     "require('node:http').createServer((q,s)=>s.end('hello from the app')).listen(Number(process.env.PORT), '127.0.0.1');\n",
@@ -117,6 +154,7 @@ writeFileSync(
 const {
   handle,
   start,
+  stop,
   setListenAddress,
   computerContext,
   _getSessionForTest,
@@ -129,6 +167,7 @@ const call = async (urlPath, body) => {
   const res = await callApi(handle, { url: `http://127.0.0.1:3000${urlPath}`, body });
   return { status: res.status, json: await res.json() };
 };
+const stopAll = () => Promise.all(projects.map((project) => stopDev(project.name).catch(() => {})));
 const startDev = (name, body) => call(`/api/projects/p-${name}/dev/start`, body);
 const stopDev = (name) => call(`/api/projects/p-${name}/dev/stop`, {});
 const asked = (name) => _getSessionForTest(`s-${name}`).pendingDevCommand;
@@ -155,6 +194,24 @@ const freePort = () =>
       server.close(() => resolve(port));
     });
   });
+
+// A test that fails halfway must not leave a server behind, and one that passes must not either.
+// A start still in flight when its test ends spawns after the first stop, so stop until all are gone.
+afterEach(async () => {
+  _setDevApprovalWaitForTest(5 * 60_000);
+  const deadline = Date.now() + 8000;
+  while (liveRecorders().length && Date.now() < deadline) {
+    await stopAll();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const left = liveRecorders();
+  killRecorders();
+  assert.deepEqual(left, [], "a recorder process outlived its test");
+});
+after(async () => {
+  await stopAll();
+  await stop();
+});
 
 test(
   "approve once: ADE runs the parsed argv with {port}, PORT/HOST and the venv on PATH, then reuses it",
@@ -212,11 +269,11 @@ test(
       // Reused with no new approval: no arguments, or the same command and folder.
       rmSync(path.join(ui, "launched.json"));
       const again = await startDev("approve", {});
-      assert.equal(again.json.status, "running");
+      assert.equal(again.json.status, "running", JSON.stringify(again.json));
       assert.equal(asked("approve"), undefined);
       await stopDev("approve");
       const same = await startDev("approve", { command, cwd: "./ui", sessionId: "s-approve" });
-      assert.equal(same.json.status, "running");
+      assert.equal(same.json.status, "running", JSON.stringify(same.json));
       assert.equal(asked("approve"), undefined);
       await stopDev("approve");
 
@@ -482,6 +539,22 @@ test("end to end: an approved `node server.js` really serves the app", async () 
   } finally {
     await stopDev("e2e");
   }
+});
+
+test("restarting right after a stop is not undone by the old process exiting late", async () => {
+  const command = `${node} server.js`;
+  const proposing = startDev("slowstop", { command, sessionId: "s-slowstop" });
+  await answer("slowstop", await waitFor(() => asked("slowstop"), "the request"), "allow");
+  assert.equal((await proposing).json.status, "running");
+  await stopDev("slowstop");
+  const again = await startDev("slowstop", {});
+  assert.equal(again.json.status, "running", JSON.stringify(again.json));
+  // The first process dies 400 ms after its stop; the second must stay up and recorded.
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  const status = (await call("/api/projects/p-slowstop/dev")).json;
+  assert.equal(status.status, "running", JSON.stringify(status));
+  const page = await fetch(`http://127.0.0.1:${again.json.port}/`);
+  assert.equal(await page.text(), "ok");
 });
 
 test("the agent's tools learn which session asks", () => {

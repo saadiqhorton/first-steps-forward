@@ -1,6 +1,8 @@
 import path from "node:path";
 
 export const SELF_PROJECT_ID = "ade-self";
+/** The hidden project the agent re-applies kept changes in while ADE updates. */
+export const SELF_UPDATE_PROJECT_ID = "ade-self-update";
 
 /** Files a customization may not change (functionality only, never the design system). */
 export const LOCKED_PATHS = [
@@ -24,6 +26,8 @@ export function selfPaths(dataDir) {
     source: path.join(root, "source"),
     partial: path.join(root, "source.partial"),
     builds: path.join(root, "builds"),
+    update: path.join(root, "update"),
+    updateWork: path.join(root, "update", "work"),
     homes: path.join(root, "homes"),
     backups: path.join(root, "backups"),
     workspace: path.join(dataDir, "workspace.json"),

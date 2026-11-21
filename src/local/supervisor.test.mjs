@@ -33,7 +33,7 @@ http
     res.end(JSON.stringify({
       who, pid: process.pid, grandchild: sleeper.pid,
       running: process.env.ADE_RUNNING_SHA, supervised: process.env.ADE_SUPERVISED,
-      quiet: process.env.ADE_LAUNCH_QUIET ?? null, args: process.argv.slice(2),
+      quiet: process.env.ADE_LAUNCH_QUIET ?? null, stockRoot: process.env.ADE_STOCK_ROOT ?? null, args: process.argv.slice(2),
     }));
   })
   .listen(port, "127.0.0.1", () => console.log("ADE is running: " + who));
@@ -126,6 +126,11 @@ test(
     assert.equal(first.who, SHA1);
     assert.equal(first.running, SHA1);
     assert.equal(first.supervised, "1");
+    assert.equal(
+      first.stockRoot,
+      path.dirname(path.dirname(f.stockBin)),
+      "a kept build learns which ADE it is updated to",
+    );
     assert.equal(first.quiet, null, "the first start prints ADE's links");
     assert.deepEqual(first.args, ["--port", String(port)]);
     await waitFor(() => ready, "onReady");

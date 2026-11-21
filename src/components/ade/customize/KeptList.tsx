@@ -65,7 +65,8 @@ export function KeptList({
   const now = useNow();
   const [confirming, setConfirming] = useState<string | null>(null);
   const kept = state.changes.filter((change) => change.status === "kept");
-  const switching = showSwitch && state.switch.status !== "idle";
+  // After an update, the update notice owns the restart card.
+  const switching = showSwitch && state.switch.status !== "idle" && state.update?.status !== "done";
   const without = runningWithoutChanges(state);
   if (!kept.length && !switching && !without) return null;
 

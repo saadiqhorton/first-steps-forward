@@ -70,7 +70,16 @@ export function StockNotice({ flag = false }: { flag?: boolean | undefined }) {
  * Where kept changes stand and the one thing to do next: restart, wait, or read why the
  * switch failed. `kept` adds the calm "it's running" line for a change view.
  */
-export function SwitchCard({ state, kept = false }: { state: CustomizeState; kept?: boolean }) {
+export function SwitchCard({
+  state,
+  kept = false,
+  title = "Kept in your ADE. Restart ADE to start using it.",
+}: {
+  state: CustomizeState;
+  kept?: boolean;
+  /** What is waiting for the restart, in the pending card. */
+  title?: string;
+}) {
   const restart = useRestartAde();
   const s = state.switch;
   const restartError =
@@ -82,7 +91,7 @@ export function SwitchCard({ state, kept = false }: { state: CustomizeState; kep
       <div className="rounded-md border border-amber/40 bg-amber/5 px-4 py-3" role="status">
         <p className="flex items-center gap-2 text-ui font-medium text-ink">
           <CircleCheck className="size-4 shrink-0 text-teal" strokeWidth={1.5} aria-hidden />
-          Kept in your ADE. Restart ADE to start using it.
+          {title}
         </p>
         {s.launcher ? (
           <>

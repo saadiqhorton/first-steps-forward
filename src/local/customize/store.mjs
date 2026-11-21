@@ -9,6 +9,9 @@ export const emptyState = () => ({
   current: { stock: true, sha: null },
   switch: { status: "idle" },
   update: null,
+  stockVersion: null,
+  installedDeps: null,
+  stayedOn: null,
 });
 
 /** state.json with private permissions, written atomically. */

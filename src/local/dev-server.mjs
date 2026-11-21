@@ -197,6 +197,32 @@ export function createDevServers({ state, save }) {
     }
     return out;
   }
+  /** Children whose exit ADE has fully seen (see stopAndWait). */
+  const closed = new WeakSet();
+  /**
+   * Stop a child and wait until it is gone (SIGKILL for its group after 5 s), so the stop has
+   * really finished when it returns: the next start reuses this record, and the old child's
+   * exit must not land in the middle of it.
+   */
+  async function stopAndWait(child) {
+    const gone = closed.has(child) ? Promise.resolve() : new Promise((r) => child.once("close", r));
+    stopChild(child);
+    const within = (ms) =>
+      new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(false), ms);
+        timer.unref?.();
+        gone.then(() => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
+    if (await within(5000)) return;
+    try {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+      else child.kill("SIGKILL");
+    } catch {}
+    await within(2000);
+  }
   function spawnProcess(proc, project, launch = {}) {
     const bin = launch.bin ?? proc.bin;
     const args = launch.args ?? proc.args;
@@ -214,7 +240,11 @@ export function createDevServers({ state, save }) {
     proc.startedAt = now();
     proc.output = [`$ ${bin} ${args.join(" ")}`];
     children.set(proc.id, child);
+    // The record is reused by the next start. A stopped child's late events (its exit arrives
+    // after the stop returned) must not mark the new child stopped or drop it from `children`.
+    const stale = () => children.get(proc.id) !== child;
     const line = (data) => {
+      if (stale()) return;
       proc.output = [...proc.output, ...data.toString().split(/\r?\n/).filter(Boolean)].slice(-300);
       proc.updatedAt = now();
       save().catch(() => {});
@@ -222,6 +252,7 @@ export function createDevServers({ state, save }) {
     child.stdout.on("data", line);
     child.stderr.on("data", line);
     child.on("error", (e) => {
+      if (stale()) return;
       proc.status = "stopped";
       delete proc.pid;
       // A process that never listened leaves no usable port behind.
@@ -231,6 +262,8 @@ export function createDevServers({ state, save }) {
       save().catch(() => {});
     });
     child.on("close", (code) => {
+      closed.add(child);
+      if (stale()) return;
       proc.status = "stopped";
       proc.stoppedAt = now();
       delete proc.pid;
@@ -398,7 +431,8 @@ export function createDevServers({ state, save }) {
       proc.updatedAt = now();
       await save();
     }
-    stopChild(child ?? proc.pid);
+    if (child) await stopAndWait(child);
+    else stopChild(proc.pid);
     if (proc.status !== "stopped" || proc.pid) {
       proc.status = "stopped";
       proc.stoppedAt = now();

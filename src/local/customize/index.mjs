@@ -8,6 +8,8 @@ import { resolveStock } from "./source.mjs";
 import { registerSelfProject, runSetup } from "./setup.mjs";
 import { createPreviews } from "./preview.mjs";
 import { createSwitch } from "./switch.mjs";
+import { createUpdater, updateView } from "./update.mjs";
+import { hashDeps } from "./builds.mjs";
 import {
   CustomizeError,
   createChange,
@@ -21,7 +23,10 @@ import {
 
 export { CustomizeError };
 
-const DEFAULT_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+// Under the `ade` supervisor this ADE runs from a kept build, but the stock version
+// is the one the supervisor itself was installed with (ADE_STOCK_ROOT).
+const DEFAULT_ROOT =
+  process.env.ADE_STOCK_ROOT || fileURLToPath(new URL("../../../", import.meta.url));
 
 /**
  * The Customize ADE service: setup of a private copy of ADE's source and the
@@ -39,6 +44,7 @@ const DEFAULT_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
  *     isBusy: (session: any) => boolean,
  *   },
  *   sourceRoot?: string,
+ *   env?: NodeJS.ProcessEnv,
  *   run?: typeof defaultRun,
  *   now?: () => number,
  *   id?: () => string,
@@ -57,6 +63,7 @@ export function createCustomize({
   emit = () => {},
   deps,
   sourceRoot = DEFAULT_ROOT,
+  env = process.env,
   // Checks, builds and installs run package scripts whose children must die
   // with them on timeout, or a hung test keeps a change "checking" forever.
   run = (bin, args, opts = {}) => defaultRun(bin, args, { killGroup: true, ...opts }),
@@ -102,7 +109,18 @@ export function createCustomize({
     },
     /** Every state change so far is on disk (before ADE is restarted). */
     flush: () => writes,
-    resolveStock: async () => (stock ??= await resolveStock({ sourceRoot, run })),
+    resolveStock: async (fresh = false) =>
+      fresh || !stock ? (stock = await resolveStock({ sourceRoot, run, env })) : stock,
+    /** Hash of the dependencies the copy's node_modules were installed from. */
+    async installedDeps() {
+      if (data.installedDeps) return data.installedDeps;
+      const first = (await ctx.git(["rev-list", "--max-parents=0", "stock"])).stdout
+        .trim()
+        .split(/\r?\n/)[0];
+      if (!first) return null;
+      const show = async (name) => (await ctx.git(["show", `${first}:${name}`])).stdout;
+      return hashDeps(await show("package.json"), await show("package-lock.json"));
+    },
     pipeline: (changeId) => pipelines.get(changeId) ?? Promise.resolve(),
     enqueue(changeId, fn) {
       const next = (pipelines.get(changeId) ?? Promise.resolve()).then(fn).catch((error) => {
@@ -123,6 +141,8 @@ export function createCustomize({
   ctx.previews = previews;
   const switcher = createSwitch(ctx, { launcher, ...switching });
   ctx.switcher = switcher;
+  const updater = createUpdater(ctx);
+  ctx.updater = updater;
 
   const runningSetup = () => data.setup.status === "running";
 
@@ -146,6 +166,11 @@ export function createCustomize({
       if (data.setup.status === "ready") await registerSelfProject(ctx);
       await switcher.reconcile();
       ctx.changed();
+      if (data.setup.status === "ready") {
+        await updater.resume();
+        // Is ADE newer than the copy? Looks in the background; failures are not the user's to handle.
+        void updater.check().catch(() => {});
+      }
     },
 
     async status() {
@@ -158,7 +183,7 @@ export function createCustomize({
         changes: data.changes.filter((c) => c.status !== "undone").map((c) => viewOf(ctx, c)),
         current: data.current,
         switch: switcher.view(),
-        update: data.update,
+        update: updateView(data.update),
       };
     },
 
@@ -181,6 +206,11 @@ export function createCustomize({
     keep: (changeId) => keepChange(ctx, changeId),
     undo: (changeId) => undoChange(ctx, changeId),
     remove: (changeId) => removeChange(ctx, changeId),
+    /** Is a newer ADE than the copy's installed? Starts re-applying kept changes when it is. */
+    checkForUpdate: () => updater.check(),
+    retryUpdate: (changeId) => updater.retry(changeId),
+    skipUpdate: (changeId) => updater.skip(changeId),
+    stayOnCurrent: () => updater.stay(),
     /** "Restart ADE": wait for agents, back up the workspace, restart on the kept version. */
     restart: () => switcher.restart(),
     onTurnEnd: (session) => onTurnEnd(ctx, session),
@@ -203,7 +233,7 @@ export function createCustomize({
 
     /** Wait for setup, change pipelines and state writes (tests, shutdown). */
     async idle() {
-      await Promise.all([setupRun, ...pipelines.values(), previews.settled()]);
+      await Promise.all([setupRun, ...pipelines.values(), previews.settled(), updater.settled()]);
       await switcher.settled();
       await writes;
     },

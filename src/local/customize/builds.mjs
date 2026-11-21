@@ -5,7 +5,74 @@
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+
+const DEP_FIELDS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+  "overrides",
+];
+
+/**
+ * Only what decides the installed packages: the dependency fields of
+ * package.json and the lockfile's packages, without the project's own name
+ * and version. A release that only bumps ADE's version must not reinstall
+ * ~0.7 GB of build tools. Unparsable files hash as written.
+ */
+function depsOnly(manifest, lock) {
+  try {
+    const pkg = JSON.parse(manifest || "{}");
+    const lockJson = JSON.parse(lock || "{}");
+    const packages = { ...(lockJson.packages ?? {}) };
+    if (packages[""]) {
+      const { name: _name, version: _version, ...root } = packages[""];
+      packages[""] = root;
+    }
+    return JSON.stringify([DEP_FIELDS.map((key) => pkg[key] ?? null), packages]);
+  } catch {
+    return `${manifest}\0${lock}`;
+  }
+}
+
+/** What a folder's dependencies are, as one hash of package.json and package-lock.json. */
+export const hashDeps = (manifest, lock) =>
+  createHash("sha256").update(depsOnly(manifest, lock)).digest("hex");
+
+export async function depsHash(dir) {
+  const read = (name) => fs.readFile(path.join(dir, name), "utf8").catch(() => "");
+  return hashDeps(await read("package.json"), await read("package-lock.json"));
+}
+
+/**
+ * Give `dir` its dependencies: linked from the private copy when `dir` needs the
+ * same ones the copy installed (`installed` is their hash; unknown counts as the
+ * same), else its own `npm ci`.
+ * @throws {Error} with npm's last lines
+ */
+export async function provideDeps({ paths, run, dir, installed, home, timeout = 600_000 }) {
+  if (!installed || (await depsHash(dir)) === installed) {
+    // A junction needs no admin rights on Windows.
+    await fs.symlink(
+      path.join(paths.source, "node_modules"),
+      path.join(dir, "node_modules"),
+      "junction",
+    );
+    return;
+  }
+  await fs.mkdir(home, { recursive: true, mode: 0o700 });
+  const result = await run("npm", ["ci", "--no-audit", "--no-fund"], {
+    cwd: dir,
+    env: { HOME: home, USERPROFILE: home, CI: "1" },
+    timeout,
+  });
+  await fs.rm(home, { recursive: true, force: true }).catch(() => {});
+  if (result.code !== 0 || result.timedOut)
+    throw new Error(
+      `Installing build tools failed: ${tail(`${result.stdout}\n${result.stderr}`, 12)}`,
+    );
+}
 
 /** The folder a kept version lives in. */
 export const buildDir = (paths, sha) => path.join(paths.builds, sha);
@@ -81,10 +148,17 @@ const tail = (text, n = 40) => text.trim().split(/\r?\n/).slice(-n).join("\n");
  * the private copy, and `.output` either moved in from `output` (the checks
  * already built this exact tree) or built here. Built in `<sha>.partial` and
  * renamed when complete, so a failure leaves nothing half-made.
- * @param {{ paths: ReturnType<typeof import("./paths.mjs").selfPaths>, run: typeof import("../spawn.mjs").runCommand, sha: string, output?: string|null, timeout?: number }} options
+ * @param {{ paths: ReturnType<typeof import("./paths.mjs").selfPaths>, run: typeof import("../spawn.mjs").runCommand, sha: string, output?: string|null, timeout?: number, installed?: string|null }} options
  * @throws {Error} with the build's last output lines
  */
-export async function prepareBuild({ paths, run, sha, output = null, timeout = 600_000 }) {
+export async function prepareBuild({
+  paths,
+  run,
+  sha,
+  output = null,
+  timeout = 600_000,
+  installed = null,
+}) {
   const dir = buildDir(paths, sha);
   if (usableBuild(paths, sha)) {
     if (output) await fs.rm(output, { recursive: true, force: true }).catch(() => {});
@@ -105,12 +179,15 @@ export async function prepareBuild({ paths, run, sha, output = null, timeout = 6
     const unpacked = await run("tar", ["-x", "-f", archive, "-C", partial]);
     if (unpacked.code !== 0)
       throw new Error(`Could not unpack your version: ${tail(unpacked.stderr, 4)}`);
-    // Dependencies come from the private copy; a junction needs no admin rights on Windows.
-    await fs.symlink(
-      path.join(paths.source, "node_modules"),
-      path.join(partial, "node_modules"),
-      "junction",
-    );
+    // Dependencies come from the private copy, unless this version changed them.
+    await provideDeps({
+      paths,
+      run,
+      dir: partial,
+      installed,
+      home: path.join(paths.homes, `deps-${sha.slice(0, 12)}`),
+      timeout,
+    });
     if (output) await fs.rename(output, path.join(partial, ".output"));
     else {
       const home = path.join(paths.homes, `build-${sha.slice(0, 12)}`);

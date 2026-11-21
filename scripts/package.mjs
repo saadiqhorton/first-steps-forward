@@ -8,6 +8,7 @@ import { builtinModules } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { stageSelfSource } from "./self-source.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const packDir = path.join(root, ".pack");
@@ -28,6 +29,8 @@ const PACKAGE_CONTENTS = [
   { from: "LICENSE" },
   { from: "THIRD_PARTY_NOTICES.md" },
 ];
+// ADE's own source, so Customize ADE can copy this exact version (see scripts/self-source.mjs).
+const SELF_SOURCE = "self-source";
 
 // node-pty@1.1.0 has no Linux prebuild, so installing it compiles C++ (python3, make, g++).
 // @lydell/node-pty is the same API with prebuilds for linux, darwin and win32 on x64 and arm64.
@@ -126,12 +129,15 @@ async function main() {
     type: "module",
     bin: { ade: "bin/ade.mjs" },
     engines: rootManifest.engines,
-    files: [...new Set(PACKAGE_CONTENTS.map(({ from, to = from }) => to))],
+    files: [...new Set(PACKAGE_CONTENTS.map(({ from, to = from }) => to)), SELF_SOURCE],
     dependencies,
     optionalDependencies,
     publishConfig: { access: "public" },
   };
   await fs.writeFile(path.join(stage, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+  // After the import scan above: the source's own imports are not the server's dependencies.
+  await stageSelfSource(root, path.join(stage, SELF_SOURCE));
 
   // --ignore-scripts: nothing in the staged tree needs a lifecycle script to pack.
   const pack = spawnSync("npm", ["pack", "--ignore-scripts", "--pack-destination", packDir], {

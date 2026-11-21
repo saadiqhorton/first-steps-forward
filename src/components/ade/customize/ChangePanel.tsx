@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
-import { Eye, FileText, PanelRightClose, PanelRightOpen, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  Eye,
+  FileText,
+  PanelRightClose,
+  PanelRightOpen,
+  ShieldCheck,
+} from "lucide-react";
 import { GlideIndicator } from "@/components/ade/motion";
-import type { Change, CustomizeState } from "@/lib/ade/customizeApi";
+import { previewRunning, type Change, type CustomizeState } from "@/lib/ade/customizeApi";
 import { ChecksPanel } from "./ChecksPanel";
 import { FilesPanel } from "./FilesPanel";
 import { KeptList } from "./KeptList";
@@ -84,6 +91,8 @@ export function ChangePanel({
   tab,
   onTabChange: setTab,
   reveal,
+  expanded,
+  onExpand,
 }: {
   change: Change;
   state: CustomizeState;
@@ -93,6 +102,9 @@ export function ChangePanel({
   onTabChange: (tab: PanelTab) => void;
   /** Bumped when something (Try it) needs the panel open. */
   reveal: number;
+  /** The running preview covers the conversation column (phones: the whole screen). */
+  expanded: boolean;
+  onExpand: (expanded: boolean) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -111,6 +123,9 @@ export function ChangePanel({
   };
 
   const phone = phoneActive ? "flex" : "hidden";
+  const showingPreview = tab === "preview" && previewRunning(change);
+
+  if (expanded) return panel("flex", true);
 
   if (collapsed)
     return (
@@ -162,55 +177,81 @@ export function ChangePanel({
 
   return panel(`${phone} lg:flex`);
 
-  function panel(display: string) {
+  function panel(display: string, big = false) {
+    // A running preview gets room: wider beside the conversation, or over it when expanded.
+    const size = big
+      ? "fixed inset-0 z-[var(--z-dropdown)] lg:static lg:z-auto lg:flex-1 lg:border-l"
+      : showingPreview
+        ? "lg:w-[55%] lg:border-l"
+        : "lg:w-96 lg:border-l";
     return (
       <aside
-        aria-label="Change details"
-        className={`min-h-0 w-full shrink-0 flex-col border-line bg-panel lg:w-96 lg:border-l ${display}`}
+        aria-label={big ? "Preview" : "Change details"}
+        className={`min-h-0 w-full shrink-0 flex-col border-line bg-panel ${size} ${display}`}
       >
-        <div
-          role="tablist"
-          aria-label="Change details"
-          className="flex h-9 shrink-0 items-center gap-0.5 border-b border-line px-2"
-        >
-          {TABS.map(({ id, label, Icon }) => {
-            const active = tab === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setTab(id)}
-                className={`relative inline-flex h-9 shrink-0 items-center gap-1.5 px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-amber ${active ? "text-ink" : "text-dim hover:text-ink"}`}
-              >
-                <Icon className="size-4 shrink-0" strokeWidth={1.5} aria-hidden />
-                {label}
-                {dots[id] && (
-                  <span className={`size-1.5 shrink-0 rounded-full ${dots[id]}`} aria-hidden />
-                )}
-                {active && (
-                  <GlideIndicator
-                    id="customize-panel-tab"
-                    className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-ink"
-                  />
-                )}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => toggle(true)}
-            aria-label="Hide details panel"
-            title="Hide details panel"
-            className="ml-auto hidden size-7 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber lg:grid"
+        {big ? (
+          <div className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-3 lg:h-9 lg:px-2">
+            <button
+              type="button"
+              onClick={() => onExpand(false)}
+              title="Back to the change (Esc)"
+              className="btn-quiet inline-flex min-h-[var(--control-height-md)] shrink-0 items-center gap-1.5 px-3 text-xs lg:min-h-0 lg:py-1"
+            >
+              <ArrowLeft className="size-4" strokeWidth={1.5} aria-hidden />
+              Back to the change
+            </button>
+            <p className="min-w-0 truncate text-xs text-dim">
+              Trying <span className="text-ink">{change.title}</span>
+            </p>
+          </div>
+        ) : (
+          <div
+            role="tablist"
+            aria-label="Change details"
+            className="flex h-9 shrink-0 items-center gap-0.5 border-b border-line px-2"
           >
-            <PanelRightClose className="size-4" strokeWidth={1.5} aria-hidden />
-          </button>
-        </div>
+            {TABS.map(({ id, label, Icon }) => {
+              const active = tab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setTab(id)}
+                  className={`relative inline-flex h-9 shrink-0 items-center gap-1.5 px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-amber ${active ? "text-ink" : "text-dim hover:text-ink"}`}
+                >
+                  <Icon className="size-4 shrink-0" strokeWidth={1.5} aria-hidden />
+                  {label}
+                  {dots[id] && (
+                    <span className={`size-1.5 shrink-0 rounded-full ${dots[id]}`} aria-hidden />
+                  )}
+                  {active && (
+                    <GlideIndicator
+                      id="customize-panel-tab"
+                      className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-ink"
+                    />
+                  )}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => toggle(true)}
+              aria-label="Hide details panel"
+              title="Hide details panel"
+              className="ml-auto hidden size-7 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber lg:grid"
+            >
+              <PanelRightClose className="size-4" strokeWidth={1.5} aria-hidden />
+            </button>
+          </div>
+        )}
 
-        <div role="tabpanel" className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
-          {tab === "preview" && <PreviewPanel change={change} />}
+        <div
+          role="tabpanel"
+          className={`min-h-0 flex-1 overflow-y-auto ${showingPreview ? "flex flex-col gap-5 px-3 py-3" : "space-y-5 px-4 py-4"}`}
+        >
+          {tab === "preview" && <PreviewPanel change={change} expanded={big} onExpand={onExpand} />}
           {tab === "checks" && <ChecksPanel key={change.id} change={change} />}
           {tab === "changes" && (
             <>
@@ -220,7 +261,7 @@ export function ChangePanel({
               )}
             </>
           )}
-          {!(tab === "changes" && change.status === "kept") && <StockHint />}
+          {!(tab === "changes" && change.status === "kept") && !showingPreview && <StockHint />}
         </div>
       </aside>
     );

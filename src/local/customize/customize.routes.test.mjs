@@ -238,3 +238,19 @@ test("a turn that changes nothing needs you; undo clears it", { skip }, async ()
   const list = (await call("/api/customize")).json.changes;
   assert.ok(!list.some((c) => c.id === needs.id));
 });
+
+test(
+  "update routes: check, retry, skip and stay answer plainly when there is no update",
+  { skip },
+  async () => {
+    const checked = await call("/api/customize/update/check", {});
+    assert.equal(checked.status, 202);
+    assert.equal(checked.json.started, false);
+    assert.equal(checked.json.update, null);
+    assert.equal((await call("/api/customize/update/retry", {})).status, 400);
+    assert.equal((await call("/api/customize/update/skip", { changeId: "nope" })).status, 409);
+    assert.equal((await call("/api/customize/update/retry", { changeId: "nope" })).status, 409);
+    const stay = await call("/api/customize/update/stay", {});
+    assert.deepEqual([stay.status, stay.json], [200, { update: null }]);
+  },
+);

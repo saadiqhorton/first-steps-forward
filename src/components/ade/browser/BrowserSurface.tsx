@@ -194,10 +194,13 @@ export function BrowserSurface({
   mode,
   className,
   emptyState,
+  controlBanner = true,
 }: {
   mode: "dock" | "float";
   className?: string;
   emptyState?: ReactNode;
+  /** The "You're driving · agent paused" frame; off where no agent shares the page. */
+  controlBanner?: boolean;
 }) {
   const preview = useBrowserPreviewState();
   const { steer, state: adeState } = useAde();
@@ -1811,7 +1814,7 @@ export function BrowserSurface({
         </div>
       ) : null}
 
-      {controller === "you" ? (
+      {controller === "you" && controlBanner ? (
         <>
           <div className="pointer-events-none absolute inset-0 z-[5] border-2 border-amber" />
           <div className="absolute top-2.5 left-1/2 z-[6] flex max-w-[calc(100%-1.25rem)] -translate-x-1/2 items-center gap-2 rounded-full bg-amber py-0.5 pr-0.5 pl-2.5 text-xs font-medium whitespace-nowrap text-ink shadow-lg motion-reduce:transition-none">

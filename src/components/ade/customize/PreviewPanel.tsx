@@ -6,11 +6,13 @@ import {
   Check,
   Eye,
   LoaderCircle,
+  Maximize2,
+  Minimize2,
   RotateCcw,
   RotateCw,
   Square,
+  X,
 } from "lucide-react";
-import { BrowserChromeRow } from "@/components/ade/browser/BrowserChromeRow";
 import { BrowserPreviewProvider } from "@/components/ade/browser/BrowserPreviewProvider";
 import { BrowserSurface } from "@/components/ade/browser/BrowserSurface";
 import { useBrowserPreviewState } from "@/components/ade/browser/browserPreviewContext";
@@ -18,6 +20,7 @@ import { useBrowserPlacement } from "@/components/ade/browser/browserPresentatio
 import {
   NEEDS_YOU,
   previewChange,
+  previewRunning,
   useCustomizeAction,
   type Change,
   type ChangePreview,
@@ -36,13 +39,44 @@ export function usePreviewAction() {
   );
 }
 
+/** Below `lg` the workbench shows one pane at a time; a running preview takes the screen. */
+const PHONE_QUERY = "(max-width: 1023px)";
+const isPhone = () => typeof window !== "undefined" && window.matchMedia(PHONE_QUERY).matches;
+
+/** `127.0.0.1:43123` and the page path, from the preview's own address. */
+function splitAddress(url: string) {
+  try {
+    const parsed = new URL(url);
+    const rest = `${parsed.pathname === "/" ? "" : parsed.pathname}${parsed.search}${parsed.hash}`;
+    return { host: parsed.host, rest };
+  } catch {
+    return { host: url.replace(/^https?:\/\//, ""), rest: "" };
+  }
+}
+
 /** The Preview tab: try the change in a separate ADE, shown in the agent browser. */
-export function PreviewPanel({ change }: { change: Change }) {
+export function PreviewPanel({
+  change,
+  expanded = false,
+  onExpand,
+}: {
+  change: Change;
+  expanded?: boolean;
+  onExpand?: (expanded: boolean) => void;
+}) {
   const action = usePreviewAction();
   const preview = change.preview;
   const error = action.error instanceof Error ? action.error.message : null;
   const start = () => action.mutate({ id: change.id, action: "start" });
   const stop = () => action.mutate({ id: change.id, action: "stop" });
+
+  // Phones: when the preview comes up, it opens full screen (with a way back).
+  const running = previewRunning(change);
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (running && !wasRunning.current && isPhone()) onExpand?.(true);
+    wasRunning.current = running;
+  }, [running, onExpand]);
 
   if (change.status === "kept" || change.status === "removed")
     return (
@@ -54,11 +88,16 @@ export function PreviewPanel({ change }: { change: Change }) {
     );
 
   return (
-    <div className="space-y-3">
+    <div className={running ? "flex min-h-0 flex-1 flex-col gap-3" : "space-y-3"}>
       {preview.status === "running" && preview.url ? (
         <>
-          <PreviewBrowser url={preview.url} sessionId={change.sessionId} />
-          <div className="flex flex-wrap items-center gap-2">
+          <PreviewBrowser
+            url={preview.url}
+            sessionId={change.sessionId}
+            expanded={expanded}
+            onExpand={onExpand}
+          />
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-dim">
               <span className="size-1.5 shrink-0 rounded-full bg-teal" aria-hidden />
               {TEST_DATA}
@@ -67,16 +106,18 @@ export function PreviewPanel({ change }: { change: Change }) {
               type="button"
               onClick={stop}
               disabled={action.isPending}
-              className="btn-quiet ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+              className="btn-quiet ml-auto inline-flex min-h-[var(--control-height-md)] items-center gap-1.5 px-3 text-xs lg:min-h-0 lg:py-1.5"
             >
               <Square className="size-3.5" strokeWidth={1.5} aria-hidden />
               Stop preview
             </button>
           </div>
-          <p className="text-xs leading-5 text-dim">
-            This is your version of ADE with this change, running beside the one you use. It starts
-            empty, so add a test project to try things out.
-          </p>
+          {!expanded && (
+            <p className="shrink-0 text-xs leading-5 text-dim">
+              Your version of ADE with this change, running beside the one you use. It starts empty,
+              so add a test project to try things out.
+            </p>
+          )}
         </>
       ) : preview.status === "starting" ? (
         <Starting preview={preview} onCancel={stop} busy={action.isPending} />
@@ -263,19 +304,41 @@ function Failed({
  * The agent browser of the change's conversation (project `ade-self`), opened on the preview.
  * Its own provider, so the Shell's browser for the active project is left alone.
  */
-function PreviewBrowser({ url, sessionId }: { url: string; sessionId: string }) {
+function PreviewBrowser({
+  url,
+  sessionId,
+  expanded,
+  onExpand,
+}: {
+  url: string;
+  sessionId: string;
+  expanded: boolean;
+  onExpand: ((expanded: boolean) => void) | undefined;
+}) {
   return (
     <BrowserPreviewProvider projectId={SELF_PROJECT} sessionId={sessionId}>
-      <PreviewSurface url={url} sessionId={sessionId} />
+      <PreviewSurface url={url} sessionId={sessionId} expanded={expanded} onExpand={onExpand} />
     </BrowserPreviewProvider>
   );
 }
 
-function PreviewSurface({ url, sessionId }: { url: string; sessionId: string }) {
+const ICON_BUTTON =
+  "grid size-7 shrink-0 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:pointer-events-none disabled:opacity-40";
+
+function PreviewSurface({
+  url,
+  sessionId,
+  expanded,
+  onExpand,
+}: {
+  url: string;
+  sessionId: string;
+  expanded: boolean;
+  onExpand: ((expanded: boolean) => void) | undefined;
+}) {
   const client = useQueryClient();
   const browser = useBrowserPreviewState();
   const placement = useBrowserPlacement();
-  const frameRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   // The workspace's event stream follows the active project only, so poll this browser's state.
   const computerKey = ["computer", SELF_PROJECT, sessionId];
@@ -299,7 +362,14 @@ function PreviewSurface({ url, sessionId }: { url: string; sessionId: string }) 
     if (running) void client.invalidateQueries({ queryKey: ["browser", SELF_PROJECT, sessionId] });
   }, [running, sessionId, client]);
 
-  // Open the preview once the page stream can carry it; take the wheel so the user can click.
+  // The page lays out for the space it has (no shrunken desktop), like a real window would.
+  const { fillViewport, setFillViewport } = browser;
+  useEffect(() => {
+    if (!fillViewport) setFillViewport(true);
+  }, [fillViewport, setFillViewport]);
+
+  // Open the preview once the page stream can carry it. The person drives this page (no agent
+  // works in a preview), so take control quietly before navigating.
   const opened = useRef<string | null>(null);
   const streamOpen = browser.streamStatus === "open";
   const available = !!browser.status?.available;
@@ -350,16 +420,78 @@ function PreviewSurface({ url, sessionId }: { url: string; sessionId: string }) 
           : "Opening ADE's browser"}
       </div>
     );
+
+  const nav = browser.nav;
+  const canOperate = browser.control?.controller === "you";
+  // Before the page reports its address, show the one it is opening.
+  const shown = nav?.url && nav.url !== "about:blank" ? nav.url : url;
+  const { host, rest } = splitAddress(shown);
+  const takeBack = canOperate ? undefined : "Opening your version…";
   return (
-    <div ref={frameRef} className="flex flex-col overflow-hidden rounded-md border border-line">
-      <BrowserChromeRow
-        frameRef={frameRef}
-        sessionId={sessionId}
-        profiles={computer.data?.profiles ?? []}
-      />
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-line">
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line bg-panel px-2">
+        <button
+          type="button"
+          aria-label="Back"
+          title={takeBack ?? "Back"}
+          disabled={!canOperate || !nav?.canGoBack}
+          onClick={() => browser.send({ type: "history", delta: -1 })}
+          className={ICON_BUTTON}
+        >
+          <ArrowLeft className="size-4" strokeWidth={1.5} aria-hidden />
+        </button>
+        <button
+          type="button"
+          aria-label="Forward"
+          title={takeBack ?? "Forward"}
+          disabled={!canOperate || !nav?.canGoForward}
+          onClick={() => browser.send({ type: "history", delta: 1 })}
+          className={ICON_BUTTON}
+        >
+          <ArrowRight className="size-4" strokeWidth={1.5} aria-hidden />
+        </button>
+        <button
+          type="button"
+          aria-label={nav?.loading ? "Stop loading" : "Reload"}
+          title={takeBack ?? (nav?.loading ? "Stop loading" : "Reload")}
+          disabled={!canOperate}
+          onClick={() => browser.send(nav?.loading ? { type: "stop-loading" } : { type: "reload" })}
+          className={ICON_BUTTON}
+        >
+          {nav?.loading ? (
+            <X className="size-4" strokeWidth={1.5} aria-hidden />
+          ) : (
+            <RotateCw className="size-4" strokeWidth={1.5} aria-hidden />
+          )}
+        </button>
+        <p
+          aria-label="Preview address"
+          title={shown}
+          className="flex h-7 min-w-0 flex-1 items-center rounded-lg bg-paper px-3 font-mono text-xs ring-1 ring-line ring-inset"
+        >
+          <span className="shrink-0 text-ink">{host}</span>
+          <span className="min-w-0 truncate text-dim">{rest}</span>
+        </p>
+        {onExpand && (
+          <button
+            type="button"
+            onClick={() => onExpand(!expanded)}
+            aria-label={expanded ? "Back to the change" : "Expand preview"}
+            title={expanded ? "Back to the change (Esc)" : "Expand preview"}
+            className={ICON_BUTTON}
+          >
+            {expanded ? (
+              <Minimize2 className="size-4" strokeWidth={1.5} aria-hidden />
+            ) : (
+              <Maximize2 className="size-4" strokeWidth={1.5} aria-hidden />
+            )}
+          </button>
+        )}
+      </div>
       <BrowserSurface
         mode="dock"
-        className="aspect-[16/10] w-full"
+        controlBanner={false}
+        className="min-h-64 w-full flex-1"
         emptyState={<p className="m-0 text-xs text-dim">Opening your version…</p>}
       />
     </div>

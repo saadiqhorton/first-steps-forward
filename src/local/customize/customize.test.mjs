@@ -599,6 +599,8 @@ test("the next ADE reconciles the switch: restarted on the target, or --stock", 
   assert.deepEqual(status.current, { stock: false, sha: commit });
   assert.equal(status.switch.status, "idle");
   assert.ok(status.switch.restartedAt);
+  // The reconciled state must be on disk before the next ADE reads it.
+  await next.service.idle();
 
   const stock = await harness({
     ready: false,

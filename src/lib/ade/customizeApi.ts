@@ -85,14 +85,24 @@ export interface CustomizeSwitch {
   output?: string;
 }
 
+export type UpdateChangeStatus = "applied" | "applying" | "needs-you" | "dropped";
+
 export interface CustomizeUpdate {
   from: string;
   to: string;
   status: "applying" | "done" | "needs-you";
+  /** Why the update as a whole stopped (not tied to one change). */
+  reason?: string;
+  /** The checks run on the updated version, once every change is carried over. */
+  checks?: ChangeCheck[];
   changes: {
     id: string;
     title: string;
-    status: "applied" | "applying" | "needs-you" | "dropped";
+    status: UpdateChangeStatus;
+    /** Why it did not carry over, in plain words (needs-you only). */
+    reason?: string;
+    /** The agent's conversation while it carries this change over. */
+    sessionId?: string;
   }[];
 }
 
@@ -174,6 +184,15 @@ export const previewChange = (id: string, action: "start" | "stop") =>
     action,
   });
 
+/** ADE updated and a kept change did not carry over: ask the agent again for that change. */
+export const retryUpdateChange = (changeId: string) =>
+  call<unknown>("/api/customize/update/retry", "POST", { changeId });
+/** Carry on with the update and leave that change out. */
+export const skipUpdateChange = (changeId: string) =>
+  call<unknown>("/api/customize/update/skip", "POST", { changeId });
+/** Cancel the update and keep the version you have, with all your changes. */
+export const stayOnVersion = () => call<unknown>("/api/customize/update/stay", "POST");
+
 /** Restart ADE on your version; only when the launcher runs ADE (`switch.launcher`). */
 export const restartAde = () =>
   call<{ switch?: CustomizeSwitch }>("/api/customize/restart", "POST");
@@ -224,6 +243,11 @@ export function runningWithoutChanges(state: CustomizeState): boolean {
     state.switch.status === "idle" &&
     state.changes.some((change) => change.status === "kept")
   );
+}
+
+/** The change's preview is up and has an address to open. */
+export function previewRunning(change: Change) {
+  return change.preview.status === "running" && !!change.preview.url;
 }
 
 export function changeInProgress(state: CustomizeState | undefined): Change | undefined {

@@ -81,7 +81,14 @@ export function createSwitch(ctx, { launcher, poll = 1000, buildTimeout = 600_00
     const task = builds.then(async () => {
       try {
         if (target)
-          await prepareBuild({ paths, run: ctx.run, sha: target, output, timeout: buildTimeout });
+          await prepareBuild({
+            paths,
+            run: ctx.run,
+            sha: target,
+            output,
+            timeout: buildTimeout,
+            installed: await ctx.installedDeps(),
+          });
         await setCurrent(paths, target, await versionOf(target));
         await pruneBuilds(paths);
         if (sw().target !== target) return; // a newer Keep or Remove owns the switch now

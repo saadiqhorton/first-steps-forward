@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { exportStock } from "./source.mjs";
+import { depsHash } from "./builds.mjs";
 import { createGit } from "./git.mjs";
 import { SELF_PROJECT_ID } from "./paths.mjs";
 
@@ -130,6 +131,8 @@ export async function runSetup(ctx) {
     await git.must(["commit", "--allow-empty", "-m", `ADE ${stock.version || "stock"}`]);
     await git.must(["branch", "mine"]);
     await git.must(["checkout", "mine"]);
+    data.installedDeps = await depsHash(paths.partial);
+    data.stockVersion = stock.version;
     await fs.rename(paths.partial, paths.source);
     await registerSelfProject(ctx);
     data.current = { stock: true, sha: null };
