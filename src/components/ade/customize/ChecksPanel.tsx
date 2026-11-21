@@ -98,7 +98,8 @@ function FailedCheck({ check }: { check: ChangeCheck }) {
 export function ChecksPanel({ change }: { change: Change }) {
   const [open, setOpen] = useState<string | null>(null);
   const rerun = useCustomizeAction((id: string) => rerunChecks(id));
-  const canRerun = ["ready", "failed", "needs-you"].includes(change.status);
+  // A failed change offers "Run checks again" next to its other next steps instead.
+  const canRerun = ["ready", "needs-you"].includes(change.status);
   const failed = change.checks.filter((check) => check.status === "failed");
   const rest = change.checks.filter((check) => check.status !== "failed");
 

@@ -76,7 +76,7 @@ export function KeptList({
         <h2 className="label-section">Kept in your ADE</h2>
         {kept.length > 0 && <span className="text-xs text-dim tabular-nums">{kept.length}</span>}
       </div>
-      {without && <StockNotice flag={state.current.withoutChanges} />}
+      {without && <StockNotice flag={state.current.withoutChanges} compact />}
       {switching && <SwitchCard state={state} />}
       {kept.length > 0 && (
         <ul className="card-panel divide-y divide-line overflow-hidden">

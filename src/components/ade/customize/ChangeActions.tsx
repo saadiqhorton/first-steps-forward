@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, Eye, Lock, MessageSquare, Trash2, Undo2 } from "lucide-react";
+import { Check, Eye, Lock, MessageSquare, RotateCcw, Trash2, Undo2 } from "lucide-react";
 import {
+  AMBER_TEXT,
   keepChange,
+  rerunChecks,
   runningWithoutChanges,
   undoChange,
+  updateRowFor,
   useCustomizeAction,
   type Change,
   type CustomizeState,
@@ -14,6 +17,7 @@ import { keepBlockedReason } from "./customizeText";
 import { RemoveConfirm } from "./KeptList";
 import { canTry, usePreviewAction } from "./PreviewPanel";
 import { StockNotice, SwitchCard } from "./SwitchCard";
+import { NeedsYouCard } from "./UpdateNotice";
 
 /** Phones get thumb-sized, equal buttons; the wide layout keeps them compact. */
 const BUTTON =
@@ -21,8 +25,7 @@ const BUTTON =
 
 /** The one line that says where the change stands next to its buttons. */
 function StatusLine({ text, tone }: { text: string; tone: "quiet" | "danger" | "attention" }) {
-  const color =
-    tone === "danger" ? "text-danger" : tone === "attention" ? "text-amber-deep" : "text-dim";
+  const color = tone === "danger" ? "text-danger" : tone === "attention" ? AMBER_TEXT : "text-dim";
   const dot = tone === "danger" ? "bg-danger" : tone === "attention" ? "bg-amber" : "bg-dim";
   return (
     <p className={`flex min-w-0 items-center gap-2 text-xs leading-5 ${color}`} role="status">
@@ -43,9 +46,13 @@ function KeptCard({ change, state }: { change: Change; state: CustomizeState }) 
         onDone={() => setConfirm(false)}
       />
     );
+  const updateRow = updateRowFor(state, change.id);
   return (
     <div className="space-y-3">
-      {runningWithoutChanges(state) && <StockNotice flag={state.current.withoutChanges} />}
+      {updateRow?.status === "needs-you" && state.update && (
+        <NeedsYouCard change={updateRow} update={state.update} framed />
+      )}
+      {runningWithoutChanges(state) && <StockNotice flag={state.current.withoutChanges} compact />}
       <div className="flex flex-col gap-2 @lg:flex-row @lg:items-start @lg:gap-3">
         <div className="min-w-0 flex-1">
           <SwitchCard state={state} kept />
@@ -81,14 +88,16 @@ export function ChangeActions({
   const keep = useCustomizeAction((id: string) => keepChange(id));
   const undo = useCustomizeAction((id: string) => undoChange(id));
   const preview = usePreviewAction();
+  const rerun = useCustomizeAction((id: string) => rerunChecks(id));
   const blocked = keepBlockedReason(change);
   const previewOn = change.preview.status === "running" || change.preview.status === "starting";
   const tryIt = () => {
     onTry();
     if (!previewOn) preview.mutate({ id: change.id, action: "start" });
   };
-  const error = [keep.error, undo.error, preview.error].find((e) => e instanceof Error) as
-    Error | undefined;
+  const error = [keep.error, undo.error, preview.error, rerun.error].find(
+    (e) => e instanceof Error,
+  ) as Error | undefined;
 
   if (change.status === "removed") return null;
   if (change.status === "kept") return <KeptCard change={change} state={state} />;
@@ -193,13 +202,27 @@ export function ChangeActions({
           <>
             <button
               type="button"
+              onClick={() => rerun.mutate(change.id)}
+              disabled={rerun.isPending}
+              title="Run every check again on the change as it is"
+              className={`btn-quiet ${BUTTON}`}
+            >
+              <RotateCcw className="size-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
+              <span className="truncate @lg:hidden">Check again</span>
+              <span className="hidden @lg:inline">
+                {rerun.isPending ? "Starting checks…" : "Run checks again"}
+              </span>
+            </button>
+            <button
+              type="button"
               onClick={() => setConfirm(true)}
               className={`btn-quiet ${BUTTON}`}
             >
               <Undo2 className="size-3.5" strokeWidth={1.5} aria-hidden />
               Undo
             </button>
-            {keepButton}
+            {/* Locked while a check fails; phones say so in the status line instead. */}
+            <span className="hidden @lg:contents">{keepButton}</span>
           </>
         ) : (
           <>

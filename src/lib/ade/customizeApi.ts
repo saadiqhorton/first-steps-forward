@@ -250,6 +250,22 @@ export function previewRunning(change: Change) {
   return change.preview.status === "running" && !!change.preview.url;
 }
 
+/** A kept change's row in an update that is still running (not once it finished). */
+export function updateRowFor(state: CustomizeState | undefined, changeId: string) {
+  const update = state?.update;
+  if (!update || update.status === "done") return undefined;
+  return update.changes.find((row) => row.id === changeId);
+}
+
+/**
+ * The status the rail, its filters and the header show: a kept change that did not fit a new
+ * ADE version needs you until you choose, even though it is still kept on the version you run.
+ */
+export function shownStatus(change: Change, state: CustomizeState | undefined): ChangeStatus {
+  if (change.status !== "kept") return change.status;
+  return updateRowFor(state, change.id)?.status === "needs-you" ? "needs-you" : change.status;
+}
+
 export function changeInProgress(state: CustomizeState | undefined): Change | undefined {
   return state?.changes.find((change) => IN_PROGRESS.includes(change.status));
 }
@@ -267,9 +283,16 @@ export const STATUS_META: Record<ChangeStatus, { label: string; tone: Tone }> = 
   removed: { label: "Removed", tone: "quiet" },
 };
 
+/**
+ * Amber status text. Light theme: `--amber-deep` on paper is under 4.5:1 for small text, so it
+ * is mixed toward ink; dark theme keeps the plain token.
+ */
+export const AMBER_TEXT =
+  "text-[color-mix(in_oklab,var(--amber-deep)_72%,var(--ink))] dark:text-amber-deep";
+
 export const TONE_CLASS: Record<Tone, { text: string; dot: string; pulse: boolean }> = {
   busy: { text: "text-teal", dot: "bg-teal", pulse: true },
-  attention: { text: "text-amber-deep", dot: "bg-amber", pulse: false },
+  attention: { text: AMBER_TEXT, dot: "bg-amber", pulse: false },
   danger: { text: "text-danger", dot: "bg-danger", pulse: false },
   quiet: { text: "text-dim", dot: "bg-dim", pulse: false },
 };

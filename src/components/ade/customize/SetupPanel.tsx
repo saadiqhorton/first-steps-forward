@@ -12,6 +12,12 @@ const STEPS: { id: SetupStep; label: string }[] = [
   { id: "save", label: "Save the starting point" },
 ];
 
+const SETUP_FACTS = [
+  "Copies ADE's source into your ADE folder",
+  "Downloads build tools once, about 0.7 GB",
+  "Your projects are not touched",
+];
+
 /** First visit, running setup, and a failed setup with Retry. */
 export function SetupPanel({ setup }: { setup: CustomizeSetup }) {
   const start = useCustomizeAction(() => startSetup());
@@ -20,21 +26,27 @@ export function SetupPanel({ setup }: { setup: CustomizeSetup }) {
   const startError = start.error instanceof Error ? start.error.message : null;
 
   return (
-    <section className="card-panel w-full max-w-3xl p-6">
+    <section className="card-panel w-full max-w-2xl p-6">
       <span className="grid size-10 place-items-center rounded-lg border border-line bg-paper text-dim">
         <Wrench className="size-4" strokeWidth={1.5} aria-hidden />
       </span>
       <h2 className="mt-4 text-base font-medium text-ink">Make ADE work the way you do</h2>
-      <p className="mt-3 max-w-prose text-ui leading-5 text-[color:var(--text-secondary)]">
+      <p className="mt-2 text-ui leading-5 text-[color:var(--text-secondary)]">
         Describe a feature, a tool or a behavior change and an agent builds it in a private copy of
         ADE. You try it first, and keep it only if you like it. Colors and layout stay as designed.
       </p>
 
       {setup.status === "none" && (
         <>
-          <p className="mt-3 max-w-prose text-ui leading-5 text-[color:var(--text-secondary)]">
-            First, a one-time setup downloads build tools, about 0.7 GB. It takes a few minutes.
-          </p>
+          <h3 className="label-section mt-5">What setup does, once</h3>
+          <ul className="mt-2 space-y-1.5 text-ui leading-5 text-[color:var(--text-secondary)]">
+            {SETUP_FACTS.map((fact) => (
+              <li key={fact} className="flex items-start gap-2.5">
+                <Check className="mt-0.5 size-4 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
+                <span className="min-w-0">{fact}</span>
+              </li>
+            ))}
+          </ul>
           <button
             type="button"
             onClick={() => start.mutate(undefined)}
@@ -44,6 +56,7 @@ export function SetupPanel({ setup }: { setup: CustomizeSetup }) {
             <Download className="size-4" strokeWidth={1.5} aria-hidden />
             {start.isPending ? "Starting…" : "Set up customization"}
           </button>
+          <p className="mt-2 text-xs text-dim">It takes a few minutes.</p>
         </>
       )}
 

@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, ChevronDown, Play } from "lucide-react";
 import { Composer } from "@/components/ade/Composer";
 import { SignInDialog } from "@/components/ade/SignInDialog";
+import { saveComposerDraft } from "@/lib/ade/browser/composerFeedback";
 import {
   changeInProgress,
   createChange,
@@ -33,6 +34,9 @@ const IDEAS = [
     prompt: "Add a keyboard shortcut that opens Inbox from anywhere in ADE.",
   },
 ];
+
+/** The new-change draft survives reloads, refetches and the update notice coming and going. */
+const DRAFT_KEY = "customize:new";
 
 export function CustomizeStart({ state }: { state: CustomizeState }) {
   const navigate = useNavigate();
@@ -69,6 +73,12 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
       setError(e instanceof Error ? e.message : String(e));
       return false;
     }
+  };
+
+  // The composer restores its saved draft when it mounts, so an idea is saved as the draft first.
+  const seedIdea = async (text: string) => {
+    await saveComposerDraft(DRAFT_KEY, { text, files: [], contextItems: [] }).catch(() => {});
+    setSeed((prev) => ({ text, nonce: prev.nonce + 1 }));
   };
 
   const extra = (
@@ -130,7 +140,7 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
               key={idea.title}
               type="button"
               disabled={!!current}
-              onClick={() => setSeed((prev) => ({ text: idea.prompt, nonce: prev.nonce + 1 }))}
+              onClick={() => void seedIdea(idea.prompt)}
               className="card-panel group flex flex-col items-start gap-2 p-4 text-left transition hover:border-ink/25 disabled:opacity-60"
             >
               <div className="flex w-full items-start justify-between gap-2">
@@ -166,6 +176,7 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
           branch=""
           placeholder="Describe a change"
           initialText={seed.text}
+          draftStorageKey={DRAFT_KEY}
           sending={create.isPending}
           error={error}
           onSend={onSend}

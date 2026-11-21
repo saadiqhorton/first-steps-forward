@@ -39,36 +39,33 @@ function CustomizeLayout() {
   return (
     <CustomizePaneContext.Provider value={{ pane, setPane }}>
       <div className="workspace-chat relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-        {/* Phones: one pane at a time, picked from a full-width segmented control. */}
-        <div className="shrink-0 border-b border-line bg-paper px-3 py-2 lg:hidden">
-          <div
-            role="tablist"
-            aria-label="Customize ADE"
-            className={`grid gap-1 rounded-lg bg-surface-muted p-1 ${tabs.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}
-          >
-            {tabs.map((tab) => {
-              const active = pane === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setPane(tab.id)}
-                  className={`relative isolate inline-flex min-h-[var(--control-height-md)] min-w-0 items-center justify-center rounded-md px-2 text-ui transition-colors focus-visible:outline-2 focus-visible:outline-amber ${active ? "text-ink" : "text-dim hover:text-ink"}`}
-                >
-                  {active && (
-                    <GlideIndicator
-                      id="customize-phone-tab"
-                      spring="snappy"
-                      className="absolute inset-0 -z-10 rounded-md bg-panel shadow-[var(--shadow-resting)] ring-1 ring-ink/[0.08] ring-inset"
-                    />
-                  )}
-                  <span className="truncate">{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
+        {/* Phones: one pane at a time, picked from a plain underline tab row (as in Luna). */}
+        <div
+          role="tablist"
+          aria-label="Customize ADE"
+          className="flex shrink-0 items-stretch gap-1 border-b border-line bg-paper px-2 lg:hidden"
+        >
+          {tabs.map((tab) => {
+            const active = pane === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setPane(tab.id)}
+                className={`relative inline-flex min-h-[var(--control-height-md)] min-w-0 items-center px-3 text-ui transition-colors focus-visible:outline-2 focus-visible:outline-amber ${active ? "text-ink" : "text-dim hover:text-ink"}`}
+              >
+                <span className="truncate">{tab.label}</span>
+                {active && (
+                  <GlideIndicator
+                    id="customize-phone-tab"
+                    className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-ink"
+                  />
+                )}
+              </button>
+            );
+          })}
         </div>
         <aside
           aria-label="Changes"

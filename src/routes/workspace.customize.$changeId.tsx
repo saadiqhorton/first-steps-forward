@@ -17,6 +17,7 @@ import {
   type Change,
   type CustomizeState,
 } from "@/lib/ade/customizeApi";
+import { saveComposerDraft } from "@/lib/ade/browser/composerFeedback";
 import { useAde, useSession } from "@/lib/ade/store";
 
 export const Route = createFileRoute("/workspace/customize/$changeId")({
@@ -122,9 +123,13 @@ function ChangeView({ change, state }: { change: Change; state: CustomizeState }
   const blocked = followUpBlocked(change);
   const [seed, setSeed] = useState({ text: "", nonce: 0 });
   const composerRef = useRef<HTMLDivElement>(null);
-  const askAgain = () => {
+  const draftKey = `customize:change:${change.id}`;
+  // The composer restores its saved draft on mount, so the request is saved as the draft first.
+  const askAgain = async () => {
     setPane("conversation");
-    setSeed((s) => ({ text: askAgainText(change), nonce: s.nonce + 1 }));
+    const text = askAgainText(change);
+    await saveComposerDraft(draftKey, { text, files: [], contextItems: [] }).catch(() => {});
+    setSeed((s) => ({ text, nonce: s.nonce + 1 }));
   };
   useEffect(() => {
     if (!seed.nonce) return;
@@ -156,34 +161,38 @@ function ChangeView({ change, state }: { change: Change; state: CustomizeState }
       >
         <ChangeHeader change={change} state={state} />
         <ChangeConversation change={change} />
-        {/* Phones: the actions sit at the bottom, under the composer, within thumb reach. */}
-        <div className="order-last shrink-0 border-t border-line bg-paper px-3 py-3 @lg:order-none @lg:bg-transparent @lg:px-7">
-          <div className="mx-auto w-full max-w-3xl">
-            <ChangeActions
-              change={change}
-              state={state}
-              onTry={showPreview}
-              onAskAgain={askAgain}
-            />
+        {/* One bottom area. Wide: actions above the composer. Phones: the composer, then the
+            actions under it within thumb reach. */}
+        <div className="flex shrink-0 flex-col border-t border-line bg-paper @lg:bg-transparent">
+          <div className="order-last px-3 pb-3 @lg:order-none @lg:border-b @lg:border-line @lg:px-7 @lg:py-3">
+            <div className="mx-auto w-full max-w-3xl">
+              <ChangeActions
+                change={change}
+                state={state}
+                onTry={showPreview}
+                onAskAgain={() => void askAgain()}
+              />
+            </div>
           </div>
-        </div>
-        <div className="shrink-0 border-t border-line px-3 py-3 @lg:px-7 @lg:py-4">
-          <div ref={composerRef} className={`mx-auto w-full max-w-3xl ${COMPOSER_FIT}`}>
-            <Composer
-              key={seed.nonce}
-              {...(seed.text ? { initialText: seed.text } : {})}
-              mode="follow-up"
-              sessionId={change.sessionId}
-              selection={activeSelection}
-              onSelectionChange={setSelection}
-              branch=""
-              placeholder="Ask the agent for changes"
-              sending={sending}
-              error={error}
-              onSend={send}
-              agentLocked="A change keeps the agent it started with"
-              {...(blocked ? { disabledReason: blocked } : {})}
-            />
+          <div className="px-3 pt-3 pb-2 @lg:px-7 @lg:py-4">
+            <div ref={composerRef} className={`mx-auto w-full max-w-3xl ${COMPOSER_FIT}`}>
+              <Composer
+                key={seed.nonce}
+                {...(seed.text ? { initialText: seed.text } : {})}
+                mode="follow-up"
+                sessionId={change.sessionId}
+                draftStorageKey={draftKey}
+                selection={activeSelection}
+                onSelectionChange={setSelection}
+                branch=""
+                placeholder="Ask the agent for changes"
+                sending={sending}
+                error={error}
+                onSend={send}
+                agentLocked="A change keeps the agent it started with"
+                {...(blocked ? { disabledReason: blocked } : {})}
+              />
+            </div>
           </div>
         </div>
       </main>

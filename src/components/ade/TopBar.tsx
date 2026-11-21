@@ -21,6 +21,15 @@ const ICON_BUTTON =
 const THEME_SWITCH =
   "contents [&>button]:size-7! [&>button]:min-h-7! [&>button]:min-w-7! [&>button]:rounded-lg! [&>button]:border-transparent! [&>button]:bg-transparent! [&>button]:text-dim! [&>button]:shadow-none! [&>button]:hover:bg-ink/[0.04]! [&>button]:hover:text-ink! [&>button]:focus-visible:outline-2! [&>button]:focus-visible:outline-offset-0! [&>button]:focus-visible:outline-amber! [&_svg]:size-4 [&_svg]:stroke-[1.5]";
 
+/**
+ * Active state comes from the real pathname, not `activeProps`: the SPA shell is prerendered at
+ * `/`, and hydration keeps that markup's class, so `activeProps` never showed on a direct load.
+ */
+function workspaceLinkClass(pathname: string, to: string) {
+  const active = pathname === to || pathname.startsWith(`${to}/`);
+  return active ? "topbar-workspace-link active" : "topbar-workspace-link";
+}
+
 export function TopBar({ isDesktop }: { isDesktop: boolean }) {
   const { activeProjectId, hydrated, projects, serviceAvailable, sessions } = useAdeState(
     (state) => ({
@@ -67,16 +76,14 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
       <nav className="hidden items-center gap-1 sm:flex" aria-label="Workspace">
         <Link
           to="/workspace/inbox"
-          className="topbar-workspace-link"
-          activeProps={{ className: "topbar-workspace-link active" }}
+          className={workspaceLinkClass(pathname, "/workspace/inbox")}
           suppressHydrationWarning
         >
           <Inbox className="size-4" strokeWidth={1.5} aria-hidden /> Inbox
         </Link>
         <Link
           to="/workspace/assistant"
-          className="topbar-workspace-link"
-          activeProps={{ className: "topbar-workspace-link active" }}
+          className={workspaceLinkClass(pathname, "/workspace/assistant")}
           suppressHydrationWarning
         >
           <MessageCircle className="size-4" strokeWidth={1.5} aria-hidden /> Luna
@@ -98,8 +105,7 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
         </Link>
         <Link
           to="/workspace/customize"
-          className="topbar-workspace-link"
-          activeProps={{ className: "topbar-workspace-link active" }}
+          className={workspaceLinkClass(pathname, "/workspace/customize")}
           suppressHydrationWarning
         >
           <Wrench className="size-4" strokeWidth={1.5} aria-hidden /> Customize ADE

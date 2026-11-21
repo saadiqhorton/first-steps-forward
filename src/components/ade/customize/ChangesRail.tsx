@@ -3,7 +3,13 @@ import { Link, useParams } from "@tanstack/react-router";
 import { Plus, Search } from "lucide-react";
 import { GlideIndicator } from "@/components/ade/motion";
 import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
-import { BUSY, NEEDS_YOU, type Change, type CustomizeState } from "@/lib/ade/customizeApi";
+import {
+  BUSY,
+  NEEDS_YOU,
+  shownStatus,
+  type Change,
+  type CustomizeState,
+} from "@/lib/ade/customizeApi";
 import { useAdeState, useNow } from "@/lib/ade/store";
 import { changeDate } from "./customizeText";
 import { ChangeStatusLabel } from "./ChangeStatusLabel";
@@ -22,10 +28,11 @@ const FILTERS: { id: Filter; label: string }[] = [
 const FILTER_CONTROL =
   "w-full [&>div]:gap-0! [&>div]:p-0.5! [&_button]:min-h-7! [&_button]:grow! [&_button]:px-1! [&_button]:text-xs! [&_button>span]:gap-1!";
 
-function matches(change: Change, filter: Filter) {
-  if (filter === "needs") return NEEDS_YOU.includes(change.status);
-  if (filter === "working") return BUSY.includes(change.status);
-  if (filter === "kept") return change.status === "kept";
+function matches(change: Change, filter: Filter, state: CustomizeState | undefined) {
+  const status = shownStatus(change, state);
+  if (filter === "needs") return NEEDS_YOU.includes(status);
+  if (filter === "working") return BUSY.includes(status);
+  if (filter === "kept") return status === "kept";
   return true;
 }
 
@@ -50,13 +57,13 @@ export function ChangesRail({ state }: { state: CustomizeState | undefined }) {
   const counts = useMemo(
     () => ({
       all: visible.length,
-      needs: visible.filter((c) => matches(c, "needs")).length,
-      working: visible.filter((c) => matches(c, "working")).length,
-      kept: visible.filter((c) => matches(c, "kept")).length,
+      needs: visible.filter((c) => matches(c, "needs", state)).length,
+      working: visible.filter((c) => matches(c, "working", state)).length,
+      kept: visible.filter((c) => matches(c, "kept", state)).length,
     }),
-    [visible],
+    [visible, state],
   );
-  const list = visible.filter((change) => matches(change, filter));
+  const list = visible.filter((change) => matches(change, filter, state));
   const ready = state?.available && state.setup.status === "ready";
 
   return (
@@ -138,18 +145,34 @@ export function ChangesRail({ state }: { state: CustomizeState | undefined }) {
                     {agent?.short ?? change.agentId} · {changeDate(now, change.createdAt)}
                   </span>
                   <span className="ml-auto">
-                    <ChangeStatusLabel status={change.status} />
+                    <ChangeStatusLabel status={shownStatus(change, state)} />
                   </span>
                 </div>
               </Link>
             </div>
           );
         })}
-        {list.length === 0 && (
-          <p className="px-3 py-6 text-xs text-dim">
-            {!ready ? "No changes yet." : query.trim() ? "No changes match." : "No changes here."}
-          </p>
-        )}
+        {list.length === 0 &&
+          (!ready && state?.available ? (
+            <div className="px-3 py-6 text-xs leading-5 text-dim">
+              <p>No changes yet.</p>
+              <p className="mt-1">
+                Start with <span className="text-ink">Set up customization</span>
+                <span className="hidden lg:inline"> on the right</span>.
+              </p>
+              <button
+                type="button"
+                onClick={() => setPane("conversation")}
+                className="btn-quiet mt-3 inline-flex min-h-[var(--control-height-md)] items-center px-3 text-xs lg:hidden"
+              >
+                Go to setup
+              </button>
+            </div>
+          ) : (
+            <p className="px-3 py-6 text-xs text-dim">
+              {!ready ? "No changes yet." : query.trim() ? "No changes match." : "No changes here."}
+            </p>
+          ))}
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-line px-3 py-3">

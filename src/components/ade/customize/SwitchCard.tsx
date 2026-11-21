@@ -45,22 +45,37 @@ function useRestartAde() {
 }
 
 /** Kept changes are off: ADE was started with `ade --stock`, or not restarted since. */
-export function StockNotice({ flag = false }: { flag?: boolean | undefined }) {
+export function StockNotice({
+  flag = false,
+  compact = false,
+}: {
+  flag?: boolean | undefined;
+  /** One quiet row, for lists where the full notice would push the content down. */
+  compact?: boolean;
+}) {
+  const detail = flag ? (
+    <>
+      ADE was started with <Command>ade --stock</Command>. Start it normally to use your kept
+      changes again.
+    </>
+  ) : (
+    "The ADE running now does not include your kept changes."
+  );
+  if (compact)
+    return (
+      <p className="flex min-w-0 items-start gap-2 text-xs leading-5 text-[color:var(--text-secondary)]">
+        <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
+        <span className="min-w-0">
+          <span className="text-ink">Running without your changes.</span> {detail}
+        </span>
+      </p>
+    );
   return (
     <div className="flex items-start gap-3 rounded-md border border-line bg-surface-muted px-4 py-3">
       <CircleAlert className="mt-0.5 size-4 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
       <div className="min-w-0 text-xs leading-5 text-[color:var(--text-secondary)]">
         <p className="text-ui text-ink">Running without your changes</p>
-        <p className="mt-0.5">
-          {flag ? (
-            <>
-              ADE was started with <Command>ade --stock</Command>. Start it normally to use your
-              kept changes again.
-            </>
-          ) : (
-            "The ADE running now does not include your kept changes."
-          )}
-        </p>
+        <p className="mt-0.5">{detail}</p>
       </div>
     </div>
   );

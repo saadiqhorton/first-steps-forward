@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
+  AMBER_TEXT,
   runningWithoutChanges,
+  shownStatus,
+  updateRowFor,
   TONE_CLASS,
   STATUS_META,
   type Change,
@@ -18,7 +21,10 @@ export function Breadcrumb({ right }: { right?: ReactNode }) {
         Workspace
       </Link>
       <span className="label-mono">/ customize</span>
-      {right ? <span className="label-mono ml-auto truncate">{right}</span> : null}
+      {/* Phones: the rail already says who started it and when; the row stays uncrowded. */}
+      {right ? (
+        <span className="label-mono ml-auto hidden truncate @lg:inline">{right}</span>
+      ) : null}
     </div>
   );
 }
@@ -44,35 +50,40 @@ export function ChangeHeader({
         ? { text: "text-danger", dot: "bg-danger" }
         : state.switch.status !== "idle"
           ? {
-              text: "text-amber-deep",
+              text: AMBER_TEXT,
               dot: `bg-amber ${state.switch.status === "pending" ? "" : "animate-pulse-soft"}`,
             }
           : runningWithoutChanges(state)
             ? { text: "text-dim", dot: "bg-dim" }
             : { text: "text-teal-deep", dot: "bg-teal" };
-  const line = keptTone ?? tone;
+  const updateRow = updateRowFor(state, change.id);
+  const doesNotFit = updateRow?.status === "needs-you";
+  const line = doesNotFit ? TONE_CLASS.attention : (keptTone ?? tone);
+  const detail = doesNotFit
+    ? `Doesn't fit ADE ${state.update?.to ?? "the new version"} yet · choose what to do below`
+    : changeDetail(change, state);
   const started = Date.parse(change.createdAt);
   return (
-    <header className="shrink-0 border-b border-line px-4 pt-5 pb-4 @lg:px-7">
+    <header className="shrink-0 border-b border-line px-4 pt-4 pb-3 @lg:px-7 @lg:pt-5 @lg:pb-4">
       <div className="mx-auto w-full max-w-3xl">
         <Breadcrumb
           right={`started ${timeAgo(now, Number.isFinite(started) ? started : undefined) || "earlier"} · ${agent?.short ?? change.agentId}`}
         />
         <div className="mt-2 flex min-w-0 items-start gap-3">
           <h1
-            className="line-clamp-2 min-w-0 text-lg font-medium leading-snug break-words"
+            className="line-clamp-2 min-w-0 text-base font-medium leading-snug break-words @lg:text-lg"
             title={change.request}
           >
             {change.title}
           </h1>
           <span className="mt-1 hidden shrink-0 @lg:inline-flex">
-            <ChangeStatusLabel status={change.status} />
+            <ChangeStatusLabel status={shownStatus(change, state)} />
           </span>
           {actions ? <div className="ml-auto shrink-0">{actions}</div> : null}
         </div>
         <p className={`mt-2 flex min-w-0 items-center gap-2 text-xs ${line.text}`}>
           <span className={`size-1.5 shrink-0 rounded-full ${line.dot}`} aria-hidden />
-          <span className="min-w-0 truncate">{changeDetail(change, state)}</span>
+          <span className="min-w-0 truncate">{detail}</span>
         </p>
       </div>
     </header>

@@ -10,6 +10,7 @@ import { currentActivity } from "@/lib/ade/formatLogs.mjs";
 import { useAde, useAdeState, useSession, useSessionLogs } from "@/lib/ade/store";
 import type { Message } from "@/lib/ade/types";
 import { FilesList } from "./FilesPanel";
+import { threadItems } from "./thread.mjs";
 
 const MAX_FIX_ATTEMPTS = 2;
 
@@ -92,6 +93,55 @@ function FixPromptRow({
   );
 }
 
+/** Automatic fix attempts of a change whose checks now pass, folded behind one quiet row. */
+function ResolvedAttempts({
+  messages,
+  attempts,
+  agentName,
+  firstAttempt,
+}: {
+  messages: Message[];
+  attempts: number;
+  agentName: string | undefined;
+  firstAttempt: number;
+}) {
+  const [open, setOpen] = useState(false);
+  let n = firstAttempt;
+  return (
+    <div className="py-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full min-w-0 items-center gap-2 text-left text-xs text-dim transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-amber"
+      >
+        <Wrench className="size-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
+        <span className="min-w-0 flex-1">
+          Fixed after {attempts} automatic attempt{attempts === 1 ? "" : "s"}
+        </span>
+        <ChevronRight
+          className={`size-3.5 shrink-0 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+          strokeWidth={1.5}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <div className="mt-2 space-y-3 border-l border-line pl-4">
+          {messages.map((message) => {
+            const fix = fixPromptInfo(message);
+            if (fix) n += 1;
+            return fix ? (
+              <FixPromptRow key={message.id} message={message} info={fix} attempt={n} />
+            ) : (
+              <SessionMessage key={message.id} message={message} agentName={agentName} />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The change's agent session, rendered with the same message parts as a project conversation. */
 export function ChangeConversation({ change }: { change: Change }) {
   const { stop } = useAde();
@@ -109,6 +159,8 @@ export function ChangeConversation({ change }: { change: Change }) {
   const busy = BUSY.includes(change.status);
   const last = messages[messages.length - 1];
   let fixCount = 0;
+  // Checks pass now: earlier automatic attempts would contradict "all checks passed".
+  const resolved = change.status === "ready" || change.status === "kept";
 
   useEffect(() => {
     if (stick.current) endRef.current?.scrollIntoView({ block: "end" });
@@ -133,13 +185,32 @@ export function ChangeConversation({ change }: { change: Change }) {
           </div>
         ) : (
           <AnimatePresence initial={false}>
-            {messages.map((message) => {
-              const fix = fixPromptInfo(message);
+            {threadItems(messages, (m) => !!fixPromptInfo(m), resolved).map((item) => {
+              if (item.kind === "resolved") {
+                const first = fixCount;
+                fixCount += item.attempts;
+                return (
+                  <MotionItem key={item.id} layout={false}>
+                    <ResolvedAttempts
+                      messages={item.messages}
+                      attempts={item.attempts}
+                      agentName={agent?.short}
+                      firstAttempt={first}
+                    />
+                  </MotionItem>
+                );
+              }
+              const { message } = item;
+              const fix = item.kind === "fix" ? fixPromptInfo(message) : null;
               if (fix) fixCount += 1;
               return (
                 <MotionItem key={message.id} layout={false}>
                   {fix ? (
                     <FixPromptRow message={message} info={fix} attempt={fixCount} />
+                  ) : item.kind === "same" ? (
+                    <p className="py-1 text-xs text-dim">
+                      {agent?.short ?? "The agent"} answered the same again.
+                    </p>
                   ) : (
                     <SessionMessage message={message} agentName={agent?.short} />
                   )}
