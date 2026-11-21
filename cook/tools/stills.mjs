@@ -149,6 +149,15 @@ const api = async (p, init) => {
   return body;
 };
 const state = () => api("/api/customize");
+async function seedReferenceProjects() {
+  const root = path.join(HOME, "cook-projects");
+  for (const name of ["Atlas", "Lantern"]) {
+    const project = path.join(root, name);
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, "README.md"), `# ${name}\n`);
+    await api("/api/projects", { method: "POST", body: { path: project, name } });
+  }
+}
 async function until(label, pick, timeout = 15 * 60_000) {
   const end = Date.now() + timeout;
   let last;
@@ -388,6 +397,7 @@ try {
       );
       log("setup ready");
     }
+    await seedReferenceProjects();
     await stop(server);
     takeSnapshot();
     server = startServer(HOME, PORT);
@@ -458,9 +468,11 @@ try {
     // The running preview: click Try it, wait for the server to report it running, then for the
     // agent browser's address bar to show it and the page to paint.
     const waitPreview = async (page) => {
-      await previewTab(page);
       const address = page.getByLabel("Preview address").first();
+      if (!(await address.isVisible().catch(() => false))) await previewTab(page);
       await address.waitFor({ timeout: 90_000 });
+      const installing = page.getByText("Installing ADE's browser. This happens once.");
+      await installing.waitFor({ state: "hidden", timeout: 120_000 }).catch(() => {});
       // The page paints once the browser opened it; "Opening your version…" goes away.
       const opening = page.getByText("Opening your version…").first();
       for (let i = 0; i < 120 && (await opening.isVisible().catch(() => false)); i++)
@@ -524,8 +536,8 @@ try {
         );
         await waitPreview(page);
         await page
-          .locator('button[title^="Back to the change"]')
-          .first()
+          .getByRole("button", { name: "Back to the change", exact: true })
+          .last()
           .waitFor({ state: "visible", timeout: 10_000 });
         await page.waitForTimeout(6000);
         for (const name of ["Back", "Forward", "Reload", "Back to the change"]) {

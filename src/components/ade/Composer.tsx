@@ -85,6 +85,7 @@ export function Composer({
   onWorkflowSelect,
   sessionId,
   draftStorageKey,
+  compact = false,
 }: {
   projectId?: string;
   mode: "new" | "follow-up";
@@ -112,6 +113,8 @@ export function Composer({
   onWorkflowSelect?: (workflow: Workflow) => void;
   sessionId?: string;
   draftStorageKey?: string;
+  /** Use a shorter initial textarea for a dense, guided new-task surface. */
+  compact?: boolean;
 }) {
   const agents = useAdeState((state) => state.agents);
   const [text, setText] = useState(initialText ?? "");
@@ -261,8 +264,8 @@ export function Composer({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = `${Math.max(el.scrollHeight, mode === "new" ? 72 : 44)}px`;
-  }, [text, mode]);
+    el.style.height = `${Math.max(el.scrollHeight, mode === "new" && !compact ? 72 : 44)}px`;
+  }, [text, mode, compact]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -654,7 +657,7 @@ export function Composer({
           disabledReason ??
           (workflow ? "Add instructions for this workflow (optional)" : placeholder)
         }
-        rows={mode === "new" ? 3 : 1}
+        rows={mode === "new" ? (compact ? 2 : 3) : 1}
         className={`block w-full resize-none bg-transparent px-4 ${selectedItems.length ? "pt-2" : "pt-3"} pb-2 text-sm leading-5.5 placeholder:text-dim/70 focus-visible:outline-none disabled:opacity-60`}
       />
       <ComposerAttachments
@@ -693,7 +696,9 @@ export function Composer({
             </div>,
             document.body,
           )}
-        <div className="flex flex-wrap items-center gap-2 px-3 pb-3">
+        <div
+          className={`flex flex-wrap items-center gap-2 px-3 pb-3 ${compact ? "@min-[22rem]/composer:flex-nowrap" : ""}`}
+        >
           <button
             ref={chipRef}
             type="button"

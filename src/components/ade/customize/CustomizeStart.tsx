@@ -30,7 +30,8 @@ const IDEAS = [
   },
   {
     title: "Add a keyboard shortcut",
-    description: "Jump to Inbox from anywhere with one key combination.",
+    description: "Jump to Inbox from anywhere with a key combination.",
+    descriptionClass: "max-w-64",
     prompt: "Add a keyboard shortcut that opens Inbox from anywhere in ADE.",
   },
 ];
@@ -136,9 +137,9 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
         Describe a change and an agent builds it in your own copy of ADE
       </p>
 
-      <div className="mt-6 @lg:mt-8">
+      <div className="mt-9 @lg:mt-8">
         <div className="label-section">Start with an idea</div>
-        <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-2 @lg:mt-3 @lg:gap-3">
+        <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-3 @lg:mt-3 @lg:gap-3">
           {IDEAS.map((idea) => (
             <button
               key={idea.title}
@@ -154,7 +155,11 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
                   aria-hidden
                 />
               </div>
-              <p className="line-clamp-2 text-xs leading-relaxed text-dim">{idea.description}</p>
+              <p
+                className={`line-clamp-2 text-xs leading-relaxed text-dim ${idea.descriptionClass ?? ""}`}
+              >
+                {idea.description}
+              </p>
             </button>
           ))}
         </div>
@@ -171,10 +176,11 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
         </Link>
       )}
 
-      <div className="mt-4 @lg:mt-6">
+      <div className="mt-3 @lg:mt-6">
         <Composer
           key={seed.nonce}
           mode="new"
+          compact
           projectId="ade-self"
           selection={selection}
           onSelectionChange={setSelection}

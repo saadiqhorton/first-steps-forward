@@ -113,7 +113,7 @@ test(
       await server.close();
       await rm(root, { recursive: true, force: true });
     });
-    const page = await browser.newPage();
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     page.on("pageerror", (error) => console.error("CustomizeStart browser error:", error));
     page.on("console", (message) => {
       if (message.type() === "error")
@@ -125,5 +125,6 @@ test(
     await page.getByLabel("Reference a project file or folder").waitFor();
     assert.equal(await page.getByLabel("Insert workflow or skill").isVisible(), true);
     assert.equal(await page.getByLabel("Reference a project file or folder").isVisible(), true);
+    assert.equal(await page.getByPlaceholder("Describe a change").evaluate((el) => el.rows), 2);
   },
 );

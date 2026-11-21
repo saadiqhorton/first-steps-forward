@@ -211,3 +211,13 @@ Changes: Details is available on the start screen with ADE version, stock/privat
 Verification: `npm run typecheck`, `npm run lint`, `npm run token-audit`, `npm run build`, and `npm test` passed. The full suite reported 761 passed, 1 skipped, 0 failed; token audit reported 0 errors (52 existing warnings). The browser integration test confirms the new-change composer exposes workflow and file-reference controls. `git diff --check` is clean.
 
 Stills: `cook/stills/r13/`, compare `cook/compare/r13/all.jpg`. The phone run verified Details, `/` and `@`, ready and kept states, and the expanded preview with its address and 44px controls. A final S08-only capture refreshed the start/details images and comparison; its harness and ADE process exited. The latest visual review scored the compact phone composition 88/100 overall: all toolbar controls are visible, with remaining differences in vertical spacing, card density, and the installed agent/model label. The behavior and check gates pass; the visual bar is still below the 90-point target, so leave the branch for human review before any merge.
+
+## Round 14
+
+Focus: finish the phone start composition and make the bottom composer controls fit on one row.
+
+Changes: the shared composer now accepts an opt-in compact mode; only Customize's new-change composer uses a two-row initial textarea and keeps its footer on one row at phone widths. Other composer surfaces keep their existing sizing. The idea cards now match the reference copy and wrap, with the card and composer spacing tuned to W08. The screenshot fixture creates Atlas and Lantern in its disposable home, and the preview capture waits for the browser install and phone auto-open to finish before saving.
+
+Verification: full typecheck, lint (0 errors), token-audit (0 errors; 52 existing warnings), build, and `npm test` pass. The full suite reported 761 passed, 1 skipped, 0 failed. The integration test checks `/`, `@`, and the compact two-row composer. Final S08 capture: 5 phone states, real checks reached Ready, preview address loaded, 0 harness problems, and no harness processes left. `git diff --check` is clean.
+
+Stills: `cook/stills/r14/`, compare `cook/compare/r14/all.jpg`. Two fresh screenshot-only reviewers scored (layout, color, typography, detail, interaction): 97/98/95/95/93 and 93/97/91/90/93. Medians are **95/97.5/93/92.5/93**, meeting all five bars (90/95/90/85/90). Remaining visual difference: the installed OpenAI Codex/default model label is shown honestly and differs from the mock's Claude label. Customize ADE is ready on `customize-ade` for human review; no merge or push was made.
