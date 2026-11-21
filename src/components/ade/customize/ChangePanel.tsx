@@ -182,7 +182,7 @@ export function ChangePanel({
     const size = big
       ? "fixed inset-0 z-[var(--z-dropdown)] lg:static lg:z-auto lg:flex-1 lg:border-l"
       : showingPreview
-        ? "lg:w-[55%] lg:border-l"
+        ? "lg:w-[45%] lg:border-l"
         : "lg:w-96 lg:border-l";
     return (
       <aside
