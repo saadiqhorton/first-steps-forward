@@ -20,11 +20,13 @@ export function selfPaths(dataDir) {
   return {
     root,
     state: path.join(root, "state.json"),
+    current: path.join(root, "current.json"),
     source: path.join(root, "source"),
     partial: path.join(root, "source.partial"),
     builds: path.join(root, "builds"),
     homes: path.join(root, "homes"),
     backups: path.join(root, "backups"),
+    workspace: path.join(dataDir, "workspace.json"),
   };
 }
 

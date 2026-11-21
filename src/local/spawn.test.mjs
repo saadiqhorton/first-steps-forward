@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { killTree, spawnCommand } from "./spawn.mjs";
+import { killTree, runCommand, spawnCommand } from "./spawn.mjs";
 
 const isWindows = process.platform === "win32";
 const collect = (child) =>
@@ -89,5 +89,32 @@ test(
       killTree(child.pid);
       rmSync(dir, { recursive: true, force: true });
     }
+  },
+);
+
+// Regression: a Customize ADE "Tests" check hung for 38 minutes because the
+// timeout killed only `npm`, while the test runner it started kept the output
+// pipes open, so the command never ended.
+test(
+  "runCommand with killGroup ends a timed-out command whose children hold the pipes",
+  { skip: isWindows && "process groups are POSIX; Windows uses taskkill /T" },
+  async () => {
+    const script =
+      "const { spawn } = require('node:child_process');" +
+      "const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' });" +
+      "console.log('grandchild ' + c.pid);" +
+      "setInterval(() => {}, 1000);";
+    const started = Date.now();
+    const result = await runCommand(process.execPath, ["-e", script], {
+      timeout: 500,
+      killGroup: true,
+      killGraceMs: 500,
+    });
+    assert.equal(result.timedOut, true);
+    assert.ok(Date.now() - started < 5000, "resolved promptly after the timeout");
+    const pid = Number(/grandchild (\d+)/.exec(result.stdout)?.[1]);
+    assert.ok(pid > 0, "the grandchild started");
+    await new Promise((r) => setTimeout(r, 200));
+    assert.throws(() => process.kill(pid, 0), "the grandchild was stopped with the group");
   },
 );

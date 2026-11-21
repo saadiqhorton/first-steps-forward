@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Eye, LoaderCircle, RotateCcw, Square } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Eye,
+  LoaderCircle,
+  RotateCcw,
+  RotateCw,
+  Square,
+} from "lucide-react";
 import { BrowserChromeRow } from "@/components/ade/browser/BrowserChromeRow";
 import { BrowserPreviewProvider } from "@/components/ade/browser/BrowserPreviewProvider";
 import { BrowserSurface } from "@/components/ade/browser/BrowserSurface";
@@ -79,34 +88,68 @@ export function PreviewPanel({ change }: { change: Change }) {
           allowed={canTry(change)}
         />
       ) : (
-        <div className="rounded-md border border-line px-4 py-4">
-          <p className="text-ui font-medium text-ink">Try this change before you keep it</p>
-          <p className="mt-1 text-xs leading-5 text-[color:var(--text-secondary)]">
-            ADE starts a separate copy of itself with this change and shows it here. {TEST_DATA}:
-            nothing you do in it touches the ADE you are using.
-          </p>
-          {canTry(change) ? (
-            <button
-              type="button"
-              onClick={start}
-              disabled={action.isPending}
-              className="btn-amber mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
-            >
-              <Eye className="size-3.5" strokeWidth={1.5} aria-hidden />
-              {action.isPending ? "Starting…" : "Try it"}
-            </button>
-          ) : (
-            <p className="mt-3 text-xs text-dim">
-              You can try it when the agent and the checks finish.
-            </p>
-          )}
-        </div>
+        <NotTried allowed={canTry(change)} busy={action.isPending} onStart={start} />
       )}
       {error && (
         <p className="text-xs text-danger" role="alert">
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+/** A browser frame waiting for the preview: the address it will get, and Try it in the middle. */
+function NotTried({
+  allowed,
+  busy,
+  onStart,
+}: {
+  allowed: boolean;
+  busy: boolean;
+  onStart: () => void;
+}) {
+  return (
+    <div
+      className="flex flex-col overflow-hidden rounded-md border border-line"
+      aria-label="Preview"
+    >
+      <div
+        className="flex h-10 shrink-0 items-center gap-1 border-b border-line bg-panel px-2"
+        aria-hidden
+      >
+        <span className="grid size-7 place-items-center text-dim opacity-40">
+          <ArrowLeft className="size-4" strokeWidth={1.5} />
+        </span>
+        <span className="grid size-7 place-items-center text-dim opacity-40">
+          <ArrowRight className="size-4" strokeWidth={1.5} />
+        </span>
+        <span className="grid size-7 place-items-center text-dim opacity-40">
+          <RotateCw className="size-4" strokeWidth={1.5} />
+        </span>
+        <span className="flex h-7 min-w-0 flex-1 items-center rounded-lg bg-paper px-3 font-mono text-xs text-dim ring-1 ring-line ring-inset">
+          127.0.0.1:—
+        </span>
+      </div>
+      <div className="flex aspect-[16/10] w-full flex-col items-center justify-center gap-3 bg-paper px-6 text-center">
+        <p className="text-ui font-medium text-ink">Try this change before you keep it</p>
+        <p className="max-w-xs text-xs leading-5 text-[color:var(--text-secondary)]">
+          {allowed
+            ? "Starts your changed ADE with test data, next to this one."
+            : "You can try it when the agent and the checks finish."}
+        </p>
+        {allowed && (
+          <button
+            type="button"
+            onClick={onStart}
+            disabled={busy}
+            className="btn-amber inline-flex min-h-[var(--control-height-md)] items-center gap-1.5 px-4 text-ui font-medium lg:min-h-0 lg:py-2"
+          >
+            <Eye className="size-4" strokeWidth={1.5} aria-hidden />
+            {busy ? "Starting…" : "Try it"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

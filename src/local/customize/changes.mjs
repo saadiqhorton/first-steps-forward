@@ -183,25 +183,45 @@ async function checkChange(ctx, change, { auto }) {
     return touch(ctx, change, { status: "failed", reason: `${names} did not pass.` });
   const session = ctx.deps.getSession(change.sessionId);
   const report = failed
-    .map(
-      (check) =>
-        `Check "${check.label}" failed (${check.summary}). Last 80 lines:\n${(check.output ?? "").split("\n").slice(-80).join("\n")}`,
+    .map((check) =>
+      [
+        `Check "${check.label}" failed (${check.summary}).`,
+        ...(check.failures?.length ? ["What failed:", ...check.failures.map((f) => `- ${f}`)] : []),
+        "Last 80 lines:",
+        (check.output ?? "").split("\n").slice(-80).join("\n"),
+      ].join("\n"),
     )
     .join("\n\n");
+  const attempt = change.fixAttempts + 1;
   touch(ctx, change, {
     status: "fixing",
     reason: `${names} did not pass. The agent is fixing it.`,
-    fixAttempts: change.fixAttempts + 1,
+    fixAttempts: attempt,
   });
   try {
     await ctx.deps.sendMessage(
       session,
       `ADE ran its checks and some failed. Fix them without touching protected design files.\n\n${report}`,
+      fixPresentation(failed, attempt),
     );
   } catch (error) {
     touch(ctx, change, { status: "failed", reason: error?.message ?? String(error) });
   }
 }
+
+/** "Tests", "Tests and Lint", "Typecheck, Tests and Lint". */
+const listOf = (labels) =>
+  labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+
+/**
+ * How an automatic fix prompt shows in the conversation: one line from ADE,
+ * not the 80-line prompt the agent receives (`kind: "ade"` marks the row).
+ */
+export const fixPresentation = (failed, attempt) => ({
+  kind: "ade",
+  text: `ADE sent the failing ${listOf(failed.map((check) => check.label))} output to the agent (attempt ${attempt} of ${MAX_FIX_ATTEMPTS})`,
+  references: [],
+});
 
 export async function rerunChecks(ctx, id) {
   const change = findChange(ctx, id);
@@ -226,13 +246,18 @@ export async function keepChange(ctx, id) {
   if (live.status !== "ready" || change.commit)
     throw new CustomizeError(409, "Only a change that passed its checks can be kept.");
   await ctx.previews?.stop(change.id);
+  // The tree the checks (or Try it) last built in the copy, so the kept version can reuse it.
+  const builtTree = change.build?.sha
+    ? (await ctx.git(["rev-parse", `${change.build.sha}^{tree}`])).stdout.trim() || null
+    : null;
   await ctx.git.must(["checkout", "-f", "mine"]);
   await ctx.git.must(["merge", "--squash", branchOf(change)]);
   await ctx.git.must(["commit", "-m", change.title]);
   const commit = await ctx.git.must(["rev-parse", "HEAD"]);
   await ctx.git(["branch", "-D", branchOf(change)]);
-  ctx.data.switch = { ...ctx.data.switch, status: "pending", launcher: ctx.launcher };
+  delete change.build;
   touch(ctx, change, { status: "kept", commit, keptAt: isoNow(ctx), reason: undefined });
+  await ctx.switcher?.mineChanged({ reuseTree: builtTree });
   return viewOf(ctx, change);
 }
 
@@ -271,8 +296,8 @@ export async function removeChange(ctx, id) {
     });
     return viewOf(ctx, change);
   }
-  ctx.data.switch = { ...ctx.data.switch, status: "pending", launcher: ctx.launcher };
   touch(ctx, change, { status: "removed", reason: undefined });
+  await ctx.switcher?.mineChanged();
   return viewOf(ctx, change);
 }
 

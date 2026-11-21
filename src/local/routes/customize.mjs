@@ -15,6 +15,8 @@ export async function customize(ctx) {
       const setup = await service.startSetup();
       return json(res, 202, { setup });
     }
+    if (parts.length === 2 && parts[1] === "restart" && method === "POST")
+      return json(res, 202, { switch: await service.restart() });
     if (parts[1] === "changes") {
       if (parts.length === 2 && method === "POST") {
         const data = await body(req);

@@ -7,6 +7,7 @@ import { selfPaths, SELF_PROJECT_ID } from "./paths.mjs";
 import { resolveStock } from "./source.mjs";
 import { registerSelfProject, runSetup } from "./setup.mjs";
 import { createPreviews } from "./preview.mjs";
+import { createSwitch } from "./switch.mjs";
 import {
   CustomizeError,
   createChange,
@@ -41,10 +42,13 @@ const DEFAULT_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
  *   run?: typeof defaultRun,
  *   now?: () => number,
  *   id?: () => string,
- *   launcher?: boolean,
+ *   launcher?: () => import("./switch.mjs").LauncherInfo,
  *   checkTimeout?: number,
  *   preview?: Parameters<typeof createPreviews>[1],
+ *   switching?: { poll?: number, buildTimeout?: number },
  * }} options
+ *   `launcher` says whether something can restart ADE (the `ade` supervisor) and
+ *   which kept version runs now; without one, the user restarts ADE themselves.
  */
 export function createCustomize({
   dataDir,
@@ -53,12 +57,15 @@ export function createCustomize({
   emit = () => {},
   deps,
   sourceRoot = DEFAULT_ROOT,
-  run = defaultRun,
+  // Checks, builds and installs run package scripts whose children must die
+  // with them on timeout, or a hung test keeps a change "checking" forever.
+  run = (bin, args, opts = {}) => defaultRun(bin, args, { killGroup: true, ...opts }),
   now = () => Date.now(),
   id = () => randomUUID(),
-  launcher = false,
+  launcher = () => ({ restart: null, running: null }),
   checkTimeout = 600_000,
   preview = {},
+  switching = {},
 }) {
   const paths = selfPaths(dataDir);
   const store = createStore(paths.state);
@@ -83,7 +90,6 @@ export function createCustomize({
     deps,
     appState,
     saveApp,
-    launcher,
     checkTimeout,
     orphans: new Set(),
     get data() {
@@ -94,6 +100,8 @@ export function createCustomize({
       writes = writes.then(() => store.save(data)).catch(() => {});
       emit("customize");
     },
+    /** Every state change so far is on disk (before ADE is restarted). */
+    flush: () => writes,
     resolveStock: async () => (stock ??= await resolveStock({ sourceRoot, run })),
     pipeline: (changeId) => pipelines.get(changeId) ?? Promise.resolve(),
     enqueue(changeId, fn) {
@@ -113,6 +121,8 @@ export function createCustomize({
 
   const previews = createPreviews(ctx, preview);
   ctx.previews = previews;
+  const switcher = createSwitch(ctx, { launcher, ...switching });
+  ctx.switcher = switcher;
 
   const runningSetup = () => data.setup.status === "running";
 
@@ -134,6 +144,7 @@ export function createCustomize({
         }
       await previews.reset();
       if (data.setup.status === "ready") await registerSelfProject(ctx);
+      await switcher.reconcile();
       ctx.changed();
     },
 
@@ -146,7 +157,7 @@ export function createCustomize({
         setup: data.setup,
         changes: data.changes.filter((c) => c.status !== "undone").map((c) => viewOf(ctx, c)),
         current: data.current,
-        switch: { ...data.switch, status: data.switch.status ?? "idle", launcher },
+        switch: switcher.view(),
         update: data.update,
       };
     },
@@ -170,6 +181,8 @@ export function createCustomize({
     keep: (changeId) => keepChange(ctx, changeId),
     undo: (changeId) => undoChange(ctx, changeId),
     remove: (changeId) => removeChange(ctx, changeId),
+    /** "Restart ADE": wait for agents, back up the workspace, restart on the kept version. */
+    restart: () => switcher.restart(),
     onTurnEnd: (session) => onTurnEnd(ctx, session),
     /** A new agent turn on a change's session: its preview no longer shows the latest work. */
     onTurnStart(session) {
@@ -191,6 +204,7 @@ export function createCustomize({
     /** Wait for setup, change pipelines and state writes (tests, shutdown). */
     async idle() {
       await Promise.all([setupRun, ...pipelines.values(), previews.settled()]);
+      await switcher.settled();
       await writes;
     },
   };

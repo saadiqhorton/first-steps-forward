@@ -158,7 +158,9 @@ export function createPreviews(
       env: previewEnv(home),
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
-      detached: process.platform !== "win32",
+      // Under the `ade` supervisor the preview stays in this server's process
+      // group, so it stops with it even when this server is killed outright.
+      detached: process.platform !== "win32" && process.env.ADE_SUPERVISED !== "1",
     });
     let exited = null;
     const closed = new Promise((resolve) => {

@@ -1,14 +1,83 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, Eye, Trash2, Undo2 } from "lucide-react";
-import { keepChange, undoChange, useCustomizeAction, type Change } from "@/lib/ade/customizeApi";
+import { Check, Eye, Lock, MessageSquare, Trash2, Undo2 } from "lucide-react";
+import {
+  keepChange,
+  runningWithoutChanges,
+  undoChange,
+  useCustomizeAction,
+  type Change,
+  type CustomizeState,
+} from "@/lib/ade/customizeApi";
+import { timeAgo, useNow } from "@/lib/ade/store";
 import { keepBlockedReason } from "./customizeText";
 import { RemoveConfirm } from "./KeptList";
 import { canTry, usePreviewAction } from "./PreviewPanel";
+import { StockNotice, SwitchCard } from "./SwitchCard";
 
-export function ChangeActions({ change, onTry }: { change: Change; onTry: () => void }) {
+/** Phones get thumb-sized, equal buttons; the wide layout keeps them compact. */
+const BUTTON =
+  "inline-flex min-h-[var(--control-height-md)] min-w-0 items-center justify-center gap-1.5 px-3 text-xs @lg:min-h-0 @lg:py-1.5";
+
+/** The one line that says where the change stands next to its buttons. */
+function StatusLine({ text, tone }: { text: string; tone: "quiet" | "danger" | "attention" }) {
+  const color =
+    tone === "danger" ? "text-danger" : tone === "attention" ? "text-amber-deep" : "text-dim";
+  const dot = tone === "danger" ? "bg-danger" : tone === "attention" ? "bg-amber" : "bg-dim";
+  return (
+    <p className={`flex min-w-0 items-center gap-2 text-xs leading-5 ${color}`} role="status">
+      <span className={`size-1.5 shrink-0 rounded-full ${dot}`} aria-hidden />
+      <span className="min-w-0">{text}</span>
+    </p>
+  );
+}
+
+/** A kept change: where the switch stands, and Remove behind a quiet button. */
+function KeptCard({ change, state }: { change: Change; state: CustomizeState }) {
+  const [confirm, setConfirm] = useState(false);
+  if (confirm)
+    return (
+      <RemoveConfirm
+        change={change}
+        onCancel={() => setConfirm(false)}
+        onDone={() => setConfirm(false)}
+      />
+    );
+  return (
+    <div className="space-y-3">
+      {runningWithoutChanges(state) && <StockNotice flag={state.current.withoutChanges} />}
+      <div className="flex flex-col gap-2 @lg:flex-row @lg:items-start @lg:gap-3">
+        <div className="min-w-0 flex-1">
+          <SwitchCard state={state} kept />
+        </div>
+        <button
+          type="button"
+          onClick={() => setConfirm(true)}
+          className={`btn-quiet shrink-0 text-dim hover:text-ink ${BUTTON}`}
+        >
+          <Trash2 className="size-3.5" strokeWidth={1.5} aria-hidden />
+          Remove from my ADE
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function ChangeActions({
+  change,
+  state,
+  onTry,
+  onAskAgain,
+}: {
+  change: Change;
+  state: CustomizeState;
+  onTry: () => void;
+  /** Failed checks: put a request for another fix in the composer. */
+  onAskAgain: () => void;
+}) {
   const navigate = useNavigate();
-  const [confirm, setConfirm] = useState<"undo" | "remove" | null>(null);
+  const now = useNow();
+  const [confirm, setConfirm] = useState(false);
   const keep = useCustomizeAction((id: string) => keepChange(id));
   const undo = useCustomizeAction((id: string) => undoChange(id));
   const preview = usePreviewAction();
@@ -22,17 +91,9 @@ export function ChangeActions({ change, onTry }: { change: Change; onTry: () => 
     Error | undefined;
 
   if (change.status === "removed") return null;
+  if (change.status === "kept") return <KeptCard change={change} state={state} />;
 
-  if (confirm === "remove")
-    return (
-      <RemoveConfirm
-        change={change}
-        onCancel={() => setConfirm(null)}
-        onDone={() => setConfirm(null)}
-      />
-    );
-
-  if (confirm === "undo")
+  if (confirm)
     return (
       <div className="rounded-md border border-line bg-surface-muted px-3 py-3" role="group">
         <p className="text-ui text-ink">Undo “{change.title}”?</p>
@@ -50,15 +111,11 @@ export function ChangeActions({ change, onTry }: { change: Change; onTry: () => 
                 onSuccess: () => void navigate({ to: "/workspace/customize" }),
               })
             }
-            className="btn-quiet px-3 py-1.5 text-xs font-medium text-danger"
+            className={`btn-quiet font-medium text-danger ${BUTTON}`}
           >
             {undo.isPending ? "Undoing…" : "Undo change"}
           </button>
-          <button
-            type="button"
-            onClick={() => setConfirm(null)}
-            className="btn-quiet px-3 py-1.5 text-xs"
-          >
+          <button type="button" onClick={() => setConfirm(false)} className={`btn-quiet ${BUTTON}`}>
             Cancel
           </button>
         </div>
@@ -70,10 +127,52 @@ export function ChangeActions({ change, onTry }: { change: Change; onTry: () => 
       </div>
     );
 
+  const failed = change.status === "failed";
+  const tried = Date.parse(change.triedAt ?? "");
+  const status: { text: string; tone: "quiet" | "danger" | "attention" } | null = blocked
+    ? {
+        text: blocked,
+        tone: failed ? "danger" : change.status === "needs-you" ? "attention" : "quiet",
+      }
+    : change.status === "ready"
+      ? Number.isFinite(tried)
+        ? { text: `Ready · tried ${timeAgo(now, tried) || "earlier"}`, tone: "quiet" }
+        : { text: "Not tried yet", tone: "quiet" }
+      : null;
+
+  const keepButton = (
+    <button
+      type="button"
+      disabled={!!blocked || keep.isPending}
+      title={blocked ?? "Add this change to your ADE"}
+      onClick={() => keep.mutate(change.id)}
+      className={`${blocked ? "btn-quiet text-dim" : "btn-amber font-medium"} ${BUTTON} disabled:cursor-not-allowed disabled:opacity-60`}
+    >
+      {blocked ? (
+        <Lock className="size-3.5" strokeWidth={1.5} aria-hidden />
+      ) : (
+        <Check className="size-3.5" strokeWidth={1.5} aria-hidden />
+      )}
+      {keep.isPending ? "Keeping…" : "Keep it"}
+      {blocked && <span className="sr-only">: {blocked}</span>}
+    </button>
+  );
+
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2">
-        {change.status !== "kept" && (
+    <div className="flex flex-col gap-2 @lg:flex-row @lg:items-center @lg:gap-3">
+      <div className="grid grid-cols-3 gap-2 @lg:flex @lg:shrink-0 @lg:items-center">
+        {failed ? (
+          <button
+            type="button"
+            onClick={onAskAgain}
+            className={`btn-amber font-medium ${BUTTON}`}
+            title="Ask the agent to try again"
+          >
+            <MessageSquare className="size-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
+            <span className="truncate @lg:hidden">Ask again</span>
+            <span className="hidden @lg:inline">Ask the agent to try again</span>
+          </button>
+        ) : (
           <button
             type="button"
             disabled={!canTry(change) || preview.isPending}
@@ -84,52 +183,45 @@ export function ChangeActions({ change, onTry }: { change: Change; onTry: () => 
             }
             onClick={tryIt}
             aria-pressed={previewOn}
-            className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+            className={`btn-quiet ${BUTTON}`}
           >
             <Eye className="size-3.5" strokeWidth={1.5} aria-hidden />
-            {previewOn ? "Show preview" : "Try it"}
+            {previewOn ? "Preview" : "Try it"}
           </button>
         )}
-        {change.status === "kept" ? (
-          <button
-            type="button"
-            onClick={() => setConfirm("remove")}
-            className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
-          >
-            <Trash2 className="size-3.5" strokeWidth={1.5} aria-hidden />
-            Remove
-          </button>
-        ) : (
+        {failed ? (
           <>
             <button
               type="button"
-              disabled={!!blocked || keep.isPending}
-              title={blocked ?? "Add this change to your ADE"}
-              onClick={() => keep.mutate(change.id)}
-              className="btn-amber inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+              onClick={() => setConfirm(true)}
+              className={`btn-quiet ${BUTTON}`}
             >
-              <Check className="size-3.5" strokeWidth={1.5} aria-hidden />
-              {keep.isPending ? "Keeping…" : "Keep it"}
+              <Undo2 className="size-3.5" strokeWidth={1.5} aria-hidden />
+              Undo
             </button>
+            {keepButton}
+          </>
+        ) : (
+          <>
+            {keepButton}
             <button
               type="button"
-              onClick={() => setConfirm("undo")}
-              className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
+              onClick={() => setConfirm(true)}
+              className={`btn-quiet ${BUTTON}`}
             >
               <Undo2 className="size-3.5" strokeWidth={1.5} aria-hidden />
               Undo
             </button>
           </>
         )}
-        {blocked && change.status !== "kept" ? (
-          <span className="min-w-0 text-xs text-dim">{blocked}</span>
-        ) : (
-          change.status === "ready" &&
-          !change.triedAt && <span className="min-w-0 text-xs text-dim">Not tried yet</span>
-        )}
       </div>
+      {status && (
+        <div className="order-first min-w-0 @lg:order-none @lg:border-l @lg:border-line @lg:pl-3">
+          <StatusLine text={status.text} tone={status.tone} />
+        </div>
+      )}
       {error && (
-        <p className="mt-2 text-xs text-danger" role="alert">
+        <p className="text-xs text-danger" role="alert">
           {error.message}
         </p>
       )}

@@ -213,7 +213,14 @@ test(
     assert.equal(kept.json.change.status, "kept");
     assert.equal((await call(`/api/customize/changes/${change.id}/undo`, {})).status, 409);
     assert.equal((await preview("start")).status, 409);
-    assert.equal((await call("/api/customize")).json.switch.status, "pending");
+    const pending = await waitFor(async () => {
+      const sw = (await call("/api/customize")).json.switch;
+      return sw.status === "pending" ? sw : null;
+    }, "the kept version to be prepared");
+    assert.equal(pending.launcher, false);
+    const restart = await call("/api/customize/restart", {});
+    assert.equal(restart.status, 409);
+    assert.match(restart.json.error, /run `ade`/);
   },
 );
 

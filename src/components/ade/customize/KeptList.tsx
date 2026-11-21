@@ -2,13 +2,16 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   removeChange,
+  runningWithoutChanges,
   useCustomizeAction,
   type Change,
   type CustomizeState,
 } from "@/lib/ade/customizeApi";
 import { useNow } from "@/lib/ade/store";
-import { changeDate, switchNote } from "./customizeText";
+import { CircleCheck, Trash2 } from "lucide-react";
+import { changeDate } from "./customizeText";
 import { StockHint } from "./StockHint";
+import { StockNotice, SwitchCard } from "./SwitchCard";
 
 export function RemoveConfirm({
   change,
@@ -48,60 +51,85 @@ export function RemoveConfirm({
   );
 }
 
-export function KeptList({ state }: { state: CustomizeState }) {
+/** Kept changes as cards; the switch state (restart, stock) on top when `showSwitch`. */
+export function KeptList({
+  state,
+  showSwitch = true,
+  currentId,
+}: {
+  state: CustomizeState;
+  showSwitch?: boolean;
+  /** The change on screen; its row does not link to itself. */
+  currentId?: string;
+}) {
   const now = useNow();
   const [confirming, setConfirming] = useState<string | null>(null);
   const kept = state.changes.filter((change) => change.status === "kept");
-  const note = switchNote(state);
-  if (!kept.length && !note) return null;
+  const switching = showSwitch && state.switch.status !== "idle";
+  const without = runningWithoutChanges(state);
+  if (!kept.length && !switching && !without) return null;
 
   return (
-    <section aria-label="Kept changes">
-      <div className="label-section">Kept in your ADE</div>
-      <ul className="mt-2 space-y-2">
-        {kept.map((change) =>
-          confirming === change.id ? (
-            <li key={change.id}>
-              <RemoveConfirm
-                change={change}
-                onCancel={() => setConfirming(null)}
-                onDone={() => setConfirming(null)}
-              />
-            </li>
-          ) : (
-            <li
-              key={change.id}
-              className="flex items-center gap-3 rounded-md border border-line bg-panel px-3 py-2"
-            >
-              <span className="size-1.5 shrink-0 rounded-full bg-dim" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <Link
-                  to="/workspace/customize/$changeId"
-                  params={{ changeId: change.id }}
-                  className="block truncate text-ui text-ink hover:underline"
-                >
-                  {change.title}
-                </Link>
-                <p className="truncate text-xs text-dim">
-                  Kept {changeDate(now, change.keptAt ?? change.updatedAt)} · {change.files.length}{" "}
-                  file{change.files.length === 1 ? "" : "s"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setConfirming(change.id)}
-                className="btn-quiet shrink-0 px-3 py-1.5 text-xs"
-              >
-                Remove
-              </button>
-            </li>
-          ),
-        )}
-      </ul>
-      {note && <p className="mt-3 text-xs leading-5 text-amber-deep">{note}</p>}
-      <div className="mt-3">
-        <StockHint />
+    <section aria-label="Kept changes" className="space-y-3">
+      <div className="flex items-baseline gap-2">
+        <h2 className="label-section">Kept in your ADE</h2>
+        {kept.length > 0 && <span className="text-xs text-dim tabular-nums">{kept.length}</span>}
       </div>
+      {without && <StockNotice flag={state.current.withoutChanges} />}
+      {switching && <SwitchCard state={state} />}
+      {kept.length > 0 && (
+        <ul className="card-panel divide-y divide-line overflow-hidden">
+          {kept.map((change) => {
+            const files = `${change.files.length} file${change.files.length === 1 ? "" : "s"}`;
+            if (confirming === change.id)
+              return (
+                <li key={change.id} className="p-2">
+                  <RemoveConfirm
+                    change={change}
+                    onCancel={() => setConfirming(null)}
+                    onDone={() => setConfirming(null)}
+                  />
+                </li>
+              );
+            return (
+              <li key={change.id} className="flex items-center gap-3 px-3 py-2.5">
+                <CircleCheck
+                  className={`size-4 shrink-0 ${without ? "text-dim" : "text-teal"}`}
+                  strokeWidth={1.5}
+                  aria-hidden
+                />
+                <div className="min-w-0 flex-1">
+                  {change.id === currentId ? (
+                    <p className="truncate text-ui text-ink">{change.title}</p>
+                  ) : (
+                    <Link
+                      to="/workspace/customize/$changeId"
+                      params={{ changeId: change.id }}
+                      className="block truncate text-ui text-ink hover:underline"
+                      title={change.request}
+                    >
+                      {change.title}
+                    </Link>
+                  )}
+                  <p className="truncate text-xs text-dim tabular-nums">
+                    Kept {changeDate(now, change.keptAt ?? change.updatedAt)} · {files}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(change.id)}
+                  aria-label={`Remove “${change.title}”`}
+                  className="btn-quiet inline-flex min-h-[var(--control-height-md)] shrink-0 items-center gap-1.5 px-3 text-xs text-dim hover:text-ink lg:min-h-0 lg:py-1.5"
+                >
+                  <Trash2 className="size-3.5" strokeWidth={1.5} aria-hidden />
+                  Remove
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <StockHint />
     </section>
   );
 }

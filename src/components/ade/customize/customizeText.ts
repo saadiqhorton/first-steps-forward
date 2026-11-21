@@ -1,5 +1,5 @@
 import { format } from "date-fns";
-import type { Change, CustomizeState } from "@/lib/ade/customizeApi";
+import { runningWithoutChanges, type Change, type CustomizeState } from "@/lib/ade/customizeApi";
 import { timeAgo } from "@/lib/ade/store";
 
 export function changeDate(now: number, iso: string) {
@@ -8,17 +8,30 @@ export function changeDate(now: number, iso: string) {
   return now - at < 24 * 60 * 60 * 1000 ? timeAgo(now, at) : format(at, "MMM d");
 }
 
-/** Where a kept change stands: running, waiting for a restart, or switching. */
+const agentsWord = (n: number) => `${n} agent${n === 1 ? "" : "s"}`;
+
+/** Where kept changes stand: waiting for a restart, switching, or the switch failed. */
 export function switchNote(state: CustomizeState): string | null {
   const s = state.switch;
-  if (s.status === "pending")
-    return s.launcher ? "Switching to your version soon." : "Restart ADE to use your kept changes.";
+  if (s.status === "pending") return "Kept · restart ADE to start using it";
+  if (s.status === "preparing") return "Kept · getting your version ready";
   if (s.status === "waiting")
-    return `Switching when the running agent turn${s.waitingFor === 1 ? "" : "s"} finish${s.waitingFor === 1 ? "es" : ""}.`;
-  if (s.status === "restarting") return "Restarting ADE with your changes.";
+    return s.waitingFor
+      ? `Kept · waiting for ${agentsWord(s.waitingFor)} to finish, then ADE restarts`
+      : "Kept · ADE restarts when the running agents finish";
+  if (s.status === "restarting") return "Restarting ADE on your version";
   if (s.status === "failed")
-    return `Switching failed, so ADE kept running the version before.${s.error ? ` ${s.error}` : ""}`;
+    return s.step === "build"
+      ? "Your version couldn't be built, so ADE stays as it is"
+      : "Your version didn't start, so ADE went back";
   return null;
+}
+
+export { agentsWord };
+
+/** A failed check's label, short enough for a row; the detail lives in its summary. */
+export function checkLabel(check: { id: string; label: string }) {
+  return check.id === "design-lock" ? "Design files" : check.label;
 }
 
 /** Why Keep it is off, in the user's words. Null when it can be kept. */
@@ -69,7 +82,7 @@ export function changeDetail(change: Change, state: CustomizeState): string {
       const kept = state.changes.filter((c) => c.status === "kept").length;
       const note = switchNote(state);
       if (note) return note;
-      return state.current.stock
+      return runningWithoutChanges(state)
         ? "Kept · ADE is running without your changes"
         : `You're on your version · ADE ${state.version} · ${kept} change${kept === 1 ? "" : "s"}`;
     }

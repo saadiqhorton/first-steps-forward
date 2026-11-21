@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AgentSelection } from "@/components/ade/AgentPicker";
@@ -9,6 +9,7 @@ import { ChangeHeader } from "@/components/ade/customize/ChangeHeader";
 import { ChangePanel, usePanelTab } from "@/components/ade/customize/ChangePanel";
 import { CustomizeFrame, CustomizeGate } from "@/components/ade/customize/CustomizeGate";
 import { paneVisibility, useCustomizePane } from "@/components/ade/customize/paneContext";
+import { checkLabel } from "@/components/ade/customize/customizeText";
 import { CUSTOMIZE_KEY, NEEDS_YOU, type Change, type CustomizeState } from "@/lib/ade/customizeApi";
 import { useAde, useSession } from "@/lib/ade/store";
 
@@ -55,6 +56,16 @@ function followUpBlocked(change: Change): string | undefined {
   return "The agent is working. You can reply when it finishes.";
 }
 
+/** What "Ask the agent to try again" puts in the composer, naming the checks that fail. */
+function askAgainText(change: Change) {
+  const failing = change.checks.filter((c) => c.status === "failed").map(checkLabel);
+  const which = failing.length ? failing.join(" and ") : "A";
+  return `${which} check${failing.length > 1 ? "s" : ""} still fail${failing.length > 1 ? "" : "s"}. Look at the failing output again, find the cause and fix it. Keep the tests meaningful: don't skip or weaken them.`;
+}
+
+/** Phones: the agent chip may use the full row, so the model name is not cut off. */
+const COMPOSER_FIT = "[&_button[aria-haspopup=dialog]]:max-w-none!";
+
 function ChangeView({ change, state }: { change: Change; state: CustomizeState }) {
   const { pane, setPane } = useCustomizePane();
   const [tab, setTab] = usePanelTab(change);
@@ -78,6 +89,18 @@ function ChangeView({ change, state }: { change: Change; state: CustomizeState }
     permission: "build",
   };
   const blocked = followUpBlocked(change);
+  const [seed, setSeed] = useState({ text: "", nonce: 0 });
+  const composerRef = useRef<HTMLDivElement>(null);
+  const askAgain = () => {
+    setPane("conversation");
+    setSeed((s) => ({ text: askAgainText(change), nonce: s.nonce + 1 }));
+  };
+  useEffect(() => {
+    if (!seed.nonce) return;
+    const field = composerRef.current?.querySelector("textarea");
+    field?.focus();
+    field?.setSelectionRange(field.value.length, field.value.length);
+  }, [seed.nonce]);
 
   const send = async (text: string) => {
     if (!text.trim()) return false;
@@ -102,14 +125,22 @@ function ChangeView({ change, state }: { change: Change; state: CustomizeState }
       >
         <ChangeHeader change={change} state={state} />
         <ChangeConversation change={change} />
-        <div className="shrink-0 border-t border-line px-4 py-3 @lg:px-7">
+        {/* Phones: the actions sit at the bottom, under the composer, within thumb reach. */}
+        <div className="order-last shrink-0 border-t border-line bg-paper px-3 py-3 @lg:order-none @lg:bg-transparent @lg:px-7">
           <div className="mx-auto w-full max-w-3xl">
-            <ChangeActions change={change} onTry={showPreview} />
+            <ChangeActions
+              change={change}
+              state={state}
+              onTry={showPreview}
+              onAskAgain={askAgain}
+            />
           </div>
         </div>
-        <div className="shrink-0 border-t border-line px-4 py-4 @lg:px-7">
-          <div className="mx-auto w-full max-w-3xl">
+        <div className="shrink-0 border-t border-line px-3 py-3 @lg:px-7 @lg:py-4">
+          <div ref={composerRef} className={`mx-auto w-full max-w-3xl ${COMPOSER_FIT}`}>
             <Composer
+              key={seed.nonce}
+              {...(seed.text ? { initialText: seed.text } : {})}
               mode="follow-up"
               sessionId={change.sessionId}
               selection={activeSelection}

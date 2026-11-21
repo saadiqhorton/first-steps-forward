@@ -49,6 +49,11 @@ export function usePanelTab(change: Change) {
   useEffect(() => {
     if (failed) setTab("checks");
   }, [failed]);
+  // Kept: the preview is gone, so show what went into your ADE.
+  const kept = change.status === "kept";
+  useEffect(() => {
+    if (kept) setTab("changes");
+  }, [kept]);
   useEffect(() => setTab(defaultTab(change)), [change.id]); // eslint-disable-line react-hooks/exhaustive-deps -- reset per change only
   return [tab, setTab] as const;
 }
@@ -210,7 +215,9 @@ export function ChangePanel({
           {tab === "changes" && (
             <>
               <FilesPanel files={change.files} working={change.status === "working"} />
-              {change.status === "kept" && <KeptList state={state} />}
+              {change.status === "kept" && (
+                <KeptList state={state} showSwitch={false} currentId={change.id} />
+              )}
             </>
           )}
           {!(tab === "changes" && change.status === "kept") && <StockHint />}

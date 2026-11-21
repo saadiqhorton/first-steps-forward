@@ -57,6 +57,7 @@ import { startProjectSession } from "./routes/sessionReads.mjs";
 import { createCustomize } from "./customize/index.mjs";
 import { customize as customizeRoute } from "./routes/customize.mjs";
 import { isHiddenProject, isHiddenSession } from "./customize/paths.mjs";
+import { currentLauncher } from "./launcher.mjs";
 
 const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
@@ -391,6 +392,7 @@ const customize = createCustomize({
   appState: state,
   saveApp: () => save(),
   emit: (scope) => eventHub.emit(scope),
+  launcher: () => currentLauncher(),
   deps: {
     startSession: async (input) => {
       const session = await startProjectSession(
@@ -400,7 +402,8 @@ const customize = createCustomize({
       await save();
       return session;
     },
-    sendMessage: (session, text) => turns.send(session, { text }, "later"),
+    sendMessage: (session, text, presentation) =>
+      turns.send(session, { text, ...(presentation ? { presentation } : {}) }, "later"),
     stopSession: (session) => turns.stop(session),
     getSession: (sessionId) => state.sessions.find((item) => item.id === sessionId),
     isBusy: (session) => turns.isBusy(session),

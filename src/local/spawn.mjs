@@ -36,34 +36,61 @@ export function killTree(pid, { platform = process.platform, run = spawnSync } =
  * Run a command to completion and collect its output. Never rejects: a
  * command that cannot start reports code 127 with the reason on stderr, and
  * `timeout` (ms) ends a command that runs too long with SIGTERM.
+ *
+ * `killGroup` runs the command in its own process group and, on timeout,
+ * stops the whole group (SIGKILL after `killGraceMs`). Use it for package
+ * scripts: `npm run test` starts children that inherit the output pipes, so
+ * killing npm alone leaves them running and the command never ends.
  */
 export function runCommand(bin, args, opts = {}) {
   return new Promise((resolve) => {
+    const group = Boolean(opts.killGroup);
     const child = spawnCommand(bin, args, {
       cwd: opts.cwd,
       env: opts.env ? { ...process.env, ...opts.env } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
+      detached: group && process.platform !== "win32",
     });
     let stdout = "",
       stderr = "",
-      timedOut = false;
-    const timer = opts.timeout
-      ? setTimeout(() => {
+      timedOut = false,
+      settled = false;
+    const timers = [];
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      timers.forEach(clearTimeout);
+      resolve(result);
+    };
+    const killAll = (signal) => {
+      try {
+        if (group && process.platform !== "win32") process.kill(-child.pid, signal);
+        else if (group && killTree(child.pid)) return;
+        else child.kill(signal);
+      } catch {
+        /* already gone */
+      }
+    };
+    if (opts.timeout)
+      timers.push(
+        setTimeout(() => {
           timedOut = true;
-          child.kill("SIGTERM");
-        }, opts.timeout)
-      : null;
+          killAll("SIGTERM");
+          if (group)
+            timers.push(
+              setTimeout(() => {
+                killAll("SIGKILL");
+                // Whatever still holds the pipes is gone or unkillable: report now.
+                finish({ code: 1, stdout, stderr, timedOut });
+              }, opts.killGraceMs ?? 5000),
+            );
+        }, opts.timeout),
+      );
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
-    child.on("error", (e) => {
-      if (timer) clearTimeout(timer);
-      resolve({ code: 127, stdout, stderr: `${stderr}${e.message}` });
-    });
-    child.on("close", (code) => {
-      if (timer) clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout, stderr, timedOut });
-    });
+    child.on("error", (e) => finish({ code: 127, stdout, stderr: `${stderr}${e.message}` }));
+    child.on("close", (code) => finish({ code: code ?? 1, stdout, stderr, timedOut }));
   });
 }
 

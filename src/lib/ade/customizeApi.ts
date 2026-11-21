@@ -24,6 +24,8 @@ export interface ChangeCheck {
   durationMs?: number;
   summary?: string;
   output?: string;
+  /** The failing lines the check found (test names, errors); newer local services only. */
+  failures?: string[];
 }
 
 export interface ChangeFile {
@@ -68,10 +70,19 @@ export interface Change {
 }
 
 export interface CustomizeSwitch {
-  status: "idle" | "pending" | "waiting" | "restarting" | "failed";
+  /** `preparing`: building the kept version before it can be restarted into. */
+  status: "idle" | "preparing" | "pending" | "waiting" | "restarting" | "failed";
+  /** While waiting: agent turns still running. */
   waitingFor?: number;
+  /** When failed: why your version did not start. */
   error?: string;
+  /** ADE runs under its launcher, so it can restart itself. */
   launcher: boolean;
+  /** Without a launcher: the command that starts ADE again. */
+  command?: string;
+  /** When failed: where it stopped, and the last lines printed. */
+  step?: string;
+  output?: string;
 }
 
 export interface CustomizeUpdate {
@@ -91,7 +102,8 @@ export interface CustomizeState {
   version: string;
   setup: CustomizeSetup;
   changes: Change[];
-  current: { stock: boolean; sha: string | null };
+  /** `stock`: ADE was started without your changes (`ade --stock`). */
+  current: { stock: boolean; sha: string | null; withoutChanges?: boolean };
   switch: CustomizeSwitch;
   update: CustomizeUpdate | null;
 }
@@ -162,14 +174,23 @@ export const previewChange = (id: string, action: "start" | "stop") =>
     action,
   });
 
+/** Restart ADE on your version; only when the launcher runs ADE (`switch.launcher`). */
+export const restartAde = () =>
+  call<{ switch?: CustomizeSwitch }>("/api/customize/restart", "POST");
+
 export function useCustomize() {
   const serviceAvailable = useAdeState((state) => state.serviceAvailable);
   return useQuery({
     queryKey: CUSTOMIZE_KEY,
     queryFn: getCustomize,
     enabled: serviceAvailable,
-    // The `customize` SSE event invalidates this; poll slowly only while setup runs.
-    refetchInterval: (query) => (query.state.data?.setup.status === "running" ? 3000 : false),
+    // The `customize` SSE event invalidates this. Poll while setup runs, and quickly while ADE
+    // switches versions: the event stream drops during a restart and does not refetch on return.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && ["preparing", "waiting", "restarting"].includes(data.switch.status)) return 1500;
+      return data?.setup.status === "running" ? 3000 : false;
+    },
     retry: (count, error) =>
       !(error instanceof CustomizeRequestError && error.missing) && count < 2,
   });
@@ -194,6 +215,16 @@ export const IN_PROGRESS: ChangeStatus[] = [
 ];
 export const BUSY: ChangeStatus[] = ["working", "checking", "fixing"];
 export const NEEDS_YOU: ChangeStatus[] = ["ready", "failed", "needs-you"];
+
+/** ADE runs now without kept changes: started with `ade --stock`, or not restarted since. */
+export function runningWithoutChanges(state: CustomizeState): boolean {
+  if (state.current.withoutChanges) return true;
+  return (
+    state.current.stock &&
+    state.switch.status === "idle" &&
+    state.changes.some((change) => change.status === "kept")
+  );
+}
 
 export function changeInProgress(state: CustomizeState | undefined): Change | undefined {
   return state?.changes.find((change) => IN_PROGRESS.includes(change.status));
