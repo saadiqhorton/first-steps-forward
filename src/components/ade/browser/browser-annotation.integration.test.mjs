@@ -175,6 +175,10 @@ test(
     });
     const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
     page.setDefaultTimeout(5000);
+    // The first navigation compiles the fixture through Vite from a cold
+    // dependency cache in a temp root. On a loaded machine that routinely
+    // exceeds the 5s interaction budget, so navigation gets its own.
+    const navigation = { timeout: 30_000 };
     page.on("pageerror", (error) => console.error("Fixture page error:", error));
     page.on("console", (message) => {
       if (message.type() === "error") console.error("Fixture console:", message.text());
@@ -235,7 +239,7 @@ test(
         },
       }),
     );
-    await page.goto(server.resolvedUrls.local[0]);
+    await page.goto(server.resolvedUrls.local[0], navigation);
     await page.locator('canvas[aria-label="Browser page"]').waitFor();
     await page.mouse.click(100, 160);
     await page.getByText("Annotation · 1 target · drag to move").waitFor();
@@ -453,7 +457,7 @@ test(
         });
       return route.abort();
     });
-    await page.goto(new URL("capture.html", server.resolvedUrls.local[0]).href);
+    await page.goto(new URL("capture.html", server.resolvedUrls.local[0]).href, navigation);
     await page.getByRole("button", { name: "Record", exact: true }).waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("button").disabled);
     await page.getByRole("button", { name: "Record", exact: true }).click();
@@ -516,7 +520,7 @@ test(
       "/api/attachments/recording-1",
     );
 
-    await page.goto(new URL("composer.html", server.resolvedUrls.local[0]).href);
+    await page.goto(new URL("composer.html", server.resolvedUrls.local[0]).href, navigation);
     await page.waitForFunction(() => typeof window.enqueue === "function");
     await page.evaluate(() => {
       window.enqueue("first");
@@ -558,7 +562,7 @@ test(
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await page.waitForFunction(async () => !(await window.readDraft()));
 
-    await page.goto(new URL("isolation.html", server.resolvedUrls.local[0]).href);
+    await page.goto(new URL("isolation.html", server.resolvedUrls.local[0]).href, navigation);
     await page.getByRole("button", { name: "Add" }).click();
     await page.getByRole("button", { name: "Note" }).click();
     await page.waitForFunction(async () => (await window.readScope("a"))?.length === 1);
@@ -592,7 +596,10 @@ test(
     const interrupted = await interruptedContext.newPage();
     interrupted.setDefaultTimeout(5000);
     try {
-      await interrupted.goto(new URL("composer.html", server.resolvedUrls.local[0]).href);
+      await interrupted.goto(
+        new URL("composer.html", server.resolvedUrls.local[0]).href,
+        navigation,
+      );
       await interrupted.waitForFunction(() => typeof window.enqueue === "function");
       await interrupted.waitForFunction(() => {
         const composer = document.querySelector("textarea");
