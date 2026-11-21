@@ -39,9 +39,12 @@ Files containing adapted code (each file's header names the T3 source path it wa
 - `scripts/browser-setup.mjs`
 - `src/components/ade/browser/AgentCursor.tsx`
 - `src/components/ade/browser/BrowserChromeRow.tsx`
+- `src/components/ade/browser/BrowserFileNotShown.tsx`
 - `src/components/ade/browser/BrowserMiniPlayer.tsx`
 - `src/components/ade/browser/BrowserSurface.tsx`
+- `src/components/ade/browser/BrowserUnreachable.tsx`
 - `src/components/ade/browser/BrowserViewportHandles.tsx`
+- `src/components/ade/browser/useBrowserShortcuts.ts`
 - `src/components/ade/browser/useBrowserCapture.ts`
 - `src/lib/ade/browser/agentCursorLogic.d.mts`
 - `src/lib/ade/browser/agentCursorLogic.mjs`
@@ -56,12 +59,15 @@ Files containing adapted code (each file's header names the T3 source path it wa
 - `src/local/browser-contexts.mjs`
 - `src/local/browser-control.mjs`
 - `src/local/browser-control.test.mjs`
+- `src/local/browser-downloads.mjs`
+- `src/local/browser-favicon.mjs`
 - `src/local/browser-host.mjs`
 - `src/local/browser-import-chromium.mjs`
 - `src/local/browser-import-firefox.mjs`
 - `src/local/browser-import-safari.mjs`
 - `src/local/browser-install.mjs`
 - `src/local/browser-inspection.mjs`
+- `src/local/browser-secret-linux.py`
 - `src/local/browser-local-servers.mjs`
 - `src/local/browser-local-servers.test.mjs`
 - `src/local/browser-page.mjs`
@@ -108,9 +114,7 @@ Files copied from beUI:
 - `src/components/agents/agent-activity/types.ts`
 - `src/components/agents/agent-disclosure.tsx`
 - `src/components/agents/loading-states/thinking-shimmer.tsx`
-- `src/components/motion/text-shimmer.tsx`
 - `src/lib/ease.ts`
-- `src/lib/text-shimmer.ts`
 
 The full license text, copied from the beUI repository:
 

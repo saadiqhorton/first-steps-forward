@@ -30,7 +30,7 @@ Source: ADE `:root` in `src/styles.css` (overrides Arc `foundation.css`). `src/t
 | `--deck` | `oklch(0.18 0.006 70)` | Code/log/command surfaces (dark in both themes) |
 | `--deck-foreground` | `oklch(0.945 0.02 90)` | Text on deck |
 | `--scrim` | `oklch(0.18 0.006 70 / 0.45)` | Modal / overlay backdrop |
-| `--focus-ring` | `transparent` (Arc `foundation.css`) | Intentionally empty — product: no focus rings |
+| `--focus-ring` | `transparent` (Arc `foundation.css`) | No visible outline from rules that use this token |
 | `--border-width-hairline` | `1px` | Default borders and rules |
 | `--border-width-thick` | `2px` | Emphasized outlines |
 | `--border-width-heavy` | `3px` | Rare high-emphasis edges |
@@ -42,7 +42,7 @@ Source: ADE `:root` in `src/styles.css` (overrides Arc `foundation.css`). `src/t
 - ADE remaps Layer 1 workbench hues under `:root[data-theme="dark"]`; the semantic names above follow automatically.
 - Dark highlights: paper/panel shift to warm charcoal; amber/teal lighten; borders darken; `--deck` stays near-black for code.
 - `--accent-foreground` remains dark ink in both themes (amber needs dark type on top).
-- `--focus-ring` stays `transparent` in both themes.
+- `--focus-ring` stays `transparent` in both themes. Components that use Tailwind ring utilities with a separate color (for example `ring-amber/35`) can still draw a visible ring.
 
 ## Do
 
@@ -54,4 +54,4 @@ Source: ADE `:root` in `src/styles.css` (overrides Arc `foundation.css`). `src/t
 
 - Don't use Layer 1 names (`--ink`, `--amber`, `--neutral-*`) in component CSS when a semantic name exists.
 - Don't hard-code hex/oklch for UI chrome — theme flips will break.
-- Don't draw custom focus outlines with `--focus-ring` expecting a visible ring (it resolves to nothing).
+- Don't draw custom focus outlines with `--focus-ring` expecting a visible ring (it resolves to nothing). Use an explicit semantic color where a component needs a visible ring.

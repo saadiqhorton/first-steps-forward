@@ -19,7 +19,7 @@
 ## 4. Tokens used
 - List: `bg-muted`, `text-muted-foreground`, `rounded-lg`
 - Active trigger: `bg-background` / `--background`, `text-foreground` / `--foreground`, shadow
-- Focus rings: `ring-ring`, `ring-offset-background`
+- Focus classes: `ring-ring`, `ring-offset-background`; `ring-ring` resolves through the transparent `--focus-ring` token, and the global foundation stylesheet removes outlines, so the current wrapper does not provide a visible focus indicator.
 - Disabled opacity `50` / `--opacity-disabled`
 
 ## 5. Props/API
@@ -29,7 +29,7 @@
 
 ## 6. States
 - active (`data-state=active` on trigger), inactive
-- focus-visible ring; disabled (`pointer-events-none`, opacity)
+- focus-visible styles are applied, but their ring color is transparent; disabled (`pointer-events-none`, opacity)
 - hover: N/A beyond cursor; error: N/A
 
 ## 7. Code example
