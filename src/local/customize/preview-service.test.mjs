@@ -29,7 +29,7 @@ test("the real service loads the sample and serves its README", async () => {
   assert.equal(bootstrap.status, 200);
   const workspace = await bootstrap.json();
   assert.equal(workspace.projects.length, 1);
-  assert.equal(workspace.projects[0].name, "Sample project (disposable)");
+  assert.equal(workspace.projects[0].name, "Sample project");
   assert.equal(workspace.projects[0].path, path.join(home, "sample-project"));
   assert.deepEqual(workspace.sessions, []);
   const file = await call(`/api/editor/${workspace.projects[0].id}/file?path=README.md`);

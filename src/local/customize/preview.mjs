@@ -44,7 +44,7 @@ export async function seedPreview(home) {
       projects: [
         {
           id: "preview-sample",
-          name: "Sample project (disposable)",
+          name: "Sample project",
           path: project,
           branch: "",
           ahead: 0,

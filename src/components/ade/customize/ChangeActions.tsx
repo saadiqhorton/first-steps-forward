@@ -90,7 +90,8 @@ export function ChangeActions({
   const preview = usePreviewAction();
   const rerun = useCustomizeAction((id: string) => rerunChecks(id));
   const blocked = keepBlockedReason(change);
-  const previewOn = change.preview.status === "running" || change.preview.status === "starting";
+  const previewStarting = change.preview.status === "starting";
+  const previewOn = change.preview.status === "running";
   const tryIt = () => {
     onTry();
     if (!previewOn) preview.mutate({ id: change.id, action: "start" });
@@ -184,18 +185,21 @@ export function ChangeActions({
         ) : (
           <button
             type="button"
-            disabled={!canTry(change) || preview.isPending}
+            disabled={!canTry(change) || preview.isPending || previewStarting}
             title={
-              canTry(change)
-                ? "Run this change in a separate ADE with a sample project"
-                : "You can try it when the agent and the checks finish"
+              previewStarting
+                ? "The preview is starting"
+                : previewOn
+                  ? "Expand the running preview"
+                  : canTry(change)
+                    ? "Run this change in a separate ADE with a sample project"
+                    : "You can try it when the agent and the checks finish"
             }
             onClick={tryIt}
-            aria-pressed={previewOn}
             className={`btn-quiet ${BUTTON}`}
           >
             <Eye className="size-3.5" strokeWidth={1.5} aria-hidden />
-            {previewOn ? "Preview" : "Try it"}
+            {previewStarting ? "Starting…" : previewOn ? "Expand preview" : "Try it"}
           </button>
         )}
         {failed ? (

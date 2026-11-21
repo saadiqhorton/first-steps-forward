@@ -139,7 +139,7 @@ test(
     );
     assert.equal(workspace.projects.length, 1);
     const sample = workspace.projects[0];
-    assert.match(sample.name, /sample.*disposable/i);
+    assert.equal(sample.name, "Sample project");
     assert.equal(sample.path, path.join(previewHome, "sample-project"));
     assert.ok(realpathSync(sample.path).startsWith(`${realpathSync(previewHome)}${path.sep}`));
     assert.match(readFileSync(path.join(sample.path, "README.md"), "utf8"), /disposable/i);

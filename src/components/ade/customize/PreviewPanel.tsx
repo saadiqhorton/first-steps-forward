@@ -321,7 +321,7 @@ function PreviewBrowser({
 }
 
 const ICON_BUTTON =
-  "grid size-7 shrink-0 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:pointer-events-none disabled:opacity-40";
+  "grid size-11 shrink-0 place-items-center rounded-lg text-dim transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-amber disabled:pointer-events-none disabled:opacity-40 lg:size-7";
 
 function PreviewSurface({
   url,
@@ -427,7 +427,7 @@ function PreviewSurface({
   const takeBack = canOperate ? undefined : "Opening your version…";
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-line">
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line bg-panel px-2">
+      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-line bg-panel px-2 lg:h-10">
         <button
           type="button"
           aria-label="Back"
