@@ -91,6 +91,10 @@ export function PreviewPanel({
     <div className={running ? "flex min-h-0 flex-1 flex-col gap-3" : "space-y-3"}>
       {preview.status === "running" && preview.url ? (
         <>
+          <p className="shrink-0 rounded-md border border-line bg-surface-muted px-3 py-2 text-ui leading-5 text-ink">
+            The sample project resets when the preview stops. Other folders you open are real and
+            can be changed; the preview can also use credentials available to ADE.
+          </p>
           <PreviewBrowser
             url={preview.url}
             sessionId={change.sessionId}
@@ -112,10 +116,6 @@ export function PreviewPanel({
               Stop preview
             </button>
           </div>
-          <p className="shrink-0 text-xs leading-5 text-dim">
-            The sample project resets when the preview stops. Other folders you open are real and
-            can be changed; the preview can also use credentials available to ADE.
-          </p>
         </>
       ) : preview.status === "starting" ? (
         <Starting preview={preview} onCancel={stop} busy={action.isPending} />
