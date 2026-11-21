@@ -24,6 +24,43 @@ export function previewEnv(home, base = process.env) {
   return { ...env, HOME: home, USERPROFILE: home };
 }
 
+/** Create disposable, local content to explore without inventing agent activity. */
+export async function seedPreview(home) {
+  const project = path.join(home, "sample-project");
+  const data = path.join(home, ".ade");
+  await fs.mkdir(project, { recursive: true, mode: 0o700 });
+  await fs.mkdir(data, { recursive: true, mode: 0o700 });
+  await fs.writeFile(
+    path.join(project, "README.md"),
+    "# Sample project\n\nThis disposable project is for trying ADE changes. Its files are reset when the preview restarts.\n",
+  );
+  await fs.writeFile(
+    path.join(project, "notes.md"),
+    "# Notes\n\nUse this sample file to explore the editor and project views.\n",
+  );
+  await fs.writeFile(
+    path.join(data, "workspace.json"),
+    JSON.stringify({
+      projects: [
+        {
+          id: "preview-sample",
+          name: "Sample project (disposable)",
+          path: project,
+          branch: "",
+          ahead: 0,
+          uncommittedFiles: [],
+          defaultAgent: "codex",
+          addedAt: Date.now(),
+        },
+      ],
+      sessions: [],
+      processes: [],
+      agents: [],
+      workflows: [],
+    }),
+  );
+}
+
 /** One GET; resolves true when the server answered at all (any status below 500). */
 function answers(url) {
   return new Promise((resolve) => {
@@ -49,7 +86,7 @@ function runsLauncher(pid) {
 /**
  * Previews of in-progress changes. At most one runs at a time.
  * @param {any} ctx the customize context (paths, git, run, data, changed, deps)
- * @param {{ timeout?: number, allocatePort?: typeof defaultAllocate, spawn?: typeof spawnCommand, node?: string }} [options]
+ * @param {{ timeout?: number, allocatePort?: typeof defaultAllocate, spawn?: typeof spawnCommand, node?: string, seed?: typeof seedPreview }} [options]
  */
 export function createPreviews(
   ctx,
@@ -58,6 +95,7 @@ export function createPreviews(
     allocatePort = defaultAllocate,
     spawn = spawnCommand,
     node = process.execPath,
+    seed = seedPreview,
   } = {},
 ) {
   /** changeId → { child, closed: Promise<void> } */
@@ -66,7 +104,20 @@ export function createPreviews(
   const generations = new Map();
   /** changeId → the start in flight (tests and shutdown wait on it). */
   const tasks = new Map();
+  // Serialize home setup and teardown, including across a quick stop and restart.
+  const homes = new Map();
   let generation = 0;
+
+  async function withHome(id, work) {
+    const previous = homes.get(id) ?? Promise.resolve();
+    const current = previous.catch(() => {}).then(work);
+    homes.set(id, current);
+    try {
+      return await current;
+    } finally {
+      if (homes.get(id) === current) homes.delete(id);
+    }
+  }
 
   const homeOf = (change) => path.join(ctx.paths.homes, `preview-${change.id}`);
   const set = (change, preview) => {
@@ -92,24 +143,26 @@ export function createPreviews(
 
   /** Stop the change's preview (a no-op when none runs). */
   async function stop(changeId) {
-    const change = ctx.data.changes.find((item) => item.id === changeId);
     generations.set(changeId, ++generation);
-    const running = children.get(changeId);
-    if (running) {
-      children.delete(changeId);
-      stopProcess(running.child);
-      const done = await Promise.race([running.closed.then(() => true), delay(5000)]);
-      if (!done && running.child.pid && process.platform !== "win32") {
-        try {
-          process.kill(-running.child.pid, "SIGKILL");
-        } catch {}
-      }
-    } else if (change) await killRecorded(change);
-    if (!change) return;
-    const was = change.preview?.status;
-    delete change.previewProcess;
-    if (was && was !== "stopped") set(change, { status: "stopped" });
-    await fs.rm(homeOf(change), { recursive: true, force: true }).catch(() => {});
+    return withHome(changeId, async () => {
+      const change = ctx.data.changes.find((item) => item.id === changeId);
+      const running = children.get(changeId);
+      if (running) {
+        children.delete(changeId);
+        stopProcess(running.child);
+        const done = await Promise.race([running.closed.then(() => true), delay(5000)]);
+        if (!done && running.child.pid && process.platform !== "win32") {
+          try {
+            process.kill(-running.child.pid, "SIGKILL");
+          } catch {}
+        }
+      } else if (change) await killRecorded(change);
+      if (!change) return;
+      const was = change.preview?.status;
+      delete change.previewProcess;
+      if (was && was !== "stopped") set(change, { status: "stopped" });
+      await fs.rm(homeOf(change), { recursive: true, force: true }).catch(() => {});
+    });
   }
 
   async function launch(change, gen) {
@@ -149,8 +202,12 @@ export function createPreviews(
 
     const port = await allocatePort();
     const home = homeOf(change);
-    await fs.rm(home, { recursive: true, force: true });
-    await fs.mkdir(home, { recursive: true, mode: 0o700 });
+    await withHome(change.id, async () => {
+      if (!isLive(change, gen)) return;
+      await fs.rm(home, { recursive: true, force: true });
+      await fs.mkdir(home, { recursive: true, mode: 0o700 });
+      await seed(home);
+    });
     if (!isLive(change, gen)) return;
     const output = [];
     const child = spawn(node, [path.join(source, "bin", "ade.mjs"), "--port", String(port)], {

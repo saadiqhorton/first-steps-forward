@@ -187,7 +187,7 @@ export function ChangeActions({
             disabled={!canTry(change) || preview.isPending}
             title={
               canTry(change)
-                ? "Run this change in a separate ADE with test data"
+                ? "Run this change in a separate ADE with a sample project"
                 : "You can try it when the agent and the checks finish"
             }
             onClick={tryIt}

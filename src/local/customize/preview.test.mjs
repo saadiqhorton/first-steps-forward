@@ -19,7 +19,7 @@ const skip = process.platform === "win32" ? "process groups are POSIX" : false;
 const { createCustomize } = await import("./index.mjs");
 const { runCommand } = await import("../spawn.mjs");
 const { allocatePort } = await import("../ports.mjs");
-const { previewEnv } = await import("./preview.mjs");
+const { previewEnv, seedPreview } = await import("./preview.mjs");
 
 async function waitFor(check, what, ms = 20000) {
   const deadline = Date.now() + ms;
@@ -134,6 +134,20 @@ test(
     const answer = await (await fetch(`${running.url}api/bootstrap`)).json();
     const previewHome = path.join(h.dataDir, "self", "homes", `preview-${h.id}`);
     assert.equal(answer.home, previewHome);
+    const workspace = JSON.parse(
+      readFileSync(path.join(previewHome, ".ade", "workspace.json"), "utf8"),
+    );
+    assert.equal(workspace.projects.length, 1);
+    const sample = workspace.projects[0];
+    assert.match(sample.name, /sample.*disposable/i);
+    assert.equal(sample.path, path.join(previewHome, "sample-project"));
+    assert.ok(realpathSync(sample.path).startsWith(`${realpathSync(previewHome)}${path.sep}`));
+    assert.match(readFileSync(path.join(sample.path, "README.md"), "utf8"), /disposable/i);
+    assert.match(readFileSync(path.join(sample.path, "notes.md"), "utf8"), /sample/i);
+    assert.deepEqual(workspace.sessions, []);
+    assert.deepEqual(workspace.agents, []);
+    assert.deepEqual(workspace.processes, []);
+    writeFileSync(path.join(sample.path, "notes.md"), "changed in preview");
     const info = launcherInfo(h);
     assert.equal(info.cwd, realpathSync(h.service.paths.source));
     assert.equal(info.adeHost, null);
@@ -147,6 +161,49 @@ test(
     await gone(info.pid);
     await gone(info.grandchild);
     assert.ok(!existsSync(previewHome), "the throwaway home is removed");
+    await h.service.startPreview(h.id);
+    await h.reachPreview("running");
+    assert.match(readFileSync(path.join(sample.path, "notes.md"), "utf8"), /sample/i);
+    await h.service.stopPreview(h.id);
+    assert.ok(!existsSync(previewHome), "the restarted preview home is removed");
+  },
+);
+
+test(
+  "stopping while the sample is being seeded removes it before a clean restart",
+  { skip },
+  async () => {
+    let release;
+    let entered;
+    const blocked = new Promise((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise((resolve) => {
+      entered = resolve;
+    });
+    let calls = 0;
+    const h = await harness({
+      preview: {
+        seed: async (previewHome) => {
+          if (++calls === 1) {
+            entered();
+            await blocked;
+          }
+          await seedPreview(previewHome);
+        },
+      },
+    });
+    await h.service.startPreview(h.id);
+    await started;
+    const stopping = h.service.stopPreview(h.id);
+    release();
+    await stopping;
+    const previewHome = path.join(h.dataDir, "self", "homes", `preview-${h.id}`);
+    assert.ok(!existsSync(previewHome));
+    await h.service.startPreview(h.id);
+    await h.reachPreview("running");
+    assert.ok(existsSync(path.join(previewHome, "sample-project", "README.md")));
+    await h.service.stopPreview(h.id);
   },
 );
 

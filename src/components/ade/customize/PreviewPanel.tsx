@@ -29,7 +29,7 @@ import { computerControl, computerStatus } from "@/lib/ade/store";
 
 /** The hidden project the private copy's sessions (and their agent browser) belong to. */
 const SELF_PROJECT = "ade-self";
-const TEST_DATA = "Test data, not your projects";
+const TEST_DATA = "Separate workspace · sample project";
 
 export const canTry = (change: Change) => NEEDS_YOU.includes(change.status);
 
@@ -112,12 +112,10 @@ export function PreviewPanel({
               Stop preview
             </button>
           </div>
-          {!expanded && (
-            <p className="shrink-0 text-xs leading-5 text-dim">
-              Your version of ADE with this change, running beside the one you use. It starts empty,
-              so add a test project to try things out.
-            </p>
-          )}
+          <p className="shrink-0 text-xs leading-5 text-dim">
+            The sample project resets when the preview stops. Other folders you open are real and
+            can be changed; the preview can also use credentials available to ADE.
+          </p>
         </>
       ) : preview.status === "starting" ? (
         <Starting preview={preview} onCancel={stop} busy={action.isPending} />
@@ -176,7 +174,7 @@ function NotTried({
         <p className="text-ui font-medium text-ink">Try this change before you keep it</p>
         <p className="max-w-xs text-xs leading-5 text-[color:var(--text-secondary)]">
           {allowed
-            ? "Starts your changed ADE with test data, next to this one."
+            ? "Starts your changed ADE in a separate workspace with a disposable sample project."
             : "You can try it when the agent and the checks finish."}
         </p>
         {allowed && (
@@ -197,7 +195,7 @@ function NotTried({
 
 const STEPS = [
   { id: "build", label: "Build this version" },
-  { id: "start", label: "Start ADE with test data" },
+  { id: "start", label: "Start ADE with a sample project" },
   { id: "open", label: "Open it here" },
 ] as const;
 
