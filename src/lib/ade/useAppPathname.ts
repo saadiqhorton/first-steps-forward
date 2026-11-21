@@ -17,7 +17,10 @@ export function useAppPathname(): string {
   const routeKey = useRouterState({
     select: (state) => state.matches.map((match) => match.pathname).join("|"),
   });
-  const [path, setPath] = useState(routed);
+  // The prerendered shell was rendered at `/`. Match it on the first client
+  // render, then update after hydration even when the router already knows the
+  // requested URL. Otherwise React can retain the shell's inactive classes.
+  const [path, setPath] = useState("/");
   useEffect(() => {
     const sync = () => setPath(window.location.pathname);
     sync();
@@ -29,6 +32,6 @@ export function useAppPathname(): string {
       window.clearTimeout(timer);
       window.removeEventListener("popstate", sync);
     };
-  }, [routeKey]);
+  }, [routeKey, routed]);
   return path;
 }

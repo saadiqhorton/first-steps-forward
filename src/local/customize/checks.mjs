@@ -51,6 +51,12 @@ export function extractFailures(id, output) {
     const text = clip(line.trim());
     if (text && !found.includes(text)) found.push(text);
   };
+  const addAssertionDetails = (block) => {
+    for (const line of block) {
+      if (/^\s*(?:expected|actual):\s*\S/i.test(line) || /^\s*[+-] (?!at\s)\S/.test(line))
+        add(line);
+    }
+  };
   if (id === "test") {
     const list = lines.findIndex((line) => /^\s*✖ failing tests:?\s*$/.test(line));
     if (list >= 0) {
@@ -62,12 +68,21 @@ export function extractFailures(id, output) {
           .find((line) => line.trim())
           ?.trim();
         add(first && !first.startsWith("✖") ? `${name[1]}: ${first}` : name[1]);
+        let end = i + 1;
+        while (end < lines.length && !/^\s*(?:✖ |test at )/.test(lines[end])) end++;
+        addAssertionDetails(lines.slice(i + 1, end));
       }
-    } else
-      for (const line of lines) {
-        const tap = /^\s*not ok \d+ - (.+?)(\s+#.*)?$/.exec(line);
-        if (tap) add(tap[1]);
+    } else {
+      for (let i = 0; i < lines.length; i++) {
+        const tap = /^\s*not ok \d+ - (.+?)(\s+#.*)?$/.exec(lines[i]);
+        if (tap) {
+          add(tap[1]);
+          let end = i + 1;
+          while (end < lines.length && !/^\s*(?:(?:not )?ok \d+|\.\.\.)/.test(lines[end])) end++;
+          addAssertionDetails(lines.slice(i + 1, end));
+        }
       }
+    }
   }
   if (!found.length && (id === "typecheck" || id === "build"))
     for (const line of lines) if (/error TS\d+:/.test(line)) add(line);

@@ -327,6 +327,89 @@ test("a check that fails after a clean apply goes to the agent for the change it
   );
 });
 
+test("changes survive successive updates and can then be removed", async () => {
+  const h = await keptHarness({ launcher: () => ({ running: null, restart: () => {} }) });
+  h.env.ADE_SELF_STOCK_SOURCE = release(h.root, "1.3.0");
+  await h.service.checkForUpdate();
+  await h.reach("done");
+  await h.service.idle();
+  const target = (await h.service.status()).switch.target;
+  const next = h.make({ launcher: () => ({ running: target, restart: () => {} }) });
+  await next.init();
+  h.env.ADE_SELF_STOCK_SOURCE = release(h.root, "1.4.0");
+  await next.checkForUpdate();
+  await waitFor(async () => (await next.status()).update?.status === "done", "second update");
+  await next.idle();
+  assert.match(readFileSync(path.join(h.source, "src/feature.txt"), "utf8"), /four/);
+  assert.equal((await next.remove(h.kept.id)).status, "removed");
+  await next.idle();
+  assert.doesNotMatch(readFileSync(path.join(h.source, "src/feature.txt"), "utf8"), /four/);
+});
+
+test("a conflict during a multi-commit removal restores every reverted commit", async () => {
+  const h = await keptHarness();
+  h.env.ADE_SELF_STOCK_SOURCE = release(h.root, "1.3.0", (dir) => {
+    const manifest = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
+    manifest.scripts.test = `node -e "const f=require('fs');if(f.readFileSync('src/feature.txt','utf8').includes('four')&&!f.existsSync('fixed.txt'))process.exit(1)"`;
+    writeFileSync(path.join(dir, "package.json"), JSON.stringify(manifest));
+  });
+  await h.service.checkForUpdate();
+  await h.finishUpdateTurn(write("fixed.txt", "fixed\n"));
+  await h.reach("done");
+  await h.service.idle();
+  const target = (await h.service.status()).switch.target;
+  const next = h.make({ launcher: () => ({ running: target, restart: () => {} }) });
+  await next.init();
+  const second = await next.createChange({ request: "Edit the fourth line", agentId: "codex" });
+  write("src/feature.txt", "one\ntwo\nthree\nFOUR changed\n")(h.source);
+  const session = h.sessions.get(second.sessionId);
+  session.status = "ready";
+  next.onTurnEnd(session);
+  await waitFor(
+    async () => (await next.status()).changes.find((c) => c.id === second.id).status === "ready",
+    "second change",
+  );
+  await next.keep(second.id);
+  await next.idle();
+  const before = git(h.source, "rev-parse", "mine");
+  assert.equal((await next.remove(h.kept.id)).status, "needs-you");
+  assert.equal(git(h.source, "rev-parse", "mine"), before);
+  assert.equal(git(h.source, "status", "--porcelain"), "");
+  assert.equal(readFileSync(path.join(h.source, "fixed.txt"), "utf8"), "fixed\n");
+});
+
+test("skipping one change then staying preserves its kept status", async () => {
+  const h = await keptHarness();
+  const second = await h.service.createChange({ request: "Change another file", agentId: "codex" });
+  write("src/other.txt", "custom\n")(h.source);
+  const session = h.sessions.get(second.sessionId);
+  session.status = "ready";
+  h.service.onTurnEnd(session);
+  await waitFor(
+    async () =>
+      (await h.service.status()).changes.find((c) => c.id === second.id).status === "ready",
+    "second change",
+  );
+  await h.service.keep(second.id);
+  await h.service.idle();
+  h.env.ADE_SELF_STOCK_SOURCE = release(h.root, "1.3.0", (dir) => {
+    write("src/feature.txt", "conflict\n")(dir);
+    write("src/other.txt", "stock\n")(dir);
+  });
+  await h.service.checkForUpdate();
+  const live = await h.finishUpdateTurn();
+  await waitFor(() => h.sent.length === 1, "retry");
+  live.status = "ready";
+  h.service.onTurnEnd(live);
+  await h.reach("needs-you");
+  await h.service.skipUpdate(h.kept.id);
+  await waitFor(() => h.upStarted().length === 2, "second conflict");
+  await h.service.stayOnCurrent();
+  const changes = (await h.service.status()).changes;
+  assert.equal(changes.find((c) => c.id === h.kept.id).status, "kept");
+  assert.match(readFileSync(path.join(h.source, "src/feature.txt"), "utf8"), /four/);
+});
+
 test("checks that still fail after two attempts need you", async () => {
   const h = await keptHarness();
   h.env.ADE_SELF_STOCK_SOURCE = release(h.root, "1.3.0", (dir) => {

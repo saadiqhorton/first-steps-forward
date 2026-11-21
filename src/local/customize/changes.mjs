@@ -178,13 +178,25 @@ async function checkChange(ctx, change, { auto }) {
     timeout: ctx.checkTimeout,
   });
   if (!inProgress(change)) return;
+  const headAfter = await ctx.git.must(["rev-parse", "HEAD"]);
+  const dirtyAfter = await ctx.git.must(["status", "--porcelain"]);
+  if (headAfter !== sha || dirtyAfter) {
+    delete change.checkedSha;
+    return touch(ctx, change, {
+      status: "needs-you",
+      reason:
+        "The working copy changed during checks. Ask the agent to finish it and run checks again.",
+    });
+  }
   // The build check left this commit's output in the copy; Try it serves it as is.
   const build = checks.find((check) => check.id === "build");
   if (build?.status === "passed" && sha) change.build = { sha };
   else delete change.build;
   touch(ctx, change, { checks });
   const failed = checks.filter((check) => check.status === "failed");
-  if (!failed.length) return touch(ctx, change, { status: "ready", reason: undefined });
+  if (!failed.length)
+    return touch(ctx, change, { status: "ready", reason: undefined, checkedSha: sha });
+  delete change.checkedSha;
   const names = failed.map((check) => check.label).join(", ");
   if (!auto || change.fixAttempts >= MAX_FIX_ATTEMPTS)
     return touch(ctx, change, { status: "failed", reason: `${names} did not pass.` });
@@ -237,6 +249,11 @@ export async function rerunChecks(ctx, id) {
   const session = ctx.deps.getSession(change.sessionId);
   if (session && ctx.deps.isBusy(session))
     throw new CustomizeError(409, "Wait for the agent to finish first.");
+  if ((await ctx.git.must(["status", "--porcelain"])).trim())
+    throw new CustomizeError(
+      409,
+      "The change has uncommitted work. Ask the agent to finish it before running checks.",
+    );
   await ctx.previews?.stop(change.id);
   touch(ctx, change, { status: "checking", reason: undefined, checks: pendingChecks() });
   ctx.enqueue(change.id, async () => {
@@ -252,6 +269,16 @@ export async function keepChange(ctx, id) {
   const live = viewOf(ctx, change);
   if (live.status !== "ready" || change.commit)
     throw new CustomizeError(409, "Only a change that passed its checks can be kept.");
+  if ((await ctx.git.must(["status", "--porcelain"])).trim())
+    throw new CustomizeError(
+      409,
+      "The change has uncommitted work. Ask the agent to finish it before keeping it.",
+    );
+  if ((await ctx.git.must(["rev-parse", "HEAD"])) !== change.checkedSha)
+    throw new CustomizeError(
+      409,
+      "The change has changed since its checks. Run checks again before keeping it.",
+    );
   await ctx.previews?.stop(change.id);
   // The tree the checks (or Try it) last built in the copy, so the kept version can reuse it.
   const builtTree = change.build?.sha
@@ -293,7 +320,11 @@ export async function removeChange(ctx, id) {
     throw new CustomizeError(409, "Finish or undo the change in progress first.");
   await ctx.previews?.stopAll();
   await ctx.git.must(["checkout", "-f", "mine"]);
-  const reverted = await ctx.git(["revert", "--no-edit", change.commit]);
+  const reverted = await ctx.git([
+    "revert",
+    "--no-edit",
+    ...(change.commits ?? [change.commit]).slice().reverse(),
+  ]);
   if (reverted.code !== 0) {
     await ctx.git(["revert", "--abort"]);
     await ctx.git(["checkout", "-f", "mine"]);

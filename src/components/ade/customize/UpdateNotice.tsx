@@ -176,9 +176,11 @@ export function UpdateNotice({ state }: { state: CustomizeState }) {
   const count = total === 1 ? "1 change" : `${total} changes`;
   const summary = done
     ? `${carried} of ${count} carried over`
-    : total
-      ? `carrying ${count} over`
-      : "getting it ready";
+    : needsYou
+      ? "needs your choice"
+      : total
+        ? `carrying ${count} over`
+        : "getting it ready";
   return (
     <section
       aria-label={`ADE ${update.to}`}

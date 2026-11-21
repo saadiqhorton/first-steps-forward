@@ -246,7 +246,7 @@ export function createUpdater(ctx) {
   /** Apply one change's commits; true when it is in the working branch. */
   async function pick(entry, change, mine) {
     const original = !entry.parts?.length;
-    const queue = original ? [change.commit] : [...entry.parts];
+    const queue = original ? (change.commits ?? [change.commit]) : [...entry.parts];
     const base = await wgit.must(["rev-parse", "HEAD"]);
     const produced = [];
     for (const sha of queue) {
@@ -377,6 +377,20 @@ export function createUpdater(ctx) {
     await ctx.git.must(["update-ref", "refs/heads/stock", importSha]);
     await ctx.git.must(["update-ref", "refs/heads/mine", head]);
     await ctx.git.must(["reset", "--hard", "mine"]);
+    for (const entry of update().changes) {
+      const change = changeOf(entry.id);
+      if (!change) continue;
+      if (entry.status === "dropped") {
+        Object.assign(change, {
+          status: "removed",
+          reason: `Left out of the update to ADE ${to}.`,
+          updatedAt: new Date(ctx.now()).toISOString(),
+        });
+      } else if (entry.parts?.length) {
+        change.commits = [...entry.parts];
+        change.commit = entry.parts[0];
+      }
+    }
     ctx.data.stockVersion = to;
     touch({ status: "done" });
     await ctx.switcher.mineChanged();
@@ -505,13 +519,6 @@ export function createUpdater(ctx) {
       if (running) throw new CustomizeError(409, "Wait until ADE has finished its current step.");
       Object.assign(entry, { status: "dropped", parts: [], files: [] });
       entry.reason = `Left out of the update to ADE ${update().to}.`;
-      const change = changeOf(changeId);
-      if (change)
-        Object.assign(change, {
-          status: "removed",
-          reason: `Left out of the update to ADE ${update().to}.`,
-          updatedAt: new Date(ctx.now()).toISOString(),
-        });
       void kick();
       return updateView(update());
     },

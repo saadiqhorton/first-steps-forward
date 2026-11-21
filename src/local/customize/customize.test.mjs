@@ -305,6 +305,37 @@ test("a stopped or failed agent turn needs you with the reason", async () => {
   assert.equal(done.reason, "Rate limit reached.");
 });
 
+test("checks and keep never discard uncommitted work", async () => {
+  const h = await harness();
+  const change = await start(h);
+  const session = h.sessions.get(change.sessionId);
+  const file = path.join(h.service.paths.source, "src/feature.txt");
+  writeFileSync(file, "unfinished work\n");
+  session.status = "stopped";
+  h.service.onTurnEnd(session);
+  await h.reach(change.id, "needs-you");
+  await assert.rejects(h.service.rerunChecks(change.id), /uncommitted work/);
+  assert.equal(readFileSync(file, "utf8"), "unfinished work\n");
+  h.finishTurn(session);
+  await h.reach(change.id, "ready");
+  writeFileSync(file, "later work\n");
+  await assert.rejects(h.service.keep(change.id), /uncommitted work/);
+  assert.equal(readFileSync(file, "utf8"), "later work\n");
+  git(h.service.paths.source, "add", "src/feature.txt");
+  git(
+    h.service.paths.source,
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    "Later work",
+  );
+  await assert.rejects(h.service.keep(change.id), /since its checks/);
+  assert.equal(readFileSync(file, "utf8"), "later work\n");
+});
+
 test("changes go checking then ready when every check passes", async () => {
   const h = await harness();
   const change = await start(h);
