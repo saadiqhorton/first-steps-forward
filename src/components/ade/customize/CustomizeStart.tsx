@@ -125,20 +125,20 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
   );
 
   return (
-    <div className="flex w-full max-w-3xl flex-col px-4 py-6 @lg:px-7 @lg:py-10">
+    <div className="flex w-full max-w-3xl flex-col px-4 pt-12 pb-8 @lg:px-7 @lg:py-10">
       {state.update && (
         <div className="mb-8 empty:hidden">
           <UpdateNotice state={state} />
         </div>
       )}
       <h1 className="heading-display text-2xl @lg:text-3xl">What should ADE do differently?</h1>
-      <p className="mt-3 text-ui text-dim">
+      <p className="mt-2 text-ui text-dim @lg:mt-3">
         Describe a change and an agent builds it in your own copy of ADE
       </p>
 
-      <div className="mt-8">
+      <div className="mt-6 @lg:mt-8">
         <div className="label-section">Start with an idea</div>
-        <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-3">
+        <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-2 @lg:mt-3 @lg:gap-3">
           {IDEAS.map((idea) => (
             <button
               key={idea.title}
@@ -171,10 +171,11 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
         </Link>
       )}
 
-      <div className="mt-6">
+      <div className="mt-4 @lg:mt-6">
         <Composer
           key={seed.nonce}
           mode="new"
+          projectId="ade-self"
           selection={selection}
           onSelectionChange={setSelection}
           branch=""

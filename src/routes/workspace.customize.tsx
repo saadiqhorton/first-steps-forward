@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Outlet, createFileRoute, useParams } from "@tanstack/react-router";
+import { useState } from "react";
+import { Outlet, createFileRoute } from "@tanstack/react-router";
 import { GlideIndicator } from "@/components/ade/motion";
 import { ChangesRail } from "@/components/ade/customize/ChangesRail";
 import { RestartOverlay } from "@/components/ade/customize/SwitchCard";
@@ -26,15 +26,8 @@ const PANES: { id: CustomizePane; label: string }[] = [
  * `workspace-chat` keeps the shell's right pane hidden from the first paint.
  */
 function CustomizeLayout() {
-  const { changeId } = useParams({ strict: false });
   const [pane, setPane] = useState<CustomizePane>("conversation");
   const query = useCustomize();
-
-  useEffect(() => {
-    if (!changeId && pane === "details") setPane("conversation");
-  }, [changeId, pane]);
-
-  const tabs = PANES.filter((p) => p.id !== "details" || changeId);
 
   return (
     <CustomizePaneContext.Provider value={{ pane, setPane }}>
@@ -45,7 +38,7 @@ function CustomizeLayout() {
           aria-label="Customize ADE"
           className="flex shrink-0 items-stretch gap-1 border-b border-line bg-paper px-2 lg:hidden"
         >
-          {tabs.map((tab) => {
+          {PANES.map((tab) => {
             const active = pane === tab.id;
             return (
               <button
