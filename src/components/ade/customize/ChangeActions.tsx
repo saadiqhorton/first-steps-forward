@@ -2,16 +2,24 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Check, Eye, Trash2, Undo2 } from "lucide-react";
 import { keepChange, undoChange, useCustomizeAction, type Change } from "@/lib/ade/customizeApi";
-import { keepBlockedReason, PREVIEW_LATER } from "./customizeText";
+import { keepBlockedReason } from "./customizeText";
 import { RemoveConfirm } from "./KeptList";
+import { canTry, usePreviewAction } from "./PreviewPanel";
 
-export function ChangeActions({ change }: { change: Change }) {
+export function ChangeActions({ change, onTry }: { change: Change; onTry: () => void }) {
   const navigate = useNavigate();
   const [confirm, setConfirm] = useState<"undo" | "remove" | null>(null);
   const keep = useCustomizeAction((id: string) => keepChange(id));
   const undo = useCustomizeAction((id: string) => undoChange(id));
+  const preview = usePreviewAction();
   const blocked = keepBlockedReason(change);
-  const error = [keep.error, undo.error].find((e) => e instanceof Error) as Error | undefined;
+  const previewOn = change.preview.status === "running" || change.preview.status === "starting";
+  const tryIt = () => {
+    onTry();
+    if (!previewOn) preview.mutate({ id: change.id, action: "start" });
+  };
+  const error = [keep.error, undo.error, preview.error].find((e) => e instanceof Error) as
+    Error | undefined;
 
   if (change.status === "removed") return null;
 
@@ -65,15 +73,21 @@ export function ChangeActions({ change }: { change: Change }) {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        {import.meta.env.DEV && change.status !== "kept" && (
+        {change.status !== "kept" && (
           <button
             type="button"
-            disabled
-            title={PREVIEW_LATER}
+            disabled={!canTry(change) || preview.isPending}
+            title={
+              canTry(change)
+                ? "Run this change in a separate ADE with test data"
+                : "You can try it when the agent and the checks finish"
+            }
+            onClick={tryIt}
+            aria-pressed={previewOn}
             className="btn-quiet inline-flex items-center gap-1.5 px-3 py-1.5 text-xs"
           >
             <Eye className="size-3.5" strokeWidth={1.5} aria-hidden />
-            Try it
+            {previewOn ? "Show preview" : "Try it"}
           </button>
         )}
         {change.status === "kept" ? (
@@ -107,8 +121,11 @@ export function ChangeActions({ change }: { change: Change }) {
             </button>
           </>
         )}
-        {blocked && change.status !== "kept" && (
+        {blocked && change.status !== "kept" ? (
           <span className="min-w-0 text-xs text-dim">{blocked}</span>
+        ) : (
+          change.status === "ready" &&
+          !change.triedAt && <span className="min-w-0 text-xs text-dim">Not tried yet</span>
         )}
       </div>
       {error && (

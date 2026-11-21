@@ -189,6 +189,7 @@ test("a failed install leaves no partial copy and keeps the real error", async (
   await h.service.idle();
   const { setup } = await h.service.status();
   assert.equal(setup.status, "failed");
+  assert.equal(setup.step, "install", "the failed step stays visible");
   assert.match(setup.error, /ETIMEDOUT/);
   assert.ok(!existsSync(h.service.paths.source));
   assert.ok(!existsSync(h.service.paths.partial));
@@ -196,6 +197,44 @@ test("a failed install leaves no partial copy and keeps the real error", async (
   // Retry works once the install does.
   const retry = await harness({ ready: true });
   assert.equal((await retry.service.status()).setup.status, "ready");
+});
+
+test("install progress counts lockfile packages as they land", async () => {
+  const lock = {
+    lockfileVersion: 3,
+    packages: {
+      "": { name: "stock" },
+      "node_modules/a": {},
+      "node_modules/@s/b": {},
+      "node_modules/a/node_modules/c": {},
+      "node_modules/linked": { link: true },
+    },
+  };
+  const root = makeStockRepo();
+  writeFileSync(path.join(root, "package-lock.json"), JSON.stringify(lock));
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "lock");
+  let seen = null;
+  const h = await harness({
+    sourceRoot: root,
+    ready: false,
+    install: async (opts) => {
+      seen = (await h.service.status()).setup;
+      write("node_modules/a/package.json", "{}")(opts.cwd);
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  await h.service.startSetup();
+  await h.service.idle();
+  assert.deepEqual(seen.progress, { done: 0, total: 2, label: "0 of 2 packages" });
+  const { lockedPackages, installedCount } = await import("./setup.mjs");
+  const dir = tempDir("ade-lock-");
+  writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify(lock));
+  const packages = await lockedPackages(dir);
+  assert.deepEqual(packages, ["node_modules/a", "node_modules/@s/b"]);
+  write("node_modules/@s/b/package.json", "{}")(dir);
+  assert.equal(await installedCount(dir, packages), 1);
+  assert.equal(await lockedPackages(tempDir("ade-nolock-")), null);
 });
 
 test("creating a change starts a build-mode session in the hidden project and branches", async () => {

@@ -4,6 +4,31 @@ import { exportStock } from "./source.mjs";
 import { createGit } from "./git.mjs";
 import { SELF_PROJECT_ID } from "./paths.mjs";
 
+/** Top-level packages `npm ci` installs, from the lockfile; null when there is none. */
+export async function lockedPackages(dir) {
+  try {
+    const lock = JSON.parse(await fs.readFile(path.join(dir, "package-lock.json"), "utf8"));
+    return Object.entries(lock.packages ?? {})
+      .filter(([key, entry]) => /^node_modules\/(@[^/]+\/)?[^/]+$/.test(key) && !entry?.link)
+      .map(([key]) => key);
+  } catch {
+    return null;
+  }
+}
+
+/** How many of `packages` have landed in `dir` so far. */
+export async function installedCount(dir, packages) {
+  const found = await Promise.all(
+    packages.map((key) =>
+      fs.access(path.join(dir, key, "package.json")).then(
+        () => true,
+        () => false,
+      ),
+    ),
+  );
+  return found.filter(Boolean).length;
+}
+
 const IGNORED = ["node_modules", "dist", ".output", ".vinxi", ".tanstack", ".nitro"];
 
 /** The hidden project record the agent's sessions live under. */
@@ -53,13 +78,29 @@ export async function runSetup(ctx) {
     const home = path.join(paths.homes, "setup");
     await fs.mkdir(home, { recursive: true, mode: 0o700 });
     const started = ctx.now();
-    const ticker = setInterval(() => {
-      data.setup.progress = {
-        done: Math.round((ctx.now() - started) / 1000),
-        total: null,
-        label: "Installing build tools",
-      };
-      ctx.changed();
+    const packages = await lockedPackages(paths.partial);
+    const total = packages?.length || null;
+    if (total) data.setup.progress = { done: 0, total, label: `0 of ${total} packages` };
+    let counting = false;
+    const ticker = setInterval(async () => {
+      if (counting) return;
+      counting = true;
+      try {
+        let progress;
+        if (total && packages) {
+          const done = Math.min(total, await installedCount(paths.partial, packages));
+          progress = { done, total, label: `${done} of ${total} packages` };
+        } else {
+          const seconds = Math.round((ctx.now() - started) / 1000);
+          progress = { done: seconds, total: null, label: `Installing build tools · ${seconds}s` };
+        }
+        if (data.setup.status === "running" && data.setup.step === "install") {
+          data.setup.progress = progress;
+          ctx.changed();
+        }
+      } finally {
+        counting = false;
+      }
     }, 2000);
     ticker.unref?.();
     let install;
@@ -95,7 +136,12 @@ export async function runSetup(ctx) {
     data.setup = { status: "ready" };
   } catch (error) {
     await fs.rm(paths.partial, { recursive: true, force: true }).catch(() => {});
-    data.setup = { status: "failed", error: error?.message ?? String(error) };
+    // Keep the step, so the user sees which one stopped.
+    data.setup = {
+      status: "failed",
+      ...(data.setup.step ? { step: data.setup.step } : {}),
+      error: error?.message ?? String(error),
+    };
   }
   ctx.changed();
 }

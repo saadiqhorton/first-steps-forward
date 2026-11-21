@@ -21,8 +21,6 @@ export function switchNote(state: CustomizeState): string | null {
   return null;
 }
 
-export const PREVIEW_LATER = "Preview arrives in a later round";
-
 /** Why Keep it is off, in the user's words. Null when it can be kept. */
 export function keepBlockedReason(change: Change): string | null {
   switch (change.status) {

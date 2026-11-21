@@ -6,6 +6,7 @@ import { createStore } from "./store.mjs";
 import { selfPaths, SELF_PROJECT_ID } from "./paths.mjs";
 import { resolveStock } from "./source.mjs";
 import { registerSelfProject, runSetup } from "./setup.mjs";
+import { createPreviews } from "./preview.mjs";
 import {
   CustomizeError,
   createChange,
@@ -42,6 +43,7 @@ const DEFAULT_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
  *   id?: () => string,
  *   launcher?: boolean,
  *   checkTimeout?: number,
+ *   preview?: Parameters<typeof createPreviews>[1],
  * }} options
  */
 export function createCustomize({
@@ -56,6 +58,7 @@ export function createCustomize({
   id = () => randomUUID(),
   launcher = false,
   checkTimeout = 600_000,
+  preview = {},
 }) {
   const paths = selfPaths(dataDir);
   const store = createStore(paths.state);
@@ -108,6 +111,9 @@ export function createCustomize({
     },
   };
 
+  const previews = createPreviews(ctx, preview);
+  ctx.previews = previews;
+
   const runningSetup = () => data.setup.status === "running";
 
   return {
@@ -116,12 +122,17 @@ export function createCustomize({
     async init() {
       data = await store.load();
       if (runningSetup())
-        data.setup = { status: "failed", error: "Setup was interrupted. Try again." };
+        data.setup = {
+          status: "failed",
+          ...(data.setup.step ? { step: data.setup.step } : {}),
+          error: "Setup was interrupted. Try again.",
+        };
       for (const change of data.changes)
         if (["working", "checking", "fixing"].includes(change.status)) {
           change.status = "needs-you";
           change.reason = "ADE restarted while this was running.";
         }
+      await previews.reset();
       if (data.setup.status === "ready") await registerSelfProject(ctx);
       ctx.changed();
     },
@@ -160,11 +171,26 @@ export function createCustomize({
     undo: (changeId) => undoChange(ctx, changeId),
     remove: (changeId) => removeChange(ctx, changeId),
     onTurnEnd: (session) => onTurnEnd(ctx, session),
+    /** A new agent turn on a change's session: its preview no longer shows the latest work. */
+    onTurnStart(session) {
+      const change = data.changes.find((item) => item.sessionId === session.id);
+      if (change && ["starting", "running"].includes(change.preview?.status))
+        void previews.stop(change.id).catch(() => {});
+    },
+    startPreview: (changeId) => previews.start(changeId),
+    async stopPreview(changeId) {
+      const change = data.changes.find((item) => item.id === changeId);
+      if (!change || change.status === "undone") throw new CustomizeError(404, "Change not found.");
+      await previews.stop(changeId);
+      return viewOf(ctx, change);
+    },
+    /** ADE is shutting down: stop previews now (synchronous). */
+    shutdown: () => previews.shutdown(),
     isSelfProject: (projectId) => projectId === SELF_PROJECT_ID,
 
     /** Wait for setup, change pipelines and state writes (tests, shutdown). */
     async idle() {
-      await Promise.all([setupRun, ...pipelines.values()]);
+      await Promise.all([setupRun, ...pipelines.values(), previews.settled()]);
       await writes;
     },
   };

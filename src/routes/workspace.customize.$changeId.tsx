@@ -6,7 +6,7 @@ import { Composer } from "@/components/ade/Composer";
 import { ChangeActions } from "@/components/ade/customize/ChangeActions";
 import { ChangeConversation } from "@/components/ade/customize/ChangeConversation";
 import { ChangeHeader } from "@/components/ade/customize/ChangeHeader";
-import { ChangePanel } from "@/components/ade/customize/ChangePanel";
+import { ChangePanel, usePanelTab } from "@/components/ade/customize/ChangePanel";
 import { CustomizeFrame, CustomizeGate } from "@/components/ade/customize/CustomizeGate";
 import { paneVisibility, useCustomizePane } from "@/components/ade/customize/paneContext";
 import { CUSTOMIZE_KEY, NEEDS_YOU, type Change, type CustomizeState } from "@/lib/ade/customizeApi";
@@ -56,7 +56,14 @@ function followUpBlocked(change: Change): string | undefined {
 }
 
 function ChangeView({ change, state }: { change: Change; state: CustomizeState }) {
-  const { pane } = useCustomizePane();
+  const { pane, setPane } = useCustomizePane();
+  const [tab, setTab] = usePanelTab(change);
+  const [reveal, setReveal] = useState(0);
+  const showPreview = () => {
+    setTab("preview");
+    setReveal((n) => n + 1);
+    setPane("details");
+  };
   const { steer } = useAde();
   const client = useQueryClient();
   const session = useSession(change.sessionId);
@@ -97,7 +104,7 @@ function ChangeView({ change, state }: { change: Change; state: CustomizeState }
         <ChangeConversation change={change} />
         <div className="shrink-0 border-t border-line px-4 py-3 @lg:px-7">
           <div className="mx-auto w-full max-w-3xl">
-            <ChangeActions change={change} />
+            <ChangeActions change={change} onTry={showPreview} />
           </div>
         </div>
         <div className="shrink-0 border-t border-line px-4 py-4 @lg:px-7">
@@ -118,7 +125,14 @@ function ChangeView({ change, state }: { change: Change; state: CustomizeState }
           </div>
         </div>
       </main>
-      <ChangePanel change={change} state={state} phoneActive={pane === "details"} />
+      <ChangePanel
+        change={change}
+        state={state}
+        phoneActive={pane === "details"}
+        tab={tab}
+        onTabChange={setTab}
+        reveal={reveal}
+      />
     </>
   );
 }

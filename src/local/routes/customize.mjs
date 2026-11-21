@@ -30,8 +30,13 @@ export async function customize(ctx) {
         if (action === "keep") return json(res, 200, { change: await service.keep(changeId) });
         if (action === "undo") return json(res, 200, await service.undo(changeId));
         if (action === "remove") return json(res, 200, { change: await service.remove(changeId) });
-        if (action === "preview")
-          return json(res, 501, { error: "Preview arrives in a later round." });
+        if (action === "preview") {
+          const { action: op } = await body(req);
+          if (op === "start")
+            return json(res, 202, { change: await service.startPreview(changeId) });
+          if (op === "stop") return json(res, 200, { change: await service.stopPreview(changeId) });
+          return json(res, 400, { error: 'Send { action: "start" } or { action: "stop" }.' });
+        }
       }
     }
     return json(res, 404, { error: "Not found." });

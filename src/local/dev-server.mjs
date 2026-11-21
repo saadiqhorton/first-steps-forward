@@ -1,9 +1,9 @@
-import { connect, createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { processRunsIn, spawnCommand as spawn, stopProcess as stopChild } from "./spawn.mjs";
 import { packageManager } from "./project-scripts.mjs";
+import { allocatePort, probeConnection } from "./ports.mjs";
 import {
   DevCommandError,
   devCommandEnv,
@@ -35,43 +35,6 @@ export function createDevServers({ state, save }) {
   const devStartClaims = new Set();
   const id = () => randomUUID();
   const now = () => Date.now();
-  async function allocatePort() {
-    // Ask the OS for an ephemeral port, but do not return it until nothing
-    // answers there: WSL's mirrored networking (verified) keeps a just-closed
-    // loopback socket connectable for up to ~500 ms, and a false connect would
-    // make waitForListening report "running" before the dev server binds.
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      const port = await new Promise((resolve, reject) => {
-        const server = createServer();
-        server.once("error", reject);
-        server.listen(0, "127.0.0.1", () => {
-          const allocated = server.address().port;
-          server.close(() => resolve(allocated));
-        });
-      });
-      const deadline = Date.now() + 1500;
-      while (await probeConnection(port)) {
-        if (Date.now() >= deadline) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      if (!(await probeConnection(port))) return port;
-      // Still connectable after 1.5 s: something really owns it — fresh port.
-    }
-    throw new Error("Could not allocate a free loopback port for the dev server.");
-  }
-  function probeConnection(port) {
-    return new Promise((resolve) => {
-      if (!port) return resolve(false);
-      const socket = connect({ port, host: "127.0.0.1" });
-      const finish = (ok) => {
-        socket.destroy();
-        resolve(ok);
-      };
-      socket.setTimeout(1000, () => finish(false));
-      socket.once("connect", () => finish(true));
-      socket.once("error", () => finish(false));
-    });
-  }
   /**
    * Only a port that actually accepts a connection proves the dev server is
    * up. Bounded poll: returns false if the process dies first or nothing

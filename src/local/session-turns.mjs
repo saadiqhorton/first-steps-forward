@@ -135,6 +135,7 @@ const SAFETY_PREAMBLE =
  * @param {(scope: string) => void} [deps.emit]
  * @param {(agentId: string) => boolean} [deps.isAgentUpdating]
  * @param {(session: Session) => void} [deps.turnEnded]
+ * @param {(session: Session) => void} [deps.turnStarted] a run took the session's slot
  * @param {(session: Session) => import("./adapters/kit.mjs").TurnInput["workspaceAssistant"]} [deps.workspaceTools]
  */
 export function createSessionTurns({
@@ -147,6 +148,7 @@ export function createSessionTurns({
   emit = () => {},
   isAgentUpdating = () => false,
   turnEnded = () => {},
+  turnStarted = () => {},
   workspaceTools = () => undefined,
 }) {
   /** @type {Map<string, { controller: AbortController, child?: import("node:child_process").ChildProcess }>} */
@@ -191,6 +193,7 @@ export function createSessionTurns({
     // Handoffs use this to tell a queued request's own reply apart from a
     // previous turn's reply that may still land after the queue was filled.
     session.turnStartedAt = now();
+    turnStarted(session);
     return slot;
   };
   /** Hand a finished run's slot straight to the next run, never freeing it in between. */

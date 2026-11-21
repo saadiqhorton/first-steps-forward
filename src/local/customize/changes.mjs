@@ -54,7 +54,8 @@ export function viewOf(ctx, change) {
     !change.commit &&
     session &&
     ctx.deps.isBusy(session);
-  return { ...change, ...(working ? { status: "working", reason: undefined } : {}) };
+  const { previewProcess: _process, build: _build, ...shown } = change;
+  return { ...shown, ...(working ? { status: "working", reason: undefined } : {}) };
 }
 
 async function filesOf(ctx, change) {
@@ -153,7 +154,9 @@ async function afterTurn(ctx, change, session) {
 }
 
 async function checkChange(ctx, change, { auto }) {
+  await ctx.previews?.stop(change.id);
   touch(ctx, change, { status: "checking", reason: undefined, checks: pendingChecks() });
+  const sha = (await ctx.git(["rev-parse", "HEAD"])).stdout.trim();
   const checks = await runChecks({
     run: ctx.run,
     git: ctx.git,
@@ -168,6 +171,10 @@ async function checkChange(ctx, change, { auto }) {
     timeout: ctx.checkTimeout,
   });
   if (!inProgress(change)) return;
+  // The build check left this commit's output in the copy; Try it serves it as is.
+  const build = checks.find((check) => check.id === "build");
+  if (build?.status === "passed" && sha) change.build = { sha };
+  else delete change.build;
   touch(ctx, change, { checks });
   const failed = checks.filter((check) => check.status === "failed");
   if (!failed.length) return touch(ctx, change, { status: "ready", reason: undefined });
@@ -203,6 +210,7 @@ export async function rerunChecks(ctx, id) {
   const session = ctx.deps.getSession(change.sessionId);
   if (session && ctx.deps.isBusy(session))
     throw new CustomizeError(409, "Wait for the agent to finish first.");
+  await ctx.previews?.stop(change.id);
   touch(ctx, change, { status: "checking", reason: undefined, checks: pendingChecks() });
   ctx.enqueue(change.id, async () => {
     const files = await filesOf(ctx, change);
@@ -217,6 +225,7 @@ export async function keepChange(ctx, id) {
   const live = viewOf(ctx, change);
   if (live.status !== "ready" || change.commit)
     throw new CustomizeError(409, "Only a change that passed its checks can be kept.");
+  await ctx.previews?.stop(change.id);
   await ctx.git.must(["checkout", "-f", "mine"]);
   await ctx.git.must(["merge", "--squash", branchOf(change)]);
   await ctx.git.must(["commit", "-m", change.title]);
@@ -235,6 +244,7 @@ export async function undoChange(ctx, id) {
   // Mark first so a running pipeline stops between steps, then wait for it.
   change.status = "undone";
   if (session && ctx.deps.isBusy(session)) await ctx.deps.stopSession(session);
+  await ctx.previews?.stop(change.id);
   await ctx.pipeline(change.id);
   await ctx.git(["checkout", "-f", "mine"]);
   await ctx.git(["clean", "-fd"]);
@@ -249,6 +259,7 @@ export async function removeChange(ctx, id) {
     throw new CustomizeError(409, "Only a kept change can be removed.");
   if (ctx.data.changes.some(inProgress))
     throw new CustomizeError(409, "Finish or undo the change in progress first.");
+  await ctx.previews?.stopAll();
   await ctx.git.must(["checkout", "-f", "mine"]);
   const reverted = await ctx.git(["revert", "--no-edit", change.commit]);
   if (reverted.code !== 0) {

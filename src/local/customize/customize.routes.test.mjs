@@ -142,7 +142,8 @@ test("bad requests, setup when ready, and preview", { skip }, async () => {
   const setup = await call("/api/customize/setup", {});
   assert.equal(setup.status, 202);
   assert.equal(setup.json.setup.status, "ready");
-  assert.equal((await call("/api/customize/changes/x/preview", { action: "start" })).status, 501);
+  assert.equal((await call("/api/customize/changes/x/preview", { action: "start" })).status, 404);
+  assert.equal((await call("/api/customize/changes/x/preview", { action: "stop" })).status, 404);
   assert.equal((await call("/api/customize/changes/x/keep", {})).status, 404);
   assert.equal((await call("/api/customize/nothing")).status, 404);
 });
@@ -165,6 +166,9 @@ test(
       agentId: "codex",
     });
     assert.equal(second.status, 409);
+    // The agent is still working: nothing to try yet.
+    const early = await call(`/api/customize/changes/${change.id}/preview`, { action: "start" });
+    assert.equal(early.status, 409);
 
     const boot = (await call("/api/bootstrap")).json;
     assert.ok(!boot.projects.some((p) => p.id === "ade-self"));
@@ -185,10 +189,30 @@ test(
     assert.equal(ready.files[0].path, "src/feature.txt");
     assert.ok(ready.checks.every((c) => ["passed", "skipped"].includes(c.status)));
 
+    // Try it: the change's ADE answers on its own port, then stops.
+    const preview = (action) => call(`/api/customize/changes/${change.id}/preview`, { action });
+    assert.equal((await preview("open")).status, 400);
+    const starting = await preview("start");
+    assert.equal(starting.status, 202, JSON.stringify(starting.json));
+    assert.equal(starting.json.change.preview.status, "starting");
+    const running = await waitFor(async () => {
+      const found = (await call("/api/customize")).json.changes.find((c) => c.id === change.id);
+      if (found.preview.status === "failed") throw new Error(JSON.stringify(found.preview));
+      return found.preview.status === "running" ? found.preview : null;
+    }, "preview running");
+    assert.notEqual(new URL(running.url).port, "3100");
+    const answer = await (await fetch(`${running.url}api/bootstrap`)).json();
+    assert.ok(answer.home.startsWith(path.join(home, ".ade", "self", "homes", "preview-")));
+    const stopped = await preview("stop");
+    assert.equal(stopped.status, 200);
+    assert.equal(stopped.json.change.preview.status, "stopped");
+    await assert.rejects(fetch(running.url));
+
     const kept = await call(`/api/customize/changes/${change.id}/keep`, {});
     assert.equal(kept.status, 200);
     assert.equal(kept.json.change.status, "kept");
     assert.equal((await call(`/api/customize/changes/${change.id}/undo`, {})).status, 409);
+    assert.equal((await preview("start")).status, 409);
     assert.equal((await call("/api/customize")).json.switch.status, "pending");
   },
 );

@@ -23,6 +23,32 @@ export const git = (cwd, ...args) =>
   ).trim();
 
 const OK = `node -e ""`;
+
+/**
+ * A stand-in for ADE's launcher: serves /api/bootstrap on --port, starts a
+ * grandchild (to prove the whole process group stops) and records both pids
+ * and its HOME in $HOME/preview.json.
+ */
+export const PREVIEW_SERVER = `import http from "node:http";
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import path from "node:path";
+const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
+const sleeper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+writeFileSync(
+  path.join(process.env.HOME, "preview.json"),
+  JSON.stringify({ pid: process.pid, grandchild: sleeper.pid, home: process.env.HOME, cwd: process.cwd(), adeHost: process.env.ADE_HOST ?? null }),
+);
+http
+  .createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ path: req.url, home: process.env.HOME }));
+  })
+  .listen(port, "127.0.0.1", () => console.log("preview listening on " + port));
+`;
+/** A launcher that fails the way a broken change would. */
+export const CRASHING_SERVER = `console.error("TypeError: broken by this change");\nprocess.exit(1);\n`;
+const BUILD = `node -e "const fs=require('fs');fs.mkdirSync('.output/public',{recursive:true});fs.writeFileSync('.output/public/_shell.html','built '+Date.now())"`;
 /** A git checkout shaped like ADE: version, scripts the checks call, a locked file. */
 export function makeStockRepo({ scripts = {}, version = "1.2.3" } = {}) {
   const dir = tempDir("ade-stock-");
@@ -36,14 +62,16 @@ export function makeStockRepo({ scripts = {}, version = "1.2.3" } = {}) {
       scripts: {
         typecheck: OK,
         lint: OK,
-        build: OK,
+        build: BUILD,
         test: `node -e "console.log('# pass 7'); console.log('HOME=' + process.env.HOME)"`,
         "token-audit": OK,
         ...scripts,
       },
     }),
   );
-  writeFileSync(path.join(dir, ".gitignore"), "node_modules\n");
+  writeFileSync(path.join(dir, ".gitignore"), "node_modules\n.output\n");
+  mkdirSync(path.join(dir, "bin"));
+  writeFileSync(path.join(dir, "bin", "ade.mjs"), PREVIEW_SERVER);
   writeFileSync(path.join(dir, "src", "tokens.css"), ":root { --a: 1; }\n");
   writeFileSync(path.join(dir, "src", "feature.txt"), "one\ntwo\nthree\n");
   git(dir, "add", "-A");

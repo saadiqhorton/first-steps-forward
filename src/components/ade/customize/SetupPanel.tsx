@@ -50,7 +50,7 @@ export function SetupPanel({ setup }: { setup: CustomizeSetup }) {
       {(running || (setup.status === "failed" && current >= 0)) && setup.status !== "none" && (
         <ol className="mt-5 space-y-3" aria-label="Setup steps">
           {STEPS.map((step, index) => {
-            const done = setup.status === "running" ? index < current : false;
+            const done = index < current;
             const active = index === current;
             const failed = setup.status === "failed" && active;
             return (
@@ -69,8 +69,9 @@ export function SetupPanel({ setup }: { setup: CustomizeSetup }) {
                 <div className="min-w-0 flex-1">
                   <p className={`text-ui ${done || active ? "text-ink" : "text-dim"}`}>
                     {step.label}
+                    {failed && <span className="text-danger"> · stopped here</span>}
                     <span className="sr-only">
-                      {done ? " (done)" : failed ? " (failed)" : active ? " (running)" : ""}
+                      {done ? " (done)" : active && !failed ? " (running)" : ""}
                     </span>
                   </p>
                   {active && running && setup.progress && (

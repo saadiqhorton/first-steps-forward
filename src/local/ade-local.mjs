@@ -142,6 +142,7 @@ const turns = createSessionTurns({
     refreshBootstrapInBackground(eventHub.activeProjects());
     customize.onTurnEnd(session);
   },
+  turnStarted: (session) => customize.onTurnStart(session),
   workspaceTools: (session) => sessionWorkspaceTools(session),
   turnContext: async (project, session) => {
     // The manifest says which dev command applies now, not as of the last bootstrap poll.
@@ -405,6 +406,9 @@ const customize = createCustomize({
     isBusy: (session) => turns.isBusy(session),
   },
 });
+// A preview of a change is a detached ADE; it must not outlive this one.
+const stopPreviews = () => customize.shutdown();
+process.once("exit", stopPreviews);
 // Viewers reach the stream through /preview-stream on the server that serves
 // the UI and API (see handleUpgrade); it never listens on its own.
 const browserStream = createBrowserStreamServer({
@@ -1055,6 +1059,8 @@ export function start() {
  */
 export async function stop() {
   devServers.stopMonitor();
+  process.off("exit", stopPreviews);
+  stopPreviews();
   if (clientRefreshTimer) clearInterval(clientRefreshTimer);
   clientRefreshTimer = null;
   if (computerWatchTimer) clearInterval(computerWatchTimer);

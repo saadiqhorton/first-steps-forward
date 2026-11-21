@@ -32,10 +32,19 @@ export interface ChangeFile {
   removed: number;
 }
 
+export type PreviewStep = "build" | "start";
+
 export interface ChangePreview {
   status: "stopped" | "starting" | "running" | "failed";
+  /** While starting: what runs now; when failed: where it stopped (absent before the first step). */
+  step?: PreviewStep;
+  /** This start built the change first (the checks' build was missing or out of date). */
+  rebuilt?: boolean;
   url?: string;
+  port?: number;
   error?: string;
+  /** The last lines the build or ADE printed, when it failed. */
+  output?: string;
 }
 
 export interface Change {
@@ -50,6 +59,8 @@ export interface Change {
   createdAt: string;
   updatedAt: string;
   keptAt?: string;
+  /** First time the user started Try it for this change. */
+  triedAt?: string;
   files: ChangeFile[];
   checks: ChangeCheck[];
   fixAttempts: number;
@@ -147,7 +158,9 @@ export const undoChange = (id: string) =>
 export const removeChange = (id: string) =>
   call<{ change: Change }>(`/api/customize/changes/${encodeURIComponent(id)}/remove`, "POST");
 export const previewChange = (id: string, action: "start" | "stop") =>
-  call<unknown>(`/api/customize/changes/${encodeURIComponent(id)}/preview`, "POST", { action });
+  call<{ change: Change }>(`/api/customize/changes/${encodeURIComponent(id)}/preview`, "POST", {
+    action,
+  });
 
 export function useCustomize() {
   const serviceAvailable = useAdeState((state) => state.serviceAvailable);

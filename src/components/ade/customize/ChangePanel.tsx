@@ -3,18 +3,17 @@ import { Eye, FileText, PanelRightClose, PanelRightOpen, ShieldCheck } from "luc
 import { GlideIndicator } from "@/components/ade/motion";
 import type { Change, CustomizeState } from "@/lib/ade/customizeApi";
 import { ChecksPanel } from "./ChecksPanel";
-import { PREVIEW_LATER } from "./customizeText";
 import { FilesPanel } from "./FilesPanel";
 import { KeptList } from "./KeptList";
+import { PreviewPanel } from "./PreviewPanel";
 import { StockHint } from "./StockHint";
 
-type PanelTab = "preview" | "checks" | "changes";
+export type PanelTab = "preview" | "checks" | "changes";
 
 const COLLAPSED_KEY = "ade-customize-panel-collapsed";
 
-// Preview lands in round 2; until then only dev builds show the tab, with an honest note.
 const TABS: { id: PanelTab; label: string; Icon: typeof Eye }[] = [
-  ...(import.meta.env.DEV ? [{ id: "preview" as const, label: "Preview", Icon: Eye }] : []),
+  { id: "preview", label: "Preview", Icon: Eye },
   { id: "checks", label: "Checks", Icon: ShieldCheck },
   { id: "changes", label: "Changes", Icon: FileText },
 ];
@@ -36,7 +35,29 @@ function writeCollapsed(value: boolean) {
 }
 
 function defaultTab(change: Change): PanelTab {
-  return change.status === "kept" || change.status === "removed" ? "changes" : "checks";
+  if (change.status === "kept" || change.status === "removed") return "changes";
+  return change.preview.status === "stopped" ? "checks" : "preview";
+}
+
+/**
+ * The panel's tab, owned by the change view so Try it can bring Preview forward. A failed check
+ * moves it to Checks once, so the failure is never off screen; each change starts on its default.
+ */
+export function usePanelTab(change: Change) {
+  const [tab, setTab] = useState<PanelTab>(() => defaultTab(change));
+  const failed = change.checks.some((c) => c.status === "failed");
+  useEffect(() => {
+    if (failed) setTab("checks");
+  }, [failed]);
+  useEffect(() => setTab(defaultTab(change)), [change.id]); // eslint-disable-line react-hooks/exhaustive-deps -- reset per change only
+  return [tab, setTab] as const;
+}
+
+function previewTone(change: Change) {
+  if (change.preview.status === "running") return "bg-teal";
+  if (change.preview.status === "starting") return "bg-teal animate-pulse-soft";
+  if (change.preview.status === "failed") return "bg-danger";
+  return null;
 }
 
 function checkTone(change: Change) {
@@ -55,28 +76,34 @@ export function ChangePanel({
   change,
   state,
   phoneActive,
+  tab,
+  onTabChange: setTab,
+  reveal,
 }: {
   change: Change;
   state: CustomizeState;
   /** Phones show one pane at a time; this one when its tab is selected. */
   phoneActive: boolean;
+  tab: PanelTab;
+  onTabChange: (tab: PanelTab) => void;
+  /** Bumped when something (Try it) needs the panel open. */
+  reveal: number;
 }) {
-  const [tab, setTab] = useState<PanelTab>(() => defaultTab(change));
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => setCollapsed(readCollapsed()), []);
-  // A failed check moves the panel to it once, so the failure is never off screen.
-  const failed = change.checks.some((c) => c.status === "failed");
   useEffect(() => {
-    if (failed) setTab("checks");
-  }, [failed]);
-  useEffect(() => setTab(defaultTab(change)), [change.id]); // eslint-disable-line react-hooks/exhaustive-deps -- reset per change only
+    if (reveal) setCollapsed(false);
+  }, [reveal]);
 
   const toggle = (next: boolean) => {
     setCollapsed(next);
     writeCollapsed(next);
   };
-  const dot = checkTone(change);
+  const dots: Partial<Record<PanelTab, string | null>> = {
+    preview: previewTone(change),
+    checks: checkTone(change),
+  };
 
   const phone = phoneActive ? "flex" : "hidden";
 
@@ -116,9 +143,9 @@ export function ChangePanel({
               >
                 <Icon className="size-4" strokeWidth={1.5} aria-hidden />
               </button>
-              {id === "checks" && dot && (
+              {dots[id] && (
                 <span
-                  className={`absolute top-0.5 right-0.5 size-1.5 rounded-full ${dot}`}
+                  className={`absolute top-0.5 right-0.5 size-1.5 rounded-full ${dots[id]}`}
                   aria-hidden
                 />
               )}
@@ -154,8 +181,8 @@ export function ChangePanel({
               >
                 <Icon className="size-4 shrink-0" strokeWidth={1.5} aria-hidden />
                 {label}
-                {id === "checks" && dot && (
-                  <span className={`size-1.5 shrink-0 rounded-full ${dot}`} aria-hidden />
+                {dots[id] && (
+                  <span className={`size-1.5 shrink-0 rounded-full ${dots[id]}`} aria-hidden />
                 )}
                 {active && (
                   <GlideIndicator
@@ -178,15 +205,7 @@ export function ChangePanel({
         </div>
 
         <div role="tabpanel" className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
-          {tab === "preview" && (
-            <div className="rounded-md border border-dashed border-line px-4 py-6 text-center">
-              <Eye className="mx-auto size-4 text-dim" strokeWidth={1.5} aria-hidden />
-              <p className="mt-2 text-ui text-ink">{PREVIEW_LATER}</p>
-              <p className="mt-1 text-xs leading-5 text-dim">
-                Until then, the checks are what tell you a change is safe to keep.
-              </p>
-            </div>
-          )}
+          {tab === "preview" && <PreviewPanel change={change} />}
           {tab === "checks" && <ChecksPanel key={change.id} change={change} />}
           {tab === "changes" && (
             <>
