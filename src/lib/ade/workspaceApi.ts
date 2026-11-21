@@ -38,6 +38,9 @@ export type AssistantThread = {
   agentId?: string;
   model?: string;
   effort?: string;
+  mode?: "chat" | "work";
+  permission?: string;
+  workspacePath?: string;
   updatedAt: number;
   readAt?: number;
   unread?: boolean;
@@ -146,6 +149,8 @@ export const startAssistantThread = (data: {
   agentId?: string;
   model?: string;
   effort?: string;
+  mode?: "chat" | "work";
+  permission?: string;
   attachmentIds?: string[];
 }) =>
   request<{ thread: AssistantThread; runId?: string }>(
@@ -176,6 +181,8 @@ export const patchAssistantThread = (
     agentId?: string;
     model?: string;
     effort?: string;
+    mode?: "chat" | "work";
+    permission?: string;
   },
 ) =>
   request<{ thread: AssistantThread }>(

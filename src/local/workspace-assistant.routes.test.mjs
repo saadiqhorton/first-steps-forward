@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { workspaceAssistant } from "./routes/workspaceAssistant.mjs";
 
-function context(parts, { method = "GET", body, assistant = {} } = {}) {
+function context(parts, { method = "GET", body, assistant = {}, state, ...rest } = {}) {
   const responses = [];
   const calls = [];
   const service = {
@@ -21,6 +21,10 @@ function context(parts, { method = "GET", body, assistant = {} } = {}) {
     },
     listThreads: () => [{ id: "t1" }],
     listAgents: () => [{ id: "fake", workspaceAssistant: "tools" }],
+    startThread: async (data) => {
+      calls.push(["startThread", data]);
+      return { thread: { id: "new", ...data } };
+    },
     getThread: () => ({ thread: { id: "t1" } }),
     markRead: async (id, at) => ({ id, readAt: at }),
     defaults: () => ({}),
@@ -48,8 +52,9 @@ function context(parts, { method = "GET", body, assistant = {} } = {}) {
         responses.push([status, value]);
         return value;
       },
-      state: { assistantThreads: [] },
+      state: state ?? { assistantThreads: [] },
       workspaceAssistant: service,
+      ...rest,
     },
   };
 }
@@ -94,4 +99,71 @@ test("renaming an assistant chat goes through the saving service", async () => {
   assert.deepEqual(calls.at(-1), ["renameThread", "t1", "Release checklist"]);
   assert.equal(responses.at(-1)[0], 200);
   assert.equal(responses.at(-1)[1].thread.title, "Release checklist");
+});
+
+test("mode and permission changes go through updateThread", async () => {
+  const { ctx, calls, responses } = context(["workspace", "assistant", "threads", "t1"], {
+    method: "PATCH",
+    body: { permission: "build" },
+  });
+  await workspaceAssistant(ctx);
+  assert.deepEqual(calls.at(-1), ["updateThread", "t1", { permission: "build" }]);
+  assert.equal(responses.at(-1)[0], 200);
+
+  const mode = context(["workspace", "assistant", "threads", "t1"], {
+    method: "PATCH",
+    body: { mode: "work" },
+  });
+  await workspaceAssistant(mode.ctx);
+  assert.deepEqual(mode.calls.at(-1), ["updateThread", "t1", { mode: "work" }]);
+});
+
+test("a device without approve cannot change how Luna works", async () => {
+  const denied = () => ({ devicePolicy: (_ctx, capability) => capability !== "approve" });
+  for (const body of [{ permission: "build" }, { mode: "work" }]) {
+    const { ctx, calls, responses } = context(["workspace", "assistant", "threads", "t1"], {
+      method: "PATCH",
+      body,
+      ...denied(),
+    });
+    await workspaceAssistant(ctx);
+    assert.equal(responses.at(-1)[0], 403);
+    assert.equal(
+      calls.find((call) => call[0] === "updateThread"),
+      undefined,
+    );
+  }
+});
+
+test("starting a Work thread needs approve, a Chat thread only needs start", async () => {
+  const denied = () => ({ devicePolicy: (_ctx, capability) => capability !== "approve" });
+
+  const work = context(["workspace", "assistant", "threads"], {
+    method: "POST",
+    body: { text: "make a deck", mode: "work" },
+    ...denied(),
+  });
+  await workspaceAssistant(work.ctx);
+  assert.equal(work.responses.at(-1)[0], 403);
+  assert.equal(
+    work.calls.find((call) => call[0] === "startThread"),
+    undefined,
+  );
+
+  const chat = context(["workspace", "assistant", "threads"], {
+    method: "POST",
+    body: { text: "what is this", mode: "chat" },
+    ...denied(),
+  });
+  await workspaceAssistant(chat.ctx);
+  assert.equal(chat.responses.at(-1)[0], 201);
+  assert.equal(chat.calls.at(-1)[0], "startThread");
+
+  const allowed = context(["workspace", "assistant", "threads"], {
+    method: "POST",
+    body: { text: "make a deck", mode: "work" },
+  });
+  await workspaceAssistant(allowed.ctx);
+  assert.equal(allowed.responses.at(-1)[0], 201);
+  assert.deepEqual(allowed.calls.at(-1)[1], { text: "make a deck", mode: "work" });
 });

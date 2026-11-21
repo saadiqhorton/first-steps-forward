@@ -16,6 +16,7 @@
 - Attachment strip + drag overlay (`ComposerAttachments`)
 - Suggestions popover (`/` workflows-skills, `@` files)
 - Footer: agent chip (opens `AgentPicker`), branch label, tool buttons, send / send-later / send-now
+- The agent chip subtitle is `model · effort`, plus a short permission label when the permission is not `plan` (for example `· Auto-approve`), so a writable mode is visible while the picker is closed
 - Optional error alert strip
 
 ## 4. Tokens used
@@ -56,4 +57,4 @@ import { Composer } from "@/components/ade/Composer";
 ```
 
 ## 8. Cross-references
-- Related: SessionMessage, AgentPicker, ContextPills, BrowserChrome (feedback attach)
+- Related: SessionMessage, AgentPicker, ContextPills, BrowserChrome (feedback attach), SegmentedControl (Luna's Chat/Work control sits above the composer)
