@@ -1,8 +1,11 @@
 import { isHiddenSession } from "./customize/paths.mjs";
 import { randomUUID } from "node:crypto";
+import { promises as fsp } from "node:fs";
+import path from "node:path";
 import { spawnCommand } from "./spawn.mjs";
 import { TOOLS, runWorkspaceTool } from "./workspace-tools.mjs";
 import { resolveAttachments, formatAttachmentPrompt } from "./attachments.mjs";
+import { lunaBrief } from "./luna-brief.mjs";
 
 const clean = (s, n = 4000) => String(s ?? "").slice(0, n);
 export { TOOLS };
@@ -46,11 +49,36 @@ export function createWorkspaceAssistant({
   dataDir = process.cwd(),
   getAppAddress = () => null,
   onDeleteThread = () => {},
+  spawn = spawnCommand,
 }) {
   state.assistantThreads ??= [];
   state.assistantMessages ??= [];
   state.assistantActivity ??= [];
   const running = new Map();
+
+  // Luna's folders live under the ADE data dir, never in the directory ADE
+  // happened to be launched from. Chat shares the root; Work gets one folder
+  // per chat, created only when a Work turn actually runs.
+  const lunaRoot = () => path.join(dataDir, "luna");
+  const ensureLunaRoot = async () => {
+    await fsp.mkdir(lunaRoot(), { recursive: true, mode: 0o700 });
+    return lunaRoot();
+  };
+  const ensureWorkFolder = async (thread) => {
+    const folder = path.join(lunaRoot(), thread.id);
+    await fsp.mkdir(folder, { recursive: true, mode: 0o700 });
+    return folder;
+  };
+  const turnFolder = (thread) =>
+    thread.mode === "work" ? ensureWorkFolder(thread) : ensureLunaRoot();
+
+  /** Threads written before modes existed read as a read-only chat. */
+  const normalizeThread = (thread) => {
+    thread.mode ??= "chat";
+    thread.permission ??= "plan";
+    thread.workspacePath ??= path.join(lunaRoot(), thread.id);
+    return thread;
+  };
 
   /** Whether this agent's adapter actually receives ADE workspace tools in a workspace chat. */
   const adapterSupportsTools = (agent) => {
@@ -76,6 +104,7 @@ export function createWorkspaceAssistant({
   // the thread changed since it was last read. Mutates in place so getThread keeps
   // returning the live thread the PATCH route renames.
   const withMeta = (thread) => {
+    normalizeThread(thread);
     const last = state.assistantMessages.filter((m) => m.threadId === thread.id).at(-1);
     thread.preview = last?.text ? clean(last.text, 140) : undefined;
     thread.unread = (thread.updatedAt ?? 0) > (thread.readAt ?? 0);
@@ -115,6 +144,7 @@ export function createWorkspaceAssistant({
     };
   };
   async function run(thread, userMessage, runId = id(), files = []) {
+    normalizeThread(thread);
     const adapter = adapters[thread.agentId];
     const agent = state.agents.find((a) => a.id === thread.agentId);
     if (!adapter || !agent?.installed || !agent?.signedIn)
@@ -123,11 +153,15 @@ export function createWorkspaceAssistant({
     const toolToken = id() + id();
     thread.toolToken = toolToken;
     running.set(thread.id, { controller, runId });
+    // Mark the turn running before the first await: callers read status right
+    // after startThread returns.
     thread.status = "thinking";
     thread.updatedAt = now();
     thread.runId = runId;
     await save();
     emit("workspace-assistant");
+    // Set once the turn is registered; io.spawn reads it when the adapter runs.
+    let cwd = "";
     const activity = (type, text) => {
       state.assistantActivity.push({
         id: id(),
@@ -185,8 +219,8 @@ export function createWorkspaceAssistant({
         return { outcome: "cancelled" };
       },
       spawn(bin, args, { env = {}, stdin = "ignore" } = {}) {
-        const child = spawnCommand(bin, args, {
-          cwd: process.cwd(),
+        const child = spawn(bin, args, {
+          cwd,
           env: { ...process.env, ...env },
           stdio: [stdin, "pipe", "pipe"],
           shell: false,
@@ -197,6 +231,14 @@ export function createWorkspaceAssistant({
       },
     };
     try {
+      // Resolve the folder inside the try: a mkdir failure is a failed turn, never
+      // a silent run in another directory.
+      cwd = await turnFolder(thread);
+      // Brief a new agent session, and re-brief when the mode changed. Follow-ups
+      // in the same mode do not repeat it.
+      const needsBrief = !thread.agentSessionId || thread.briefedMode !== thread.mode;
+      const brief = needsBrief ? `${lunaBrief({ mode: thread.mode, folder: cwd })}\n\n` : "";
+      if (needsBrief) thread.briefedMode = thread.mode;
       const workspaceAssistant =
         adapterSupportsTools(agent) && getAppAddress()
           ? {
@@ -208,8 +250,8 @@ export function createWorkspaceAssistant({
           : undefined;
       const result = await adapter.runTurn(
         {
-          projectPath: process.cwd(),
-          prompt: `${userMessage}${formatAttachmentPrompt(files)}`,
+          projectPath: cwd,
+          prompt: `${brief}${userMessage}${formatAttachmentPrompt(files)}`,
           session: { id: thread.id, agentSessionId: thread.agentSessionId },
           continuing: !!thread.agentSessionId,
           dataDir: thread.dataDir,
@@ -218,7 +260,7 @@ export function createWorkspaceAssistant({
           model: thread.model,
           defaultModel: thread.defaultModel,
           effort: thread.effort,
-          permission: "plan",
+          permission: thread.permission,
           attachments: nativeAttachments(files),
           computer: null,
           workspaceAssistant,
@@ -256,15 +298,24 @@ export function createWorkspaceAssistant({
     if (!agentId)
       throw Object.assign(new Error("No installed signed-in agent is available."), { status: 409 });
     const files = await resolveFiles(input.attachmentIds);
-    const option = await resolveSessionOptions(agentId, input.model, { effort: input.effort });
+    const mode = input.mode === "work" ? "work" : "chat";
+    const permission = input.permission ?? (mode === "work" ? "build" : "plan");
+    const option = await resolveSessionOptions(agentId, input.model, {
+      effort: input.effort,
+      permission,
+    });
     if (!option.ok) throw Object.assign(new Error(option.error), { status: 400 });
+    const threadId = id();
     const thread = {
-      id: id(),
+      id: threadId,
       title: clean(input.text, 80) || "New chat",
       status: "idle",
       agentId,
       model: input.model,
       effort: option.value?.effort ?? input.effort,
+      mode: permission === "plan" ? "chat" : "work",
+      permission: option.value?.permission ?? permission,
+      workspacePath: path.join(lunaRoot(), threadId),
       dataDir,
       createdAt: now(),
       updatedAt: now(),
@@ -325,6 +376,16 @@ export function createWorkspaceAssistant({
     state.assistantThreads = state.assistantThreads.filter((t) => t.id !== threadId);
     state.assistantMessages = state.assistantMessages.filter((m) => m.threadId !== threadId);
     state.assistantActivity = state.assistantActivity.filter((a) => a.threadId !== threadId);
+    // Only this thread's folder, only when it really is a folder under the Luna
+    // root. A symlink or a path that escaped the root is left alone.
+    const root = lunaRoot();
+    const target = path.join(root, threadId);
+    const rel = path.relative(root, target);
+    if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+      const stat = await fsp.lstat(target).catch(() => null);
+      if (stat?.isDirectory() && !stat.isSymbolicLink())
+        await fsp.rm(target, { recursive: true, force: true }).catch(() => {});
+    }
     try {
       await onDeleteThread(threadId);
     } catch {}
@@ -356,15 +417,35 @@ export function createWorkspaceAssistant({
         delete thread.defaultModel;
         thread.model = undefined;
         thread.effort = undefined;
+        // A permission the previous adapter offered may not exist on this one.
+        thread.permission = "plan";
+        thread.mode = "chat";
       }
     }
+    normalizeThread(thread);
     const nextModel = input.model !== undefined ? String(input.model) || undefined : thread.model;
+    let nextMode = thread.mode;
+    let nextPermission = thread.permission;
+    if (input.mode !== undefined) {
+      if (input.mode !== "chat" && input.mode !== "work")
+        throw Object.assign(new Error("Choose chat or work."), { status: 400 });
+      nextMode = input.mode;
+      if (nextMode === "chat") nextPermission = "plan";
+      else if (nextPermission === "plan") nextPermission = "build";
+    }
+    if (input.permission !== undefined) {
+      nextPermission = String(input.permission);
+      nextMode = nextPermission === "plan" ? "chat" : "work";
+    }
     const checked = await resolveSessionOptions(thread.agentId, nextModel, {
       effort: input.effort !== undefined ? input.effort : thread.effort,
+      permission: nextPermission,
     });
     if (!checked.ok) throw Object.assign(new Error(checked.error), { status: 400 });
     if (input.model !== undefined) thread.model = nextModel;
     if (input.effort !== undefined) thread.effort = checked.value?.effort ?? input.effort;
+    thread.permission = checked.value?.permission ?? nextPermission;
+    thread.mode = nextMode;
     thread.updatedAt = now();
     await save();
     emit("workspace-assistant");

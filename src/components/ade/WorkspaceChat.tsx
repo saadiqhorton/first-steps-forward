@@ -5,6 +5,7 @@ import {
   Check,
   Clock3,
   History,
+  Lock,
   Mail,
   Plus,
   Send,
@@ -17,8 +18,9 @@ import {
 import { type AgentSelection } from "@/components/ade/AgentPicker";
 import { Composer } from "@/components/ade/Composer";
 import { SessionMessage } from "@/components/ade/SessionMessage";
+import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
-import { uploadAttachment, useAdeState } from "@/lib/ade/store";
+import { optionCapabilities, uploadAttachment, useAdeState } from "@/lib/ade/store";
 import type { Message } from "@/lib/ade/types";
 import {
   catchupAssistantThread,
@@ -85,6 +87,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const messages = useMemo(() => detail.data?.messages ?? [], [detail.data?.messages]);
   const running = thread?.status === "thinking";
   const agent = agents.find((item) => item.id === (selection?.agentId ?? thread?.agentId));
+  const threadPermission = (thread?.permission ?? "plan") as AgentSelection["permission"];
   const activeSelection: AgentSelection =
     selection ??
     ({
@@ -92,8 +95,26 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
       model: thread?.model ?? "",
       effort: thread?.effort ?? "",
       speed: "",
-      permission: "plan",
+      permission: threadPermission,
     } satisfies AgentSelection);
+  const caps = useQuery({
+    queryKey: ["agent-caps", activeSelection.agentId, activeSelection.model],
+    queryFn: () => optionCapabilities(activeSelection.agentId, activeSelection.model || undefined),
+    enabled: !!activeSelection.agentId,
+  });
+  const mode = activeSelection.permission === "plan" ? "chat" : "work";
+  const writablePermissions = (caps.data?.permissions ?? []).filter(
+    (permission) => permission !== "plan",
+  );
+  // Do not flash "unavailable" while the capability request is still in flight.
+  const workAvailable = caps.isPending || writablePermissions.length > 0;
+  const workBlockedReason =
+    caps.data?.permissionNotes?.build ||
+    "This agent cannot approve actions in a non-interactive run.";
+  const workNote =
+    activeSelection.agentId === "opencode"
+      ? "OpenCode rejects permission requests in non-interactive runs; only actions it already allows will run."
+      : null;
   const pendingApprovals = (handoffs.data?.handoffs ?? []).filter(
     (item) => item.status === "approval_pending",
   );
@@ -241,6 +262,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
           ...(activeSelection.agentId ? { agentId: activeSelection.agentId } : {}),
           ...(activeSelection.model ? { model: activeSelection.model } : {}),
           ...(activeSelection.effort ? { effort: activeSelection.effort } : {}),
+          ...(activeSelection.permission ? { permission: activeSelection.permission } : {}),
         });
         await navigate({
           to: "/workspace/assistant/$threadId",
@@ -263,13 +285,48 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const onSelectionChange = (next: AgentSelection) => {
     setSelection(next);
     if (!threadId || running) return;
+    // Permission is only written when it actually changed; a stale value from a
+    // previous agent must not follow the thread into a new adapter.
+    const permissionChanged = next.permission !== threadPermission;
+    const agentChanged = next.agentId !== thread?.agentId;
     void patchAssistantThread(threadId, {
       agentId: next.agentId,
       model: next.model,
       effort: next.effort,
+      ...(permissionChanged ? { permission: next.permission } : {}),
     })
+      .then(() => {
+        // The service resets model/effort/permission when the agent changes; let
+        // the thread be the source of truth again.
+        if (agentChanged) setSelection(null);
+        return client.invalidateQueries({ queryKey: ["workspace-assistant-thread", threadId] });
+      })
+      .catch((e) => {
+        setSelection(null);
+        setError(e instanceof Error ? e.message : String(e));
+      });
+  };
+
+  const setMode = (next: string) => {
+    if (running) {
+      setError("Wait for Luna to finish before changing mode.");
+      return;
+    }
+    const permission: AgentSelection["permission"] =
+      next === "work" ? (writablePermissions[0] ?? "build") : "plan";
+    if (next === "work" && !workAvailable) {
+      setError(`Work is unavailable here. ${workBlockedReason}`);
+      return;
+    }
+    const updated: AgentSelection = { ...activeSelection, permission };
+    setSelection(updated);
+    if (!threadId) return;
+    void patchAssistantThread(threadId, { permission })
       .then(() => client.invalidateQueries({ queryKey: ["workspace-assistant-thread", threadId] }))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => {
+        setSelection(null);
+        setError(e instanceof Error ? e.message : String(e));
+      });
   };
 
   const newChat = async () => {
@@ -278,6 +335,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
       const created = await startAssistantThread({
         ...(activeSelection.agentId ? { agentId: activeSelection.agentId } : {}),
         ...(activeSelection.model ? { model: activeSelection.model } : {}),
+        ...(activeSelection.permission ? { permission: activeSelection.permission } : {}),
       });
       await client.invalidateQueries({ queryKey: ["workspace-assistant-threads"] });
       await navigate({
@@ -563,6 +621,28 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
 
       <div className="shrink-0 border-t border-line px-4 py-4 @lg:px-7">
         <div className="mx-auto w-full max-w-3xl">
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <SegmentedControl
+              label="Luna mode"
+              value={mode}
+              onValueChange={setMode}
+              options={[
+                { value: "chat", label: "Chat" },
+                {
+                  value: "work",
+                  label: "Work",
+                  ...(workAvailable ? {} : { accessory: <Lock className="size-3" aria-hidden /> }),
+                },
+              ]}
+            />
+            <span className="min-w-0 truncate text-xs text-dim">
+              {!workAvailable
+                ? `Work unavailable: ${workBlockedReason}`
+                : mode === "work"
+                  ? (workNote ?? thread?.workspacePath ?? "Files stay in this chat's folder")
+                  : "Read-only answers"}
+            </span>
+          </div>
           <Composer
             key={`${threadId ?? "new"}:${promptSeed.nonce}`}
             mode={threadId ? "follow-up" : "new"}

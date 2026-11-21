@@ -1,10 +1,22 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, mkdirSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createWorkspaceAssistant } from "./workspace-assistant.mjs";
+import { createWorkspaceAssistant as createAssistantService } from "./workspace-assistant.mjs";
 import { saveAttachment } from "./attachments.mjs";
+
+// Every assistant gets its own temp data dir: Luna now writes under
+// <dataDir>/luna, and a test must never touch the real one.
+const dataDirs = [];
+const createWorkspaceAssistant = (options = {}) => {
+  const dataDir = options.dataDir ?? mkdtempSync(path.join(os.tmpdir(), "ade-luna-"));
+  dataDirs.push(dataDir);
+  return createAssistantService({ dataDir, ...options });
+};
+after(() => {
+  for (const dir of dataDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 async function settle(thread) {
@@ -141,7 +153,8 @@ test("attachment ids resolve and are stored on the user message", async () => {
     assert.equal(captured.attachments[0].name, "notes.txt");
     assert.equal(captured.attachments[0].mime, "text/plain");
     // The prompt carries the path reference so the agent can read the file.
-    assert.ok(captured.prompt.startsWith("Read this file"));
+    // Luna's brief comes first; the user text follows it.
+    assert.ok(captured.prompt.includes("Read this file"));
     assert.ok(captured.prompt.includes(absPath));
     assert.ok(captured.prompt.includes("notes.txt"));
 
@@ -528,7 +541,8 @@ test("changing Luna's agent or model updates the chat and its next turn", async 
   assert.equal(changed.thread.model, "m1");
   assert.equal(changed.thread.effort, "low");
   assert.equal(changed.thread.defaultModel, undefined);
-  assert.deepEqual(checked.at(-1), ["b", "m1", { effort: "low" }]);
+  // Permission rides along with every option check; the new agent resets to plan.
+  assert.deepEqual(checked.at(-1), ["b", "m1", { effort: "low", permission: "plan" }]);
   await service.updateThread(thread.id, { model: "" });
   assert.equal(thread.model, undefined);
   await assert.rejects(service.updateThread("missing", { model: "m" }), /not found/);
@@ -659,4 +673,221 @@ test("voice preferences live on the assistant and can be muted", async () => {
   assert.equal(state.voice.muted, true);
   await service.updateVoice({ muted: "yes" });
   assert.equal(state.voice.muted, true);
+});
+
+test("a chat turn runs in the Luna root and a work turn in its own folder", async () => {
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), "ade-luna-modes-"));
+  const spawned = [];
+  const turnPaths = [];
+  const state = {
+    agents: [{ id: "fake", installed: true, signedIn: true }],
+    sessions: [],
+    projects: [],
+  };
+  const service = createWorkspaceAssistant({
+    state,
+    save: async () => {},
+    dataDir,
+    adapters: {
+      fake: {
+        runTurn: async (input, io) => {
+          turnPaths.push(input.projectPath);
+          io.spawn("fake-bin", [], {});
+          io.emit({ type: "text", text: "ok" });
+          return { ok: true };
+        },
+      },
+    },
+    spawn: (_bin, _args, options) => {
+      spawned.push(options.cwd);
+      return { kill() {} };
+    },
+    resolveSessionOptions: async (_agent, _model, options) => ({
+      ok: true,
+      value: options?.permission ? { permission: options.permission } : {},
+    }),
+  });
+
+  const chat = await service.startThread({ agentId: "fake", text: "hello" });
+  await settle(chat.thread);
+  assert.equal(chat.thread.mode, "chat");
+  assert.equal(chat.thread.permission, "plan");
+  assert.equal(spawned.at(-1), path.join(dataDir, "luna"));
+  assert.equal(turnPaths.at(-1), path.join(dataDir, "luna"));
+  assert.ok(existsSync(path.join(dataDir, "luna")));
+  assert.equal(existsSync(path.join(dataDir, "luna", chat.thread.id)), false);
+
+  const work = await service.startThread({
+    agentId: "fake",
+    text: "make something",
+    mode: "work",
+  });
+  await settle(work.thread);
+  assert.equal(work.thread.mode, "work");
+  assert.equal(work.thread.permission, "build");
+  assert.equal(spawned.at(-1), path.join(dataDir, "luna", work.thread.id));
+  assert.equal(turnPaths.at(-1), path.join(dataDir, "luna", work.thread.id));
+  assert.ok(existsSync(path.join(dataDir, "luna", work.thread.id)));
+});
+
+test("a continuing Luna turn keeps the folder and only re-briefs on a mode change", async () => {
+  const prompts = [];
+  const state = {
+    agents: [{ id: "fake", installed: true, signedIn: true }],
+    sessions: [],
+    projects: [],
+  };
+  const service = createWorkspaceAssistant({
+    state,
+    save: async () => {},
+    adapters: {
+      fake: {
+        runTurn: async (input, io) => {
+          prompts.push(input.prompt);
+          io.emit({ type: "conversation", id: "agent-session" });
+          io.spawn("fake-bin", [], {});
+          io.emit({ type: "text", text: "ok" });
+          return { ok: true };
+        },
+      },
+    },
+    spawn: () => ({ kill() {} }),
+    resolveSessionOptions: async (_agent, _model, options) => ({
+      ok: true,
+      value: options?.permission ? { permission: options.permission } : {},
+    }),
+  });
+
+  const { thread } = await service.startThread({ agentId: "fake", text: "first" });
+  await settle(thread);
+  assert.match(prompts[0], /^You are Luna/);
+
+  await service.sendMessage(thread.id, { text: "second" });
+  await settle(thread);
+  assert.equal(prompts[1].startsWith("You are Luna"), false);
+
+  await service.updateThread(thread.id, { mode: "work" });
+  assert.equal(thread.permission, "build");
+  await service.sendMessage(thread.id, { text: "third" });
+  await settle(thread);
+  assert.match(prompts[2], /^You are Luna/);
+  assert.match(prompts[2], /create and edit files/);
+});
+
+test("threads written before modes existed read and run as read-only chats", async () => {
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), "ade-luna-legacy-"));
+  const turnPaths = [];
+  const state = {
+    agents: [{ id: "fake", installed: true, signedIn: true }],
+    sessions: [],
+    projects: [],
+  };
+  state.assistantThreads = [
+    {
+      id: "old",
+      agentId: "fake",
+      title: "Old",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 1,
+      readAt: 1,
+    },
+  ];
+  const service = createWorkspaceAssistant({
+    state,
+    save: async () => {},
+    dataDir,
+    adapters: {
+      fake: {
+        runTurn: async (input, io) => {
+          turnPaths.push(input.projectPath);
+          io.emit({ type: "text", text: "ok" });
+          return { ok: true };
+        },
+      },
+    },
+    resolveSessionOptions: async () => ({ ok: true, value: {} }),
+  });
+
+  const detail = service.getThread("old");
+  assert.equal(detail.thread.mode, "chat");
+  assert.equal(detail.thread.permission, "plan");
+  assert.equal(detail.thread.workspacePath, path.join(dataDir, "luna", "old"));
+
+  await service.sendMessage("old", { text: "still works" });
+  await settle(state.assistantThreads[0]);
+  assert.equal(turnPaths.at(-1), path.join(dataDir, "luna"));
+});
+
+test("deleting a chat removes only its own real folder", async () => {
+  const outside = mkdtempSync(path.join(os.tmpdir(), "ade-luna-outside-"));
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), "ade-luna-delete-"));
+  const state = { agents: [], sessions: [], projects: [] };
+  const service = createWorkspaceAssistant({ state, save: async () => {}, dataDir });
+
+  mkdirSync(path.join(dataDir, "luna", "doomed"), { recursive: true });
+  mkdirSync(path.join(dataDir, "luna", "keep"), { recursive: true });
+  symlinkSync(outside, path.join(dataDir, "luna", "linked"));
+
+  await service.deleteThread("doomed");
+  await service.deleteThread("linked");
+
+  assert.equal(existsSync(path.join(dataDir, "luna", "doomed")), false);
+  assert.equal(existsSync(path.join(dataDir, "luna", "keep")), true);
+  assert.equal(existsSync(path.join(dataDir, "luna", "linked")), true);
+  assert.equal(existsSync(outside), true);
+  rmSync(outside, { recursive: true, force: true });
+});
+
+test("mode and permission stay consistent and unsupported permissions are rejected", async () => {
+  const state = {
+    agents: [{ id: "fake", installed: true, signedIn: true }],
+    sessions: [],
+    projects: [],
+  };
+  const service = createWorkspaceAssistant({
+    state,
+    save: async () => {},
+    adapters: {},
+    resolveSessionOptions: async (_agent, _model, options) => {
+      if (options?.permission === "full")
+        return { ok: false, error: 'permission "full" is not available for this agent/model.' };
+      return { ok: true, value: options?.permission ? { permission: options.permission } : {} };
+    },
+  });
+  const { thread } = await service.startThread({ agentId: "fake", text: "" });
+
+  await service.updateThread(thread.id, { mode: "work" });
+  assert.equal(thread.mode, "work");
+  assert.equal(thread.permission, "build");
+
+  await service.updateThread(thread.id, { permission: "plan" });
+  assert.equal(thread.mode, "chat");
+  assert.equal(thread.permission, "plan");
+
+  await assert.rejects(
+    service.updateThread(thread.id, { permission: "full" }),
+    /not available for this agent\/model/,
+  );
+  assert.equal(thread.permission, "plan");
+  assert.equal(thread.mode, "chat");
+});
+
+test("the service ignores a client-supplied workspacePath", async () => {
+  const dataDir = mkdtempSync(path.join(os.tmpdir(), "ade-luna-path-"));
+  const state = {
+    agents: [{ id: "fake", installed: true, signedIn: true }],
+    sessions: [],
+    projects: [],
+  };
+  const service = createWorkspaceAssistant({
+    state,
+    save: async () => {},
+    dataDir,
+    adapters: {},
+    resolveSessionOptions: async () => ({ ok: true, value: {} }),
+  });
+  const { thread } = await service.startThread({ agentId: "fake", text: "" });
+  await service.updateThread(thread.id, { workspacePath: "/etc" });
+  assert.equal(thread.workspacePath, path.join(dataDir, "luna", thread.id));
 });

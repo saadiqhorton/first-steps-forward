@@ -1,21 +1,26 @@
 # Routes
 
-TanStack Start uses **file-based routing**. Every `.tsx` file in this directory
-defines a route. Do **not** create `src/pages/`, `src/routes/_app/index.tsx`, or
-`app/layout.tsx` — those are Next.js / Remix conventions. The only root layout
-is `src/routes/__root.tsx`.
+ADE uses TanStack Router's file-based routes. Route files live in this directory;
+the router plugin generates `src/routeTree.gen.ts` from their `createFileRoute`
+paths. Do not edit the generated file by hand.
 
-## Conventions
+## Naming and nesting
 
-| File | URL |
-| --- | --- |
-| `index.tsx` | `/` |
-| `about.tsx` | `/about` |
-| `users/index.tsx` | `/users` |
-| `users/$id.tsx` | `/users/:id` (dynamic — bare `$`, no curly braces) |
-| `posts/{-$category}.tsx` | `/posts/:category?` (optional segment) |
-| `files/$.tsx` | `/files/*` (splat — read via `_splat` param, never `*`) |
-| `_layout.tsx` | layout route (renders children via `<Outlet />`) |
-| `__root.tsx` | app shell — wraps every page; preserve `<Outlet />` |
+This project uses dot-separated filenames for nested routes. A `$name` segment
+is dynamic, and `.index` adds the index route under its parent. Parent route
+files can render child routes through `<Outlet />`.
 
-`routeTree.gen.ts` is auto-generated. Don't edit it by hand.
+| File | Route path | Purpose |
+| --- | --- | --- |
+| `__root.tsx` | root | App shell and the root `<Outlet />` |
+| `index.tsx` | `/` | Main workspace entry |
+| `workspace.tsx` | `/workspace` | Workspace layout |
+| `workspace.index.tsx` | `/workspace/` | Workspace index |
+| `p.$projectId.tsx` | `/p/$projectId` | Project layout |
+| `p.$projectId.index.tsx` | `/p/$projectId/` | Project index |
+| `p.$projectId.conversations.$sessionId.tsx` | `/p/$projectId/conversations/$sessionId` | A project's selected session |
+
+The `createFileRoute` path in each file is the route's source of truth; follow
+the existing naming pattern when adding a route, then let the plugin regenerate
+the route tree. Preserve `<Outlet />` in `__root.tsx` and in any parent route
+that has children, or those child pages will not render.

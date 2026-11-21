@@ -19,7 +19,7 @@
 ## 4. Tokens used
 - Overlay: `bg-scrim` / `--scrim`, `z-50`
 - Content: `bg-background` / `--background`, border, `shadow-lg` → `--shadow-floating`
-- Close: opacity hover, `ring-ring` focus; open accent wash utilities
+- Close: opacity hover, `ring-ring` focus classes, and open accent wash utilities. `ring-ring` resolves through the transparent `--focus-ring` token, so it does not create a visible focus ring.
 
 ## 5. Props/API
 - Root/Trigger/Close: Radix Dialog primitive props (`open`, `onOpenChange`, `asChild`, …)

@@ -8,13 +8,15 @@ directory with a `SKILL.md` whose YAML frontmatter carries `name` and `descripti
 (required) plus optional `license`, `compatibility`, `metadata` and `allowed-tools`, and the
 folder may bundle `scripts/`, `references/`, `assets/` and anything else.
 
-Three scopes are in play:
+ADE-managed skills are writable in two locations. Skills discovered in other clients' folders are
+read-only until you copy them into ADE:
 
-| Scope | Path | Who owns it |
+| Kind | Path | Who owns it |
 | - | - | - |
-| ADE | `~/.ade/skills` | ADE's own, self-contained set in its data dir — yours to edit |
-| Project | `.agents/skills` | Found in the repository. Read-only, and hidden until you ask for it |
-| User | `~/.agents/skills` | Shared with the other agent clients on this machine |
+| ADE project | `.ade/skills` | ADE-managed skills for this project — editable in ADE and shareable with the repository |
+| ADE user | `~/.ade/skills` | ADE-managed skills shared across projects — editable in ADE |
+| Detected project | `.agents/skills`, `.claude/skills` | Skills found in the repository — read-only in ADE; copy to an ADE folder to edit |
+| Detected user | `~/.agents/skills`, `~/.claude/skills` | Skills found in the home folder — read-only in ADE; copy to an ADE folder to edit |
 
 ## What an option file registers
 
@@ -42,9 +44,12 @@ WS.register({
 - `ctx.mock`: shared sample content, so every option shows the same data.
   - `ctx.mock.chrome()`: the ADE top bar and the project section tabs (Conversations, Files, Workflows, **Skills**).
   - `ctx.mock.initialSkills()`: the sample library — ADE's own skills, the project's skills, and a user skill.
-- `ctx.mock.scopes`: the three scopes, with their path and a one-line hint.
+- `ctx.mock.scopes`: the mock's scope entries, with their path and a one-line hint. The mock has
+  three entries; the product groups skills into ADE-managed and detected scopes across four roots
+  as listed above.
 - `ctx.mock.visibleSkills(library, detectProject)` / `ctx.mock.hiddenProjectSkills(library, detectProject)`:
-  project skills stay out of the list until the user asks for them.
+  these describe this workshop mock's interaction. In ADE, detected skills appear in the list and
+  can be filtered with the Detected segment; they are not hidden until requested.
 - `ctx.mock.fileKind(path)` / `ctx.mock.bundledKinds(skill)`: what a skill bundles — instructions,
   references, scripts, assets, agent config, other.
   - `ctx.mock.packages`: the three packages the Import control can hand over —
@@ -82,5 +87,5 @@ node tools/check.mjs
 ```
 
 Serves the folder, loads every option, runs the import → create → edit → remove loop inside the
-mock, checks that project skills stay hidden until they are asked for, that reset clears the
+mock, checks the mock's project-skill visibility interaction, that reset clears the
 library, and that keyboard focus survives a re-render. Screenshots land in `shots/`.

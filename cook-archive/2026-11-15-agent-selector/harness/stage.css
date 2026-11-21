@@ -1,0 +1,6 @@
+html, body, #root { margin: 0; width: 100%; min-height: 100%; }
+.stage { min-height: 100vh; background: var(--paper); color: var(--ink); display: flex; justify-content: center; align-items: flex-start; }
+.picker-wrap { width: min(1050px, calc(100% - 24px)); }
+.stage-claude .picker-wrap { margin-top: var(--space-stage-claude); }
+.stage-codex .picker-wrap { margin-top: var(--space-stage-codex); }
+.stage-opencode .picker-wrap { margin-top: var(--space-stage-opencode); }

@@ -53,7 +53,15 @@ export async function workspaceAssistant(ctx) {
     if (req.method === "POST" && tail.length === 1 && tail[0] === "threads") {
       if (!can("start"))
         return json(res, 403, { error: "This device cannot start assistant work." });
-      const result = await assistant.startThread(await body(req));
+      const data = await body(req);
+      // A Work thread can write on this host, so it needs the owner's approval
+      // capability even when the device may start chats.
+      if (
+        (data.mode === "work" || (data.permission && data.permission !== "plan")) &&
+        !can("approve")
+      )
+        return json(res, 403, { error: "Only the host owner can start Luna in Work mode." });
+      const result = await assistant.startThread(data);
       return json(res, 201, result);
     }
     if (
@@ -94,8 +102,17 @@ export async function workspaceAssistant(ctx) {
       const data = await body(req);
       const thread = assistant.getThread(threadId)?.thread;
       if (!thread) return json(res, 404, { error: "Assistant chat not found." });
-      if (data.agentId !== undefined || data.model !== undefined || data.effort !== undefined)
+      if (
+        data.agentId !== undefined ||
+        data.model !== undefined ||
+        data.effort !== undefined ||
+        data.mode !== undefined ||
+        data.permission !== undefined
+      ) {
+        if ((data.mode !== undefined || data.permission !== undefined) && !can("approve"))
+          return json(res, 403, { error: "Only the host owner can change how Luna works." });
         return json(res, 200, await assistant.updateThread(threadId, data));
+      }
       let updated = thread;
       // A rename is durable state: going through the service saves it and emits
       // the workspace event, instead of mutating the in-memory thread only.

@@ -14,6 +14,7 @@ import { AgentLogo } from "@/components/ade/AgentLogo";
 import { AgentPresets } from "@/components/ade/AgentPresets";
 import { agentModels, optionCapabilities, useAdeState } from "@/lib/ade/store";
 import { readLastModel, resolveModelForAgent, writeLastModel } from "@/lib/ade/lastModels";
+import { permissionShort } from "@/lib/ade/permissions";
 import { request } from "@/lib/ade/api";
 import type {
   Agent,
@@ -91,7 +92,9 @@ export function agentChipLabel(
   const title = agent?.name ?? sel.agentId;
   const modelPart = sel.model.trim() || "Default model";
   const effortPart = sel.effort.trim() || "Default";
-  return { title, subtitle: `${modelPart} · ${effortPart}` };
+  const permissionPart =
+    sel.permission && sel.permission !== "plan" ? ` · ${permissionShort(sel.permission)}` : "";
+  return { title, subtitle: `${modelPart} · ${effortPart}${permissionPart}` };
 }
 
 function RowButton({
