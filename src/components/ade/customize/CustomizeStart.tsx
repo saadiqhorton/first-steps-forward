@@ -107,7 +107,11 @@ export function CustomizeStart({ state }: { state: CustomizeState }) {
       )}
       {agent?.installed && !agent.signedIn && (
         <div className="mt-3 flex items-center gap-3 rounded-md border border-line bg-surface-muted px-4 py-3 text-ui leading-5">
-          <span>{agent.name} is installed but not signed in.</span>
+          <span>
+            {agent.id === "opencode"
+              ? "OpenCode has no provider sign-in detected. Some models may work without one."
+              : `${agent.name} is installed but not signed in.`}
+          </span>
           <button
             type="button"
             onClick={() => setSigning(agent)}

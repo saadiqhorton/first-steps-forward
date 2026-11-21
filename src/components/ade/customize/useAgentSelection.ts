@@ -2,13 +2,18 @@ import { useEffect, useState } from "react";
 import type { AgentSelection } from "@/components/ade/AgentPicker";
 import { readLastModel, writeLastModel } from "@/lib/ade/lastModels";
 import { useAdeState } from "@/lib/ade/store";
+import { canAttemptAgent } from "@/shared/agent-availability.mjs";
 
 /** The agent that builds a change: first ready agent by default, like a new project task. */
 export function useAgentSelection(initialAgentId?: string) {
   const agents = useAdeState((state) => state.agents);
   const [selection, setSelection] = useState<AgentSelection>(() => {
     const agentId =
-      initialAgentId ?? agents.find((a) => a.installed && a.signedIn)?.id ?? agents[0]?.id ?? "";
+      initialAgentId ??
+      agents.find((a) => a.installed && a.signedIn)?.id ??
+      agents.find(canAttemptAgent)?.id ??
+      agents[0]?.id ??
+      "";
     return {
       agentId,
       model: readLastModel(agentId) ?? "",
@@ -25,7 +30,10 @@ export function useAgentSelection(initialAgentId?: string) {
   // Agents can still be loading at mount; fall back once they arrive, never over a user pick.
   useEffect(() => {
     if (agents.some((a) => a.id === selection.agentId)) return;
-    const fallback = agents.find((a) => a.installed && a.signedIn)?.id ?? agents[0]?.id;
+    const fallback =
+      agents.find((a) => a.installed && a.signedIn)?.id ??
+      agents.find(canAttemptAgent)?.id ??
+      agents[0]?.id;
     if (!fallback) return;
     setSelection((prev) => ({
       ...prev,
@@ -41,7 +49,7 @@ export function useAgentSelection(initialAgentId?: string) {
     ? "No agent is available yet."
     : !agent.installed
       ? `${agent.name} is not installed. ${agent.installHint}`
-      : !agent.signedIn
+      : !canAttemptAgent(agent)
         ? `${agent.name} must be signed in first. Open Agents settings to set it up.`
         : null;
 

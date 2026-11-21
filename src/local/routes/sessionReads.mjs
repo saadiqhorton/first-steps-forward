@@ -4,6 +4,7 @@ import { MODEL_ID } from "../models.mjs";
 import { resolveAttachments } from "../attachments.mjs";
 import { body } from "../http.mjs";
 import { readMessagePresentation } from "../message-presentation.mjs";
+import { canAttemptAgent } from "../../shared/agent-availability.mjs";
 
 /** Shared, fully validated project launch used by the API and workspace shortcuts. */
 export async function startProjectSession(ctx, data = {}) {
@@ -16,7 +17,7 @@ export async function startProjectSession(ctx, data = {}) {
   const agent = state.agents.find((a) => a.id === agentId);
   if (!project || !agent)
     throw Object.assign(new Error("Select a valid project and agent."), { status: 400 });
-  if (!agent.installed || !agent.signedIn)
+  if (!canAttemptAgent(agent))
     throw Object.assign(new Error(`${agent.name} must be installed and authenticated first.`), {
       status: 400,
     });
@@ -127,7 +128,7 @@ export async function sessionReads(ctx) {
       permission: data.permission,
     });
     if (!optionCheck.ok) return json(res, 400, { error: optionCheck.error });
-    if (!agent.installed || !agent.signedIn)
+    if (!canAttemptAgent(agent))
       return json(res, 400, {
         error: `${agent.name} must be installed and authenticated using its supported sign-in flow first.`,
       });

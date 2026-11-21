@@ -17,6 +17,7 @@ import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
 import { getDiff, projectFiles, projectInfo } from "./project-git.mjs";
 import { checksFor, otherServicesNote } from "./project-scripts.mjs";
 import { processRunsIn, runCommand, spawnCommand, stopProcess } from "./spawn.mjs";
+import { canAttemptAgent } from "../shared/agent-availability.mjs";
 
 /** @typedef {import("./adapters/kit.mjs").SessionEvent} SessionEvent */
 /** @typedef {import("./adapters/kit.mjs").TurnEnd} TurnEnd */
@@ -392,7 +393,7 @@ export function createSessionTurns({
     }
     const agent = state.agents.find((a) => a.id === session.agentId);
     const adapter = adapters[session.agentId];
-    if (!agent?.installed || !agent.signedIn || !adapter) {
+    if (!agent || !canAttemptAgent(agent) || !adapter) {
       setStatus(session, "blocked");
       addMessage(
         session,
@@ -763,7 +764,7 @@ export function createSessionTurns({
      */
     async switchAgent(session, agentId, selection = {}) {
       const target = state.agents.find((a) => a.id === agentId);
-      if (!target?.installed || !target.signedIn)
+      if (!target || !canAttemptAgent(target))
         throw new TurnRefused(
           400,
           `${target?.name ?? agentId} must be installed and authenticated before switching.`,

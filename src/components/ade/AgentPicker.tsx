@@ -77,7 +77,7 @@ function agentStatus(agent: Agent): {
     };
   }
   if (!agent.signedIn) {
-    return { kind: "signin", label: "Sign in" };
+    return { kind: "signin", label: agent.id === "opencode" ? "Sign in (optional)" : "Sign in" };
   }
   return { kind: "ready", label: "Ready" };
 }

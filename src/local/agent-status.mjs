@@ -6,6 +6,7 @@ import { adapters } from "./adapters/index.mjs";
 import { describeAgent } from "./adapters/kit.mjs";
 import { clearModelsCache } from "./models.mjs";
 import { validateOptions } from "./capabilities.mjs";
+import { canAttemptAgent } from "../shared/agent-availability.mjs";
 import {
   compareVersions,
   detectInstallMethod,
@@ -251,8 +252,8 @@ export function createAgentStatus({ state, dataDir, emit }) {
       });
   }
   /**
-   * An agent's model listing at its detected version. An installed, signed-in
-   * agent may be asked for its list when ADE has none for that version yet.
+   * An agent's model listing at its detected version. OpenCode may list models
+   * without sign-in; its CLI remains responsible for actual availability.
    */
   function listAgentModels(agentId) {
     const agent = state.agents.find((a) => a.id === agentId);
@@ -260,7 +261,7 @@ export function createAgentStatus({ state, dataDir, emit }) {
       run,
       version: agent?.version ?? "",
       cacheDir: dataDir,
-      canProbe: !!(agent?.installed && agent.signedIn),
+      canProbe: canAttemptAgent(agent),
     });
   }
   /** Resolve and validate effort/speed/permission against the model's capability row. */

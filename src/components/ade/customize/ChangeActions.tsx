@@ -196,10 +196,20 @@ export function ChangeActions({
                     : "You can try it when the agent and the checks finish"
             }
             onClick={tryIt}
+            aria-label={previewOn ? "Expand preview" : undefined}
             className={`btn-quiet ${BUTTON}`}
           >
             <Eye className="size-3.5" strokeWidth={1.5} aria-hidden />
-            {previewStarting ? "Starting…" : previewOn ? "Expand preview" : "Try it"}
+            {previewStarting ? (
+              "Starting…"
+            ) : previewOn ? (
+              <>
+                <span className="@lg:hidden">Expand</span>
+                <span className="hidden @lg:inline">Expand preview</span>
+              </>
+            ) : (
+              "Try it"
+            )}
           </button>
         )}
         {failed ? (

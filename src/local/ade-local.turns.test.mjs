@@ -98,7 +98,9 @@ const agentRow = (id, name, extra = {}) => ({
 });
 const agents = [
   agentRow("codex", "OpenAI Codex"),
-  agentRow("opencode", "OpenCode"),
+  // OpenCode can expose free models without provider login. Its CLI, not ADE's
+  // cached authentication probe, decides whether a particular model can run.
+  agentRow("opencode", "OpenCode", { signedIn: false }),
   agentRow("pi", "Pi Agent", { providers: ["anthropic"] }),
 ];
 writeFileSync(
@@ -541,8 +543,9 @@ test("a failure inside a megabyte Pi line is still classified", { skip }, async 
   assert.ok(logResponse.json.lines.every((line) => line.text.length < 8192));
 });
 
-test("OpenCode: a model error on stderr after exit 0 blocks the turn", { skip }, async () => {
+test("unsigned OpenCode starts and reports its model error honestly", { skip }, async () => {
   const id = await start("p-oc", "silent-error", { agentId: "opencode" });
+  assert.ok(id, "session creation did not require a fabricated signed-in status");
   const done = await waitFor(() => settled(id), "the failed turn");
   assert.equal(done.status, "blocked");
   assert.equal(done.failureKind, "model_not_found");
@@ -558,6 +561,24 @@ test("OpenCode: a model error on stderr after exit 0 blocks the turn", { skip },
     ),
   );
   assert.ok(turns("p-oc")[1].args.includes("--session"));
+});
+
+test("other unsigned agents remain blocked before their CLI starts", { skip }, async () => {
+  _setAgentsForTest(
+    agents.map((agent) => (agent.id === "codex" ? { ...agent, signedIn: false } : agent)),
+  );
+  try {
+    const refused = await call("/api/sessions", {
+      projectId: "p-silent",
+      agentId: "codex",
+      request: "tidy the readme wording",
+    });
+    assert.equal(refused.status, 400);
+    assert.match(refused.json.error, /authenticated/);
+    assert.equal(turns("p-silent").length, 0);
+  } finally {
+    _setAgentsForTest(agents);
+  }
 });
 
 test("a turn that exits 0 with no reply says so and stays ready", { skip }, async () => {
