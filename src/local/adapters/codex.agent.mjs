@@ -1,4 +1,5 @@
 import { codexComputerArgs } from "./computer-tools.mjs";
+import { codexConnectorWiring } from "./connector-wiring.mjs";
 import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
@@ -114,6 +115,7 @@ export const codex = defineCliAgent({
     attachments,
     computer,
     workspaceAssistant,
+    connectors,
   }) {
     // `-m` is valid for both `codex exec` and `codex exec resume`; omit it when
     // no model was chosen so the CLI keeps its own configured default.
@@ -124,6 +126,10 @@ export const codex = defineCliAgent({
     ];
     // The agent computer's MCP server, configured per turn (resume too).
     const { args: computerArgs = [] } = wireComputer(computer, workspaceAssistant);
+    // The user's connectors: secrets only in the spawn env, never in argv.
+    const { args: connectorArgs, env: connectorEnv } = codexConnectorWiring(connectors);
+    const mcpArgs = [...computerArgs, ...connectorArgs];
+    const spawnEnv = Object.keys(connectorEnv).length ? [connectorEnv] : [];
     const plan = permission === "plan";
     const fullAccess = permission === "full";
     const approveForMe = permission === "approve";
@@ -167,12 +173,13 @@ export const codex = defineCliAgent({
             ...trustArgs,
             ...modelArgs,
             ...optionArgs,
-            ...computerArgs,
+            ...mcpArgs,
             ...resumePermissionArgs,
             session.agentSessionId,
             ...imageArgs,
             ...promptArgs,
           ],
+          ...spawnEnv,
         ]
       : [
           "codex",
@@ -182,13 +189,14 @@ export const codex = defineCliAgent({
             ...trustArgs,
             ...modelArgs,
             ...optionArgs,
-            ...computerArgs,
+            ...mcpArgs,
             "--cd",
             projectPath,
             ...permissionArgs,
             ...imageArgs,
             ...promptArgs,
           ],
+          ...spawnEnv,
         ];
   },
   parse(line) {

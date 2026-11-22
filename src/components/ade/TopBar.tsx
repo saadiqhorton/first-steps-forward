@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Inbox, MessageCircle, Plus, Settings, Wrench } from "lucide-react";
+import { Inbox, MessageCircle, Plug, Plus, Settings, Wrench } from "lucide-react";
 import { getAssistantThreads } from "@/lib/ade/workspaceApi";
 import { customizeDot, useCustomize } from "@/lib/ade/customizeApi";
 import { GlideIndicator } from "@/components/ade/motion";
@@ -120,6 +120,13 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
               }
             />
           )}
+        </Link>
+        <Link
+          to="/workspace/connectors"
+          className={workspaceLinkClass(pathname, "/workspace/connectors")}
+          suppressHydrationWarning
+        >
+          <Plug className="size-4" strokeWidth={1.5} aria-hidden /> Connectors
         </Link>
       </nav>
 

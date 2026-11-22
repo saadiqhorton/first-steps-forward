@@ -50,6 +50,7 @@ export function createWorkspaceAssistant({
   getAppAddress = () => null,
   onDeleteThread = () => {},
   spawn = spawnCommand,
+  connectors: listConnectors = () => [],
 }) {
   state.assistantThreads ??= [];
   state.assistantMessages ??= [];
@@ -248,6 +249,16 @@ export function createWorkspaceAssistant({
               node: process.execPath,
             }
           : undefined;
+      /** @type {object[]} */
+      let connectors = [];
+      try {
+        connectors = (await listConnectors()) ?? [];
+      } catch (error) {
+        activity(
+          "notice",
+          `Connectors could not be read, so this turn runs without them: ${error?.message ?? error}`,
+        );
+      }
       const result = await adapter.runTurn(
         {
           projectPath: cwd,
@@ -264,6 +275,7 @@ export function createWorkspaceAssistant({
           attachments: nativeAttachments(files),
           computer: null,
           workspaceAssistant,
+          connectors,
         },
         io,
       );

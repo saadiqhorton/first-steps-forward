@@ -561,6 +561,7 @@ async function handle(message) {
         agentCapabilities: {
           loadSession: env.FAKE_ACP_LOAD === "1",
           promptCapabilities: { image: true },
+          ...(env.FAKE_ACP_MCP_HTTP === "1" ? { mcpCapabilities: { http: true } } : {}),
           sessionCapabilities: env.FAKE_ACP_RESUME === "1" ? { resume: {} } : {},
         },
         authMethods: env.FAKE_ACP_HEADLESS_AUTH === "1" ? [{ id: "cached_token" }] : [],

@@ -17,6 +17,7 @@ import {
   TOOL_KINDS,
   toolResultFields,
 } from "./acp-activity.mjs";
+import { splitAcpServers } from "./adapters/connector-wiring.mjs";
 
 export const ACP_PROTOCOL_VERSION = 1;
 const AUTH_REQUIRED = -32000;
@@ -654,9 +655,14 @@ export async function runAcpTurn(options) {
   watchExit(child, rpc, name, "before finishing the turn. See Logs for its output.");
   const call = authAware(rpc);
   const caps = await initialize(call, name, options.clientVersion, options.acpAuth);
+  const { kept, skipped } = splitAcpServers(options.mcpServers ?? [], caps);
+  if (skipped.length)
+    on.notice(
+      `${name} can't reach remote connectors (${skipped.join(", ")}); they were skipped this turn.`,
+    );
   const setup = {
     cwd: options.cwd,
-    mcpServers: options.mcpServers ?? [],
+    mcpServers: kept,
     ...(options.sessionMeta ? { _meta: options.sessionMeta } : {}),
   };
 

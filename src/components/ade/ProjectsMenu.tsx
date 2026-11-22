@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Inbox, MessageCircle, Wrench } from "lucide-react";
+import { ChevronDown, Inbox, MessageCircle, Plug, Wrench } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -84,6 +84,12 @@ export function ProjectsMenu({
               <Link to="/workspace/customize" className="cursor-pointer gap-2 text-ui">
                 <Wrench className="size-4 text-dim" strokeWidth={1.5} aria-hidden />
                 Customize ADE
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link to="/workspace/connectors" className="cursor-pointer gap-2 text-ui">
+                <Plug className="size-4 text-dim" strokeWidth={1.5} aria-hidden />
+                Connectors
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />

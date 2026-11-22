@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { TOOLS } from "../computer-tool-schemas.mjs";
 import { TOOLS as WORKSPACE_TOOLS } from "../workspace-tools.mjs";
+import { opencodeConnectorServers, piConnectorWiring } from "./connector-wiring.mjs";
 
 export const COMPUTER_TOOL_NAMES = TOOLS.map((tool) => tool.name);
 export const WORKSPACE_TOOL_NAMES = WORKSPACE_TOOLS.map((tool) => tool.name);
@@ -81,8 +82,9 @@ export function opencodeComputerEnv(
   computer,
   existing = process.env.OPENCODE_CONFIG_CONTENT,
   workspaceAssistant,
+  connectors = [],
 ) {
-  if (!computer && !workspaceAssistant) return {};
+  if (!computer && !workspaceAssistant && !connectors.length) return {};
   let base = {};
   try {
     const parsed = existing ? JSON.parse(existing) : {};
@@ -92,6 +94,7 @@ export function opencodeComputerEnv(
     ...base,
     mcp: {
       ...(base.mcp ?? {}),
+      ...opencodeConnectorServers(connectors),
       ...(computer
         ? {
             ade_computer: {
@@ -125,8 +128,11 @@ export function opencodeComputerEnv(
 }
 
 /** Pi: extension path, allowlisted tool names, and env for the extension process. */
-export function piComputerWiring(computer, workspaceAssistant) {
-  if (!computer && !workspaceAssistant) return { args: [], env: {}, toolNames: [] };
+export function piComputerWiring(computer, workspaceAssistant, connectors = []) {
+  if (!computer && !workspaceAssistant && !connectors.length)
+    return { args: [], env: {}, toolNames: [] };
+  // Connector secrets travel only as env vars the extension's config references.
+  const connectorEnv = piConnectorWiring(connectors).env;
   const workspaceEnv = workspaceAssistant
     ? {
         ADE_WORKSPACE_TOOL_URL: workspaceAssistant.url,
@@ -136,7 +142,7 @@ export function piComputerWiring(computer, workspaceAssistant) {
     : {};
   return {
     args: ["-e", computerPiExtension()],
-    env: { ...(computer?.env ?? {}), ...workspaceEnv },
+    env: { ...(computer?.env ?? {}), ...workspaceEnv, ...connectorEnv },
     toolNames: [
       ...(computer ? COMPUTER_TOOL_NAMES : []),
       ...(workspaceAssistant ? WORKSPACE_TOOL_NAMES : []),

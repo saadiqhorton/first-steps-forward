@@ -6,8 +6,8 @@ import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
 /** @param {import("./kit.mjs").ComputerContext | null} computer */
-function wireComputer(computer, workspaceAssistant = null) {
-  return piComputerWiring(computer, workspaceAssistant);
+function wireComputer(computer, workspaceAssistant = null, connectors = []) {
+  return piComputerWiring(computer, workspaceAssistant, connectors);
 }
 
 /** Thinking levels Pi accepts via `--thinking` (clamped per model by Pi itself). */
@@ -162,12 +162,15 @@ export const pi = defineCliAgent({
     attachments,
     computer,
     workspaceAssistant,
+    connectors,
   }) {
     const sessionFile = `${dataDir}/sessions/${session.agentSessionKey ?? session.id}.jsonl`;
     const fileTools = permission === "plan" ? "read,grep,find,ls" : "read,edit,write,grep,find,ls";
-    // Pi has no MCP client: ADE's agent computer arrives as a Pi extension
-    // (-e) with its tool names added to the allowlist.
-    const wired = wireComputer(computer, workspaceAssistant);
+    // ADE's agent computer arrives as a Pi extension (-e) with its tool names
+    // added to the allowlist. The same extension registers the user's
+    // connectors with Pi's built-in MCP client (pi.registerMcpServer); Pi's
+    // --tools allowlist leaves MCP tools alone unless an entry starts mcp__.
+    const wired = wireComputer(computer, workspaceAssistant, connectors);
     const tools = [fileTools, ...wired.toolNames].join(",");
     return [
       "pi",

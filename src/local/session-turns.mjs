@@ -138,6 +138,7 @@ const SAFETY_PREAMBLE =
  * @param {(session: Session) => void} [deps.turnEnded]
  * @param {(session: Session) => void} [deps.turnStarted] a run took the session's slot
  * @param {(session: Session) => import("./adapters/kit.mjs").TurnInput["workspaceAssistant"]} [deps.workspaceTools]
+ * @param {(session: Session, project: Project) => import("./connectors.mjs").Connector[] | Promise<import("./connectors.mjs").Connector[]>} [deps.connectors] the user's connectors that apply to this project's turn
  */
 export function createSessionTurns({
   state,
@@ -151,6 +152,7 @@ export function createSessionTurns({
   turnEnded = () => {},
   turnStarted = () => {},
   workspaceTools = () => undefined,
+  connectors: listConnectors = () => [],
 }) {
   /** @type {Map<string, { controller: AbortController, child?: import("node:child_process").ChildProcess }>} */
   const slots = new Map();
@@ -475,6 +477,16 @@ export function createSessionTurns({
         session,
         `Context manifest: ${session.manifest.relevantFiles.length} candidate files, tools: ${session.manifest.tools}`,
       );
+      /** @type {import("./connectors.mjs").Connector[]} */
+      let connectors = [];
+      try {
+        connectors = (await listConnectors(session, project)) ?? [];
+      } catch (error) {
+        addLog(
+          session,
+          `Connectors could not be read, so this turn runs without them: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       end = await adapter.runTurn(
         {
           projectPath: project.path,
@@ -496,6 +508,7 @@ export function createSessionTurns({
           attachments: /** @type {any} */ (attachments),
           computer: context.computer,
           workspaceAssistant: /** @type {any} */ (workspaceTools(session)),
+          connectors,
         },
         io,
       );

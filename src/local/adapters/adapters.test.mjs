@@ -805,6 +805,52 @@ test("every agent gets the computer: Codex MCP overrides, OpenCode inline config
   assert.ok(!planTools.includes("edit") && planTools.includes("computer_click"));
 });
 
+test("connectors alone reach Codex, OpenCode and Pi without leaking a secret into argv", () => {
+  const connector = {
+    id: "c1",
+    name: "exa",
+    transport: "http",
+    url: "https://mcp.exa.ai/mcp",
+    headers: { "x-api-key": "sk-argv-secret" },
+    enabled: true,
+    luna: true,
+    projects: "all",
+  };
+  const base = {
+    projectPath: "/tmp/project",
+    prompt: "x",
+    session,
+    continuing: false,
+    dataDir: "/data",
+    connectors: [connector],
+  };
+  const [, codexArgs, codexEnv] = codex.command(base);
+  assert.ok(codexArgs.includes('mcp_servers.exa.url="https://mcp.exa.ai/mcp"'));
+  assert.ok(!codexArgs.join("\n").includes("sk-argv-secret"));
+  assert.equal(codexEnv.ADE_MCP_EXA_0, "sk-argv-secret");
+
+  const [, openCodeArgs, openCodeEnv] = opencode.command(base);
+  assert.ok(!openCodeArgs.join("\n").includes("sk-argv-secret"));
+  const config = JSON.parse(openCodeEnv.OPENCODE_CONFIG_CONTENT);
+  assert.deepEqual(config.mcp.exa, {
+    type: "remote",
+    url: "https://mcp.exa.ai/mcp",
+    headers: { "x-api-key": "sk-argv-secret" },
+    enabled: true,
+  });
+
+  const [, piArgs, piEnv] = pi.command(base);
+  assert.equal(piArgs[piArgs.indexOf("-e") + 1], piExtension);
+  assert.ok(!piArgs.join("\n").includes("sk-argv-secret"));
+  assert.equal(piArgs[piArgs.indexOf("--tools") + 1], "read,edit,write,grep,find,ls");
+  assert.ok(!piArgs.includes("--no-mcp"));
+  assert.equal(piEnv.ADE_MCP_EXA_0, "sk-argv-secret");
+  assert.deepEqual(JSON.parse(piEnv.ADE_CONNECTORS), [
+    { name: "exa", url: "https://mcp.exa.ai/mcp", headers: { "x-api-key": "${ADE_MCP_EXA_0}" } },
+  ]);
+  assert.ok(!piEnv.ADE_CONNECTORS.includes("sk-argv-secret"));
+});
+
 test("without a computer context nothing extra is passed", () => {
   const base = { projectPath: "/tmp/project", prompt: "x", session, continuing: false };
   assert.ok(!codex.command(base)[1].some((a) => a.includes("ade_computer")));

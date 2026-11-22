@@ -47,6 +47,8 @@ import { processes } from "./routes/processes.mjs";
 import { agents } from "./routes/agents.mjs";
 import { workflows } from "./routes/workflows.mjs";
 import { skills } from "./routes/skills.mjs";
+import { connectors as connectorsRoute } from "./routes/connectors.mjs";
+import { connectorStore } from "./connectors.mjs";
 import { createWorkspaceAssistant } from "./workspace-assistant.mjs";
 import { workspaceAssistant as workspaceAssistantRoute } from "./routes/workspaceAssistant.mjs";
 import { createWorkspaceHandoffs } from "./workspace-handoffs.mjs";
@@ -145,6 +147,7 @@ const turns = createSessionTurns({
   },
   turnStarted: (session) => customize.onTurnStart(session),
   workspaceTools: (session) => sessionWorkspaceTools(session),
+  connectors: (_session, project) => connectorStore(DATA_DIR).forProject(project.id),
   turnContext: async (project, session) => {
     // The manifest says which dev command applies now, not as of the last bootstrap poll.
     const { changed } = isHiddenProject(project)
@@ -168,6 +171,7 @@ const workspaceAssistant = createWorkspaceAssistant({
   agentStatus,
   resolveSessionOptions,
   dataDir: DATA_DIR,
+  connectors: () => connectorStore(DATA_DIR).forLuna(),
   getAppAddress: () => listenBaseUrl,
   onDeleteThread: async (threadId) => {
     if (handoffs) await handoffs.cancelForSource(threadId);
@@ -864,6 +868,7 @@ const routes = [
   agents,
   workflows,
   skills,
+  connectorsRoute,
   customizeRoute,
 ];
 // This browser's proof of the token: HttpOnly, sent on same-site navigations, kept for a year.
@@ -938,7 +943,9 @@ export async function handle(req, res) {
     parts[2] === "computer" &&
     ["import", "import-sources"].includes(parts[3]);
   if (
-    (["terminal", "editor", "skills"].includes(parts[0]) || harnessRoute || browserImportRoute) &&
+    (["terminal", "editor", "skills", "connectors"].includes(parts[0]) ||
+      harnessRoute ||
+      browserImportRoute) &&
     !isLoopbackPeer(req)
   )
     return json(res, 403, { error: "Host tools are available only on this machine." });

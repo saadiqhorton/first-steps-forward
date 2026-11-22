@@ -79,6 +79,27 @@ async function turn(env = {}, options = {}, on = {}) {
 }
 const methods = (received) => received.filter((m) => m.method).map((m) => m.method);
 
+test("ACP drops remote connectors with a notice when the agent has no http MCP support", async () => {
+  const remote = { type: "http", name: "exa", url: "https://mcp.exa.ai/mcp", headers: [] };
+  const local = { name: "ade_computer", command: "node", args: [], env: [] };
+  const sent = async (env) => {
+    const { received, out } = await turn(env, { mcpServers: [local, remote] });
+    const session = received.find((m) => m.method === "session/new");
+    return {
+      servers: session.params.mcpServers.map((server) => server.name),
+      notices: out.notices,
+    };
+  };
+  const without = await sent({});
+  assert.deepEqual(without.servers, ["ade_computer"]);
+  assert.deepEqual(without.notices, [
+    "Fake Agent can't reach remote connectors (exa); they were skipped this turn.",
+  ]);
+  const withHttp = await sent({ FAKE_ACP_MCP_HTTP: "1" });
+  assert.deepEqual(withHttp.servers, ["ade_computer", "exa"]);
+  assert.deepEqual(withHttp.notices, []);
+});
+
 test("ACP discovery reports each model's own effort levels", async () => {
   const child = spawn(process.execPath, [FAKE], {
     stdio: ["pipe", "pipe", "pipe"],

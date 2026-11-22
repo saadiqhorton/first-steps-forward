@@ -20,6 +20,7 @@ import { Route as SessionsSessionIdRouteImport } from './routes/sessions.$sessio
 import { Route as TasksNewRouteImport } from './routes/tasks.new'
 import { Route as WorkspaceIndexRouteImport } from './routes/workspace.index'
 import { Route as WorkspaceAssistantRouteImport } from './routes/workspace.assistant'
+import { Route as WorkspaceConnectorsRouteImport } from './routes/workspace.connectors'
 import { Route as WorkspaceCustomizeRouteImport } from './routes/workspace.customize'
 import { Route as WorkspaceInboxRouteImport } from './routes/workspace.inbox'
 import { Route as WorkspaceProjectsRouteImport } from './routes/workspace.projects'
@@ -90,6 +91,11 @@ const WorkspaceIndexRoute = WorkspaceIndexRouteImport.update({
 const WorkspaceAssistantRoute = WorkspaceAssistantRouteImport.update({
   id: '/assistant',
   path: '/assistant',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceConnectorsRoute = WorkspaceConnectorsRouteImport.update({
+  id: '/connectors',
+  path: '/connectors',
   getParentRoute: () => WorkspaceRoute,
 } as any)
 const WorkspaceCustomizeRoute = WorkspaceCustomizeRouteImport.update({
@@ -188,6 +194,7 @@ export interface FileRoutesByFullPath {
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/tasks/new': typeof TasksNewRoute
   '/workspace/assistant': typeof WorkspaceAssistantRouteWithChildren
+  '/workspace/connectors': typeof WorkspaceConnectorsRoute
   '/workspace/customize': typeof WorkspaceCustomizeRouteWithChildren
   '/workspace/inbox': typeof WorkspaceInboxRoute
   '/workspace/projects': typeof WorkspaceProjectsRoute
@@ -214,6 +221,7 @@ export interface FileRoutesByTo {
   '/projects/add': typeof ProjectsAddRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/tasks/new': typeof TasksNewRoute
+  '/workspace/connectors': typeof WorkspaceConnectorsRoute
   '/workspace/inbox': typeof WorkspaceInboxRoute
   '/workspace/projects': typeof WorkspaceProjectsRoute
   '/workspace/settings': typeof WorkspaceSettingsRoute
@@ -242,6 +250,7 @@ export interface FileRoutesById {
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/tasks/new': typeof TasksNewRoute
   '/workspace/assistant': typeof WorkspaceAssistantRouteWithChildren
+  '/workspace/connectors': typeof WorkspaceConnectorsRoute
   '/workspace/customize': typeof WorkspaceCustomizeRouteWithChildren
   '/workspace/inbox': typeof WorkspaceInboxRoute
   '/workspace/projects': typeof WorkspaceProjectsRoute
@@ -273,6 +282,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/tasks/new'
     | '/workspace/assistant'
+    | '/workspace/connectors'
     | '/workspace/customize'
     | '/workspace/inbox'
     | '/workspace/projects'
@@ -299,6 +309,7 @@ export interface FileRouteTypes {
     | '/projects/add'
     | '/sessions/$sessionId'
     | '/tasks/new'
+    | '/workspace/connectors'
     | '/workspace/inbox'
     | '/workspace/projects'
     | '/workspace/settings'
@@ -326,6 +337,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/tasks/new'
     | '/workspace/assistant'
+    | '/workspace/connectors'
     | '/workspace/customize'
     | '/workspace/inbox'
     | '/workspace/projects'
@@ -434,6 +446,13 @@ declare module '@tanstack/react-router' {
       path: '/assistant'
       fullPath: '/workspace/assistant'
       preLoaderRoute: typeof WorkspaceAssistantRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/workspace/connectors': {
+      id: '/workspace/connectors'
+      path: '/connectors'
+      fullPath: '/workspace/connectors'
+      preLoaderRoute: typeof WorkspaceConnectorsRouteImport
       parentRoute: typeof WorkspaceRoute
     }
     '/workspace/customize': {
@@ -579,6 +598,7 @@ const WorkspaceCustomizeRouteWithChildren =
 
 interface WorkspaceRouteChildren {
   WorkspaceAssistantRoute: typeof WorkspaceAssistantRouteWithChildren
+  WorkspaceConnectorsRoute: typeof WorkspaceConnectorsRoute
   WorkspaceCustomizeRoute: typeof WorkspaceCustomizeRouteWithChildren
   WorkspaceInboxRoute: typeof WorkspaceInboxRoute
   WorkspaceProjectsRoute: typeof WorkspaceProjectsRoute
@@ -588,6 +608,7 @@ interface WorkspaceRouteChildren {
 
 const WorkspaceRouteChildren: WorkspaceRouteChildren = {
   WorkspaceAssistantRoute: WorkspaceAssistantRouteWithChildren,
+  WorkspaceConnectorsRoute: WorkspaceConnectorsRoute,
   WorkspaceCustomizeRoute: WorkspaceCustomizeRouteWithChildren,
   WorkspaceInboxRoute: WorkspaceInboxRoute,
   WorkspaceProjectsRoute: WorkspaceProjectsRoute,

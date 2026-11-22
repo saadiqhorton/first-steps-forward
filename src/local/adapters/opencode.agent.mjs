@@ -3,8 +3,8 @@ import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
 /** @param {import("./kit.mjs").ComputerContext | null} computer */
-function wireComputer(computer, workspaceAssistant = null) {
-  return { env: opencodeComputerEnv(computer, undefined, workspaceAssistant) };
+function wireComputer(computer, workspaceAssistant = null, connectors = []) {
+  return { env: opencodeComputerEnv(computer, undefined, workspaceAssistant, connectors) };
 }
 
 /**
@@ -246,10 +246,11 @@ export const opencode = defineCliAgent({
     attachments,
     computer,
     workspaceAssistant,
+    connectors,
   }) {
     // Third element: extra environment (the agent computer's MCP server).
     const fileArgs = (attachments ?? []).flatMap((a) => ["--file", a.path]);
-    const { env: computerEnv = {} } = wireComputer(computer, workspaceAssistant);
+    const { env: computerEnv = {} } = wireComputer(computer, workspaceAssistant, connectors);
     return [
       "opencode",
       [

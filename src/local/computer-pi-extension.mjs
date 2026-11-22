@@ -1,6 +1,8 @@
-// Pi extension exposing ADE's agent computer. Pi has no MCP client, so ADE
-// loads this with `pi -e` and adds the tool names to Pi's --tools allowlist.
-// It reuses the MCP server's tool definitions and caller, so Codex, OpenCode,
+// Pi extension exposing ADE's agent computer and the user's connectors. ADE
+// loads it with `pi -e` and adds the computer tool names to Pi's --tools
+// allowlist. Connectors are MCP servers registered with Pi's built-in MCP
+// client (pi.registerMcpServer); secrets arrive only as env vars that the
+// registered config references as ${NAME}. The computer tools reuse the MCP server's tool definitions and caller, so Codex, OpenCode,
 // and Pi drive the computer through exactly the same ADE endpoints. Pi tool
 // results use the same {type: "text"|"image"} content blocks as MCP.
 import { createToolCaller, TOOLS } from "./computer-tools-defs.mjs";
@@ -16,7 +18,34 @@ async function typebox() {
   return null;
 }
 
+/** Connector entries from ADE_CONNECTORS (references only, no secrets). */
+export function connectorServers(raw = process.env.ADE_CONNECTORS) {
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list.filter((item) => item && typeof item.name === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function registerConnectors(pi, servers = connectorServers()) {
+  if (typeof pi.registerMcpServer !== "function") return [];
+  const registered = [];
+  for (const { name, ...config } of servers) {
+    try {
+      // "direct": the tools are declared to the model, which --tools leaves alone for MCP.
+      pi.registerMcpServer(name, { ...config, exposure: "direct", timeout: 300 });
+      registered.push(name);
+    } catch {}
+  }
+  return registered;
+}
+
 export default async function adeComputer(pi) {
+  registerConnectors(pi);
+  // Connectors-only turns carry no computer; its tools are registered only with one.
+  if (!process.env.ADE_API) return;
   const Type = await typebox();
   const callTool = createToolCaller({
     api: (process.env.ADE_API ?? "").replace(/\/+$/, ""),

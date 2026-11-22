@@ -29,6 +29,7 @@
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { commandLine } from "../harness.mjs";
+import { acpConnectorServers } from "./connector-wiring.mjs";
 import { listAcpModels, runAcpTurn } from "../acp.mjs";
 import { acpBridge } from "../acp-bridge.mjs";
 import { acpModelListing, cliModelListing, MANUAL_HINT, rememberAcpModels } from "../models.mjs";
@@ -72,6 +73,7 @@ import { findOnPath, runCommand, spawnCommand, stopProcess } from "../spawn.mjs"
  * @property {"build" | "plan"} [permission]
  * @property {Attachment[]} attachments
  * @property {ComputerContext | null} computer how the agent reaches its browser tools
+ * @property {import("../connectors.mjs").Connector[]} [connectors] connectors (secrets included) that apply to this turn
  * @property {{ url: string, token: string, threadId: string, node?: string }} [workspaceAssistant]
  *   a one-turn capability for the assistant's workspace tools (only for workspace chats)
  *
@@ -355,6 +357,7 @@ export function defineAcpAgent(spec) {
                   },
                 ]
               : []),
+            ...acpConnectorServers(input.connectors),
           ],
           sessionMeta: spec.sessionMeta?.({
             computer: !!input.computer,
