@@ -576,6 +576,18 @@
   border: var(--border-width-hairline) solid var(--border);
   padding: var(--space-1) var(--space-2);
 }
+.ade-markdown th {
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+}
+.ade-markdown .contains-task-list {
+  list-style: none;
+  padding-left: var(--space-2);
+}
+.ade-markdown .task-list-item input {
+  margin-right: var(--space-2);
+  vertical-align: middle;
+}
 
 /* Command deck scrollback stays visible without the browser's bright scrollbar. */
 .host-terminal .xterm-viewport {

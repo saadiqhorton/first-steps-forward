@@ -6,10 +6,10 @@ function context(parts, { method = "GET", body, assistant = {}, state, ...rest }
   const responses = [];
   const calls = [];
   const service = {
-    voice: () => ({ muted: false, speakReplies: true, chimeDuringDictation: true }),
+    voice: () => ({ chimeDuringDictation: true }),
     updateVoice: async (patch) => {
       calls.push(["updateVoice", patch]);
-      return { voice: { muted: true, speakReplies: true, chimeDuringDictation: true, ...patch } };
+      return { voice: { chimeDuringDictation: true, ...patch } };
     },
     updateThread: async (id, patch) => {
       calls.push(["updateThread", id, patch]);
@@ -63,12 +63,15 @@ test("voice preferences use the workspace voice route", async () => {
   const get = context(["workspace", "voice"]);
   await workspaceAssistant(get.ctx);
   assert.equal(get.responses.at(-1)[0], 200);
-  assert.equal(get.responses.at(-1)[1].voice.muted, false);
+  assert.deepEqual(get.responses.at(-1)[1].voice, { chimeDuringDictation: true });
 
-  const patch = context(["workspace", "voice"], { method: "PATCH", body: { muted: true } });
+  const patch = context(["workspace", "voice"], {
+    method: "PATCH",
+    body: { chimeDuringDictation: false },
+  });
   await workspaceAssistant(patch.ctx);
-  assert.deepEqual(patch.calls.at(-1), ["updateVoice", { muted: true }]);
-  assert.equal(patch.responses.at(-1)[1].voice.muted, true);
+  assert.deepEqual(patch.calls.at(-1), ["updateVoice", { chimeDuringDictation: false }]);
+  assert.equal(patch.responses.at(-1)[1].voice.chimeDuringDictation, false);
 });
 
 test("agent and model changes go through updateThread, not a raw thread write", async () => {

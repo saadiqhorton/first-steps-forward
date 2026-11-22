@@ -638,15 +638,15 @@ export function createWorkspaceAssistant({
   const reconcile = async () => {};
   const toolContext = () => ({ state, dispatchAction, runWorkspaceTool });
   const voice = () => ({
-    muted: false,
-    speakReplies: true,
-    chimeDuringDictation: true,
-    ...(state.voice ?? {}),
+    chimeDuringDictation:
+      typeof state.voice?.chimeDuringDictation === "boolean"
+        ? state.voice.chimeDuringDictation
+        : true,
   });
   async function updateVoice(patch = {}) {
     const current = voice();
-    for (const key of ["muted", "speakReplies", "chimeDuringDictation"])
-      if (typeof patch[key] === "boolean") current[key] = patch[key];
+    if (typeof patch.chimeDuringDictation === "boolean")
+      current.chimeDuringDictation = patch.chimeDuringDictation;
     state.voice = current;
     await save();
     emit("workspace-assistant");

@@ -1,4 +1,4 @@
-import Markdown from "react-markdown";
+import { AdeMarkdown } from "@/components/ade/AdeMarkdown";
 
 export function MarkdownDocument({
   content,
@@ -13,7 +13,7 @@ export function MarkdownDocument({
     <div
       className={`ade-markdown break-words ${compact ? "text-caption leading-snug [&_*]:!my-1" : "text-sm leading-relaxed"} ${className}`}
     >
-      <Markdown>{content}</Markdown>
+      <AdeMarkdown>{content}</AdeMarkdown>
     </div>
   );
 }

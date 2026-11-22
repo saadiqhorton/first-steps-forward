@@ -46,6 +46,8 @@ Open the link on a phone or laptop connected to the same Wi-Fi. It signs that br
 
 If the link does not open on the other device, check that both are on the same network (guest and office networks often keep devices apart), that this computer's firewall allows incoming connections on ADE's port, and that this computer's address has not changed since ADE started.
 
+**Dictation.** The mic button in every chat box types what you say, using the browser's own speech recognition (Chrome, Edge or Safari; Firefox and browsers embedded in other apps don't have it). ADE loads no speech model and sends no audio to its own server; the browser's speech service does the listening. The arrow next to the mic picks which connected microphone to use (Chrome and Edge 135+; other browsers use their default mic) and remembers it per device. Dictation needs a secure page, so it works on this computer and through the HTTPS (Tailscale) link, not through the plain-HTTP Wi-Fi link. Turn the start sound on or off with **Dictation chime** in Luna's settings.
+
 Check this machine's setup with `npx @dezignerdrugz/ade doctor`. The built-in terminal is optional; when its platform binary is unavailable, the rest of ADE still works. `ade browser-setup` explains or installs host packages needed by Chrome on supported Linux systems.
 
 ### Run from source

@@ -17,6 +17,8 @@
 - Suggestions popover (`/` workflows-skills, `@` files)
 - Footer: agent chip (opens `AgentPicker`), branch label, tool buttons, send / send-later / send-now
 - The agent chip subtitle is `model · effort`, plus a short permission label when the permission is not `plan` (for example `· Auto-approve`), so a writable mode is visible while the picker is closed
+- Dictation (`DictationControl`, in the tool group after attach): mic toggle (`aria-pressed`, "Start dictation" / "Stop dictation"; listening = `bg-amber/15 text-amber` + `animate-pulse-soft` dot) and a chevron `DropdownMenu` with a radio group of mics ("System default" + connected mics), an "Allow microphone access" item while names are hidden, and a note when the saved mic is unplugged. The chevron is hidden when the browser can't dictate; the mic button always shows and explains why on click. Logic: `src/lib/ade/dictation/`
+- Dictation status strip (`role="status"` for listening/info, `role="alert"` + `text-danger` for failures)
 - Optional error alert strip
 
 ## 4. Tokens used
@@ -37,6 +39,7 @@
 - default, focus-within (panel ring), dragging files, sending, disabled (`disabledReason` / `!draftReady`)
 - running turn (dual send actions), suggestions open, agent picker open
 - error (footer `role="alert"`)
+- dictating: textarea `readOnly`, live interim text shown at the caret captured on start, finals committed into the draft; Escape, the mic button, sending, unmount, or the composer becoming disabled stops it
 
 ## 7. Code example
 ```tsx

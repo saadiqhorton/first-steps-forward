@@ -132,7 +132,7 @@ test("voice choices and session tombstones survive a stale process save", async 
       projects: [{ id: "p" }],
       sessions: [],
       processes: [],
-      voice: { muted: true, speakReplies: false, chimeDuringDictation: true },
+      voice: { chimeDuringDictation: false },
       deletedSessions: { s: 5 },
     };
     // This process never loaded the voice block; its save must not erase it.
@@ -144,11 +144,7 @@ test("voice choices and session tombstones survive a stale process save", async 
     await saveWorkspace(file, current);
     await saveWorkspace(file, stale);
     const persisted = JSON.parse(await readFile(file, "utf8"));
-    assert.deepEqual(persisted.voice, {
-      muted: true,
-      speakReplies: false,
-      chimeDuringDictation: true,
-    });
+    assert.deepEqual(persisted.voice, { chimeDuringDictation: false });
     assert.equal(persisted.sessions.length, 0);
     assert.equal(persisted.deletedSessions.s, 5);
   } finally {
@@ -188,13 +184,7 @@ test("mark unread survives another process's stale read and clears on read", asy
 });
 
 test("voice choices survive a merge with another process's older snapshot", () => {
-  const current = { voice: { muted: true } };
-  mergeWorkspaceRecords(current, {
-    voice: { muted: false, speakReplies: false, chimeDuringDictation: true },
-  });
-  assert.deepEqual(current.voice, {
-    muted: true,
-    speakReplies: false,
-    chimeDuringDictation: true,
-  });
+  const current = { voice: { chimeDuringDictation: false } };
+  mergeWorkspaceRecords(current, { voice: { chimeDuringDictation: true } });
+  assert.deepEqual(current.voice, { chimeDuringDictation: false });
 });

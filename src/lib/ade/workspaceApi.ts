@@ -259,8 +259,6 @@ export const inboxBulk = (
   }[],
 ) => request<{ results: InboxActionResult[] }>("/api/workspace/inbox/bulk", "POST", { actions });
 export type VoiceSettings = {
-  muted: boolean;
-  speakReplies: boolean;
   chimeDuringDictation: boolean;
 };
 export const getVoiceSettings = () => request<{ voice: VoiceSettings }>("/api/workspace/voice");

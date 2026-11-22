@@ -37,8 +37,6 @@ const quietButton =
 const primaryButton =
   "btn-amber inline-flex items-center justify-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs font-medium disabled:opacity-50";
 const DEFAULT_VOICE: VoiceSettings = {
-  muted: false,
-  speakReplies: true,
   chimeDuringDictation: true,
 };
 
@@ -871,7 +869,7 @@ export function WorkspaceSettings() {
       setVoice({ ...DEFAULT_VOICE, ...saved.voice });
     },
     onError: (cause) => {
-      setError(cause instanceof Error ? cause.message : "Could not save this voice setting.");
+      setError(cause instanceof Error ? cause.message : "Could not save this setting.");
       void client.invalidateQueries({ queryKey: ["workspace-voice"] });
     },
   });
@@ -890,40 +888,9 @@ export function WorkspaceSettings() {
           <span className="label-mono">/ settings</span>
         </div>
         <h1 className="mt-2 text-lg font-medium leading-snug">Luna settings</h1>
-        <p className="mt-1 text-sm leading-5 text-dim">
-          Choose how Luna speaks and listens in this browser.
-        </p>
-        <div className="label-section mb-2 mt-6">Voice</div>
+        <p className="mt-1 text-sm leading-5 text-dim">Choose how dictation sounds.</p>
+        <div className="label-section mb-2 mt-6">Dictation</div>
         <section className="card-panel divide-y divide-line">
-          <label className="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
-            <span>
-              <span className="block text-sm font-medium">Mute voice</span>
-              <span className="block text-xs leading-5 text-dim">
-                Silence spoken replies and dictation chimes.
-              </span>
-            </span>
-            <input
-              type="checkbox"
-              checked={voice.muted}
-              onChange={(event) => toggle("muted", event.target.checked)}
-              className="size-4 shrink-0 accent-amber"
-            />
-          </label>
-          <label className="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
-            <span>
-              <span className="block text-sm font-medium">Speak replies</span>
-              <span className="block text-xs leading-5 text-dim">
-                Read new replies aloud on supported desktop browsers.
-              </span>
-            </span>
-            <input
-              type="checkbox"
-              checked={voice.speakReplies}
-              disabled={voice.muted}
-              onChange={(event) => toggle("speakReplies", event.target.checked)}
-              className="size-4 shrink-0 accent-amber disabled:cursor-not-allowed disabled:opacity-50"
-            />
-          </label>
           <label className="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
             <span>
               <span className="block text-sm font-medium">Dictation chime</span>
@@ -934,9 +901,8 @@ export function WorkspaceSettings() {
             <input
               type="checkbox"
               checked={voice.chimeDuringDictation}
-              disabled={voice.muted}
               onChange={(event) => toggle("chimeDuringDictation", event.target.checked)}
-              className="size-4 shrink-0 accent-amber disabled:cursor-not-allowed disabled:opacity-50"
+              className="size-4 shrink-0 accent-amber"
             />
           </label>
         </section>

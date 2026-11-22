@@ -656,23 +656,31 @@ test("threads list newest first with a preview and unread state", async () => {
   assert.equal(listed.find((thread) => thread.id === first.thread.id).unread, false);
 });
 
-test("voice preferences live on the assistant and can be muted", async () => {
+test("voice preferences hold only the dictation chime", async () => {
   const state = { agents: [], sessions: [], projects: [] };
   const service = createWorkspaceAssistant({ state, save: async () => {} });
-  assert.deepEqual(service.voice(), {
-    muted: false,
-    speakReplies: true,
-    chimeDuringDictation: true,
-  });
-  const updated = await service.updateVoice({ muted: true, speakReplies: false });
-  assert.deepEqual(updated.voice, {
-    muted: true,
-    speakReplies: false,
-    chimeDuringDictation: true,
-  });
-  assert.equal(state.voice.muted, true);
-  await service.updateVoice({ muted: "yes" });
-  assert.equal(state.voice.muted, true);
+  assert.deepEqual(service.voice(), { chimeDuringDictation: true });
+  const updated = await service.updateVoice({ chimeDuringDictation: false, muted: true });
+  assert.deepEqual(updated.voice, { chimeDuringDictation: false });
+  assert.deepEqual(state.voice, { chimeDuringDictation: false });
+  await service.updateVoice({ chimeDuringDictation: "yes" });
+  assert.equal(state.voice.chimeDuringDictation, false);
+});
+
+test("legacy muted and speakReplies voice state never leaks out and is dropped on update", async () => {
+  const state = {
+    agents: [],
+    sessions: [],
+    projects: [],
+    voice: { muted: true, speakReplies: false, chimeDuringDictation: false },
+  };
+  const service = createWorkspaceAssistant({ state, save: async () => {} });
+  assert.deepEqual(service.voice(), { chimeDuringDictation: false });
+  await service.updateVoice({ chimeDuringDictation: true });
+  assert.deepEqual(state.voice, { chimeDuringDictation: true });
+  state.voice = { muted: true, speakReplies: false, chimeDuringDictation: false };
+  await service.updateVoice({});
+  assert.deepEqual(state.voice, { chimeDuringDictation: false });
 });
 
 test("a chat turn runs in the Luna root and a work turn in its own folder", async () => {

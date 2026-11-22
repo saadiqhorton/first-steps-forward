@@ -29,7 +29,6 @@ import {
   getAssistantThread,
   getAssistantThreads,
   getHandoffs,
-  getVoiceSettings,
   patchAssistantThread,
   retryHandoff,
   sendAssistantMessage,
@@ -61,7 +60,6 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const stickToBottomRef = useRef(true);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
-  const spokenRef = useRef("");
 
   const threads = useQuery({
     queryKey: ["workspace-assistant-threads", search],
@@ -80,8 +78,6 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
     enabled: !!threadId,
     refetchInterval: 3500,
   });
-  const voiceQuery = useQuery({ queryKey: ["workspace-voice"], queryFn: getVoiceSettings });
-  const voice = { muted: false, speakReplies: true, ...voiceQuery.data?.voice };
 
   const thread = detail.data?.thread;
   const messages = useMemo(() => detail.data?.messages ?? [], [detail.data?.messages]);
@@ -221,24 +217,6 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [historyOpen]);
-
-  useEffect(() => {
-    const latest = messages.at(-1);
-    if (
-      !voice.muted &&
-      voice.speakReplies &&
-      latest?.role === "assistant" &&
-      latest.id !== spokenRef.current &&
-      typeof window !== "undefined" &&
-      "speechSynthesis" in window
-    ) {
-      spokenRef.current = latest.id;
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(latest.text.slice(0, 1000));
-      utterance.rate = 1.03;
-      window.speechSynthesis.speak(utterance);
-    }
-  }, [messages, voice.muted, voice.speakReplies]);
 
   const send = async (outgoing: string, files: File[]): Promise<boolean> => {
     if (sending) return false;

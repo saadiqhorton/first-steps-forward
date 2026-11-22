@@ -15,6 +15,9 @@ import { AgentPicker, agentChipLabel, type AgentSelection } from "@/components/a
 import { useAdeState } from "@/lib/ade/store";
 import type { ContextReference, MessagePresentation, Workflow } from "@/lib/ade/types";
 import { ContextPills } from "@/components/ade/ContextPills";
+import { DictationControl } from "@/components/ade/DictationControl";
+import { useDictation } from "@/lib/ade/dictation/useDictation";
+import { composeDictation } from "@/lib/ade/dictation/dictation.mjs";
 import {
   ComposerAttachButton,
   ComposerAttachments,
@@ -144,6 +147,19 @@ export function Composer({
   const chip = agentChipLabel(selection, agents);
   const labelId = useId();
   const disabled = !!disabledReason || sending || !draftReady;
+  const dictation = useDictation();
+  // Text around the caret when dictation started; dictated words go between the two.
+  const [dictationAnchor, setDictationAnchor] = useState<{ before: string; after: string } | null>(
+    null,
+  );
+  const shownText =
+    dictation.active && dictationAnchor
+      ? composeDictation({
+          ...dictationAnchor,
+          finals: dictation.finals,
+          interim: dictation.interim,
+        }).text
+      : text;
   const workflowPrompt =
     workflow?.prompt.trim() ??
     contextItems.find((item) => item.kind === "workflow")?.prompt?.trim() ??
@@ -160,7 +176,41 @@ export function Composer({
       : []),
     ...contextItems,
   ];
-  const canSend = (!!text.trim() || !!workflowPrompt || contextItems.length > 0) && !disabled;
+  const canSend = (!!shownText.trim() || !!workflowPrompt || contextItems.length > 0) && !disabled;
+
+  useEffect(() => {
+    if (!dictationAnchor) return;
+    const result = composeDictation({ ...dictationAnchor, finals: dictation.finals });
+    setText(result.text);
+    if (dictation.active) return;
+    setDictationAnchor(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(result.caret, result.caret);
+    });
+  }, [dictationAnchor, dictation.finals, dictation.active]);
+
+  const { active: dictationActive, stop: stopDictation } = dictation;
+  useEffect(() => {
+    if (disabled && dictationActive) stopDictation();
+  }, [disabled, dictationActive, stopDictation]);
+
+  const toggleDictation = () => {
+    if (dictation.active) {
+      dictation.stop();
+      return;
+    }
+    if (dictation.support?.ok) {
+      const el = textareaRef.current;
+      const from = el?.selectionStart ?? text.length;
+      const to = el?.selectionEnd ?? text.length;
+      setDictationAnchor({ before: text.slice(0, from), after: text.slice(to) });
+      setTrigger(null);
+    }
+    void dictation.start();
+  };
 
   useEffect(() => {
     if (!draftStorageKey) return;
@@ -456,12 +506,19 @@ export function Composer({
     const context = references.length
       ? `Selected context:\n${references.map((item) => (item.kind === "skill" ? `- Use the ${JSON.stringify(item.label)} skill: read and follow ${JSON.stringify(item.detail)}.` : `- Project ${item.kind}: ${JSON.stringify(item.detail)}`)).join("\n")}`
       : "";
-    const outgoing = [workflowPrompt, text.trim(), context].filter(Boolean).join("\n\n");
+    const draftText = shownText;
+    const outgoing = [workflowPrompt, draftText.trim(), context].filter(Boolean).join("\n\n");
     if (!outgoing || disabled) return;
+    dictation.clearStatus();
+    if (dictation.active) {
+      setText(draftText);
+      setDictationAnchor(null);
+      dictation.cancel();
+    }
     const files = drafts.map((d) => d.file);
     const presentation = selectedItems.length
       ? {
-          text: text.trim(),
+          text: draftText.trim(),
           references: selectedItems.map(({ kind, label, detail }) => ({ kind, label, detail })),
         }
       : undefined;
@@ -598,6 +655,11 @@ export function Composer({
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}
       onDrop={onDrop}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !dictation.active) return;
+        event.preventDefault();
+        dictation.stop();
+      }}
     >
       {extra ? <div className="border-b border-line px-4 py-3">{extra}</div> : null}
       {trigger && projectId && (
@@ -633,7 +695,8 @@ export function Composer({
       <textarea
         id={labelId}
         ref={textareaRef}
-        value={text}
+        value={shownText}
+        readOnly={dictation.active}
         onChange={(e) => {
           setText(e.target.value);
           updateTrigger(e.target.value, e.target.selectionStart);
@@ -759,6 +822,12 @@ export function Composer({
                 fileInputRef={fileInputRef}
                 className={toolButtonClass}
               />
+              <DictationControl
+                dictation={dictation}
+                disabled={disabled}
+                buttonClass={toolButtonClass}
+                onToggle={toggleDictation}
+              />
             </div>
             {running ? (
               <>
@@ -793,6 +862,24 @@ export function Composer({
           </div>
         </div>
       </div>
+      {dictation.status ? (
+        <p
+          role={dictation.status.kind === "error" ? "alert" : "status"}
+          className={`border-t border-line px-4 py-2 text-xs leading-5 ${dictation.status.kind === "error" ? "text-danger" : "text-dim"}`}
+        >
+          {dictation.status.message}
+        </p>
+      ) : dictation.active ? (
+        <p role="status" className="border-t border-line px-4 py-2 text-xs leading-5 text-dim">
+          {dictation.phase === "starting"
+            ? "Starting dictation…"
+            : dictation.phase === "stopping"
+              ? "Finishing dictation…"
+              : dictation.activeMicLabel
+                ? `Listening on ${dictation.activeMicLabel}`
+                : "Listening"}
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="border-t border-line px-4 py-2 text-xs leading-5 text-danger">
           {error}

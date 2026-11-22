@@ -1,4 +1,3 @@
-import Markdown from "react-markdown";
 import type { ComponentPropsWithoutRef } from "react";
 import { File } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -9,6 +8,7 @@ import {
   workspaceFileFromLink,
 } from "@/lib/ade/browser/openInPreview.mjs";
 import type { Message, MessageAttachment } from "@/lib/ade/types";
+import { AdeMarkdown } from "@/components/ade/AdeMarkdown";
 import { ContextPills } from "@/components/ade/ContextPills";
 
 function formatAttachmentSize(bytes: number) {
@@ -100,7 +100,12 @@ export function SessionMessage({
   const attachmentRow = attachments.length ? <AttachmentChips attachments={attachments} /> : null;
 
   // Links open in ADE's browser tab, as T3 does: web addresses and local HTML/PDF files.
-  const markdownLink = ({ href, children, ...props }: ComponentPropsWithoutRef<"a">) => (
+  const markdownLink = ({
+    href,
+    children,
+    node: _node,
+    ...props
+  }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) => (
     <a
       href={href}
       {...props}
@@ -131,7 +136,7 @@ export function SessionMessage({
     </pre>
   ) : role === "agent" ? (
     <div className="ade-markdown break-words">
-      <Markdown components={{ a: markdownLink }}>{text}</Markdown>
+      <AdeMarkdown components={{ a: markdownLink }}>{text}</AdeMarkdown>
     </div>
   ) : (
     <div className="whitespace-pre-wrap break-words">{text}</div>
