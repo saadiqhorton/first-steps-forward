@@ -34,6 +34,32 @@ test("summarizeTool formats bash commands without JSON", () => {
   assert.ok(!(row.body ?? "").includes('"status"'));
 });
 
+test("summarizeTool names the connector and the tool for an MCP call", () => {
+  const row = summarizeTool("mcp__parallel__web_search", { query: "insforge" });
+  assert.equal(row.title, "Used parallel web search");
+  assert.equal(row.body, "insforge");
+  // A tool part still decides the step kind, so the pane picks the search icon.
+  const call = formatLogLine(
+    JSON.stringify({
+      type: "tool_execution_start",
+      toolCallId: "c1",
+      toolName: "mcp__parallel__web_search",
+      args: { query: "insforge" },
+    }),
+  );
+  // A web search is an outside lookup, so it takes the existing fetch wording
+  // ("Looked up", "looked something up") rather than project-search wording.
+  assert.equal(call?.kind, "fetch");
+  assert.equal(call?.title, "Used parallel web search");
+  assert.equal(call?.body, "insforge");
+  const parallel = summarizeTool("mcp__parallel__web_search", {
+    objective: "Find what InsForge is",
+    search_queries: ["InsForge", "InsForge backend"],
+  });
+  assert.equal(parallel.title, "Used parallel web search");
+  assert.equal(parallel.body, "Find what InsForge is");
+});
+
 test("formatLogLine summarizes OpenCode tool_use JSON", () => {
   const line = JSON.stringify({
     type: "tool_use",

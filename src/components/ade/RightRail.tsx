@@ -1,18 +1,28 @@
 import { type ReactNode } from "react";
 import { PanelRightOpen, PanelBottomOpen } from "lucide-react";
-import { RIGHT_PANE_TABS } from "@/components/ade/rightPaneTabs";
+import { RIGHT_PANE_TABS, type RightPaneTab } from "@/components/ade/rightPaneTabs";
 import { type RightTab } from "@/lib/ade/navigation";
 import { type RightDock, type ComputerTone } from "@/components/ade/rightPaneTypes";
 
 export function RightRail(props: {
   orientation: "vertical" | "horizontal";
   tab: RightTab;
+  /** Tabs this route can fill; defaults to the full set. */
+  tabs?: ReadonlyArray<RightPaneTab>;
   computerTone: ComputerTone;
   onSelect: (tab: RightTab) => void;
   onExpand: () => void;
   dock: RightDock;
 }): ReactNode {
-  const { orientation, tab, computerTone, onSelect, onExpand, dock } = props;
+  const {
+    orientation,
+    tab,
+    tabs = RIGHT_PANE_TABS,
+    computerTone,
+    onSelect,
+    onExpand,
+    dock,
+  } = props;
 
   const isVertical = orientation === "vertical";
   const isSideDock = dock === "side";
@@ -49,7 +59,7 @@ export function RightRail(props: {
       <div className={dividerClass} />
 
       <div className={isVertical ? "flex flex-col items-center gap-1" : "flex items-center gap-1"}>
-        {RIGHT_PANE_TABS.map(({ id, label, Icon }) => {
+        {tabs.map(({ id, label, Icon }) => {
           const isActive = tab === id;
           const isComputer = id === "computer";
 
@@ -86,7 +96,7 @@ export function RightRail(props: {
       {!isVertical && (
         <div className="ml-auto flex items-center">
           <span className="text-xs text-dim whitespace-nowrap">
-            {RIGHT_PANE_TABS.find((t) => t.id === tab)?.label}
+            {tabs.find((t) => t.id === tab)?.label}
           </span>
         </div>
       )}

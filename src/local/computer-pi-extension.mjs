@@ -29,17 +29,31 @@ export function connectorServers(raw = process.env.ADE_CONNECTORS) {
   }
 }
 
-export function registerConnectors(pi, servers = connectorServers()) {
+export function registerConnectors(
+  pi,
+  servers = connectorServers(),
+  onError = reportConnectorError,
+) {
   if (typeof pi.registerMcpServer !== "function") return [];
   const registered = [];
   for (const { name, ...config } of servers) {
     try {
-      // "direct": the tools are declared to the model, which --tools leaves alone for MCP.
+      // "direct": the tools are declared to the model. The adapter's --tools list
+      // names this server's tools (mcp__<name>__*), so the allowlist declares them.
       pi.registerMcpServer(name, { ...config, exposure: "direct", timeout: 300 });
       registered.push(name);
-    } catch {}
+    } catch (error) {
+      // A connector that cannot register must not vanish silently: the turn
+      // still runs, and the Activity trace says why its tools are missing.
+      onError(`ADE connector "${name}" could not register: ${error?.message ?? error}`);
+    }
   }
   return registered;
+}
+
+/** stderr reaches ADE's Activity log; the config holds only ${ENV} references, never a secret. */
+function reportConnectorError(message) {
+  console.error(message);
 }
 
 export default async function adeComputer(pi) {

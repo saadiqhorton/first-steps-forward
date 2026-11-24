@@ -23,7 +23,7 @@ export function computerPiExtension() {
   return path.join(LOCAL, "computer-pi-extension.mjs");
 }
 
-/** Spawn extras for one turn's computer tools. @typedef {{ args?: string[], env?: Record<string, string>, mcpServers?: object[], toolNames?: string[] }} ComputerWiring */
+/** Spawn extras for one turn's computer tools. `toolPatterns` are allowlist entries (MCP wildcards) rather than exact tool names. @typedef {{ args?: string[], env?: Record<string, string>, mcpServers?: object[], toolNames?: string[], toolPatterns?: string[] }} ComputerWiring */
 
 /** Codex: `-c` overrides parsed as TOML (JSON strings/arrays are valid TOML). */
 export function codexComputerArgs(computer, workspaceAssistant) {
@@ -127,10 +127,22 @@ export function opencodeComputerEnv(
   return { OPENCODE_CONFIG_CONTENT: JSON.stringify(config) };
 }
 
+/**
+ * Pi names an MCP tool `mcp__<server>__<tool>` and replaces every server or tool
+ * character other than a letter, digit or `_` with `_`. Connector names already
+ * pass that rule, but sanitizing here keeps the allowlist entry safe if a stored
+ * connector predates the name check.
+ * @param {string} name
+ */
+export function piMcpToolPattern(name) {
+  const server = String(name ?? "").replace(/[^A-Za-z0-9_]/g, "_");
+  return server ? `mcp__${server}__*` : "";
+}
+
 /** Pi: extension path, allowlisted tool names, and env for the extension process. */
 export function piComputerWiring(computer, workspaceAssistant, connectors = []) {
   if (!computer && !workspaceAssistant && !connectors.length)
-    return { args: [], env: {}, toolNames: [] };
+    return { args: [], env: {}, toolNames: [], toolPatterns: [] };
   // Connector secrets travel only as env vars the extension's config references.
   const connectorEnv = piConnectorWiring(connectors).env;
   const workspaceEnv = workspaceAssistant
@@ -147,5 +159,9 @@ export function piComputerWiring(computer, workspaceAssistant, connectors = []) 
       ...(computer ? COMPUTER_TOOL_NAMES : []),
       ...(workspaceAssistant ? WORKSPACE_TOOL_NAMES : []),
     ],
+    // `--tools` is an allowlist for declarations: an MCP tool that no entry
+    // names is never declared, whatever its exposure. These patterns keep each
+    // connector's tools declared while every other MCP server stays off.
+    toolPatterns: connectors.map((connector) => piMcpToolPattern(connector.name)).filter(Boolean),
   };
 }

@@ -169,10 +169,12 @@ function exited(child) {
  * - `wireComputer(computer)` (optional) → spawn extras (`args`, `env`, …) the
  *   agent's `command` merges in; harness-specific shape stays at the leaf.
  * - `parse(line)` → the session events one stdout line carries.
+ * - `keepLog(line)` (optional) → whether the line belongs in the Activity log;
+ *   return false for streaming deltas that would evict the steps around them.
  * - `stderr(line)` (optional) → session events a stderr line carries.
  * - `prepare(input)` (optional) runs before the process starts.
  * - `probeModels(run)` (optional) → the CLI's own model listing.
- * @template {{ command: (input: TurnInput) => any[], wireComputer?: (computer: ComputerContext | null) => ComputerWiring, parse: (line: string) => SessionEvent[], stderr?: (line: string) => SessionEvent[], prepare?: (input: TurnInput) => Promise<void> }} T
+ * @template {{ command: (input: TurnInput) => any[], wireComputer?: (computer: ComputerContext | null) => ComputerWiring, parse: (line: string) => SessionEvent[], keepLog?: (line: string) => boolean, stderr?: (line: string) => SessionEvent[], prepare?: (input: TurnInput) => Promise<void> }} T
  * @param {T} spec
  */
 export function defineCliAgent(spec) {
@@ -203,8 +205,9 @@ export function defineCliAgent(spec) {
         }
       };
       const stdout = lines((line) => {
-        io.emit({ type: "log", line });
-        forward(spec.parse(line));
+        const events = spec.parse(line);
+        if (spec.keepLog?.(line) !== false) io.emit({ type: "log", line });
+        forward(events);
       });
       const stderr = lines((line) => {
         io.emit({ type: "log", line });

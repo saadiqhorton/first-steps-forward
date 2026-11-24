@@ -46,6 +46,26 @@ export function parsePiModels(stdout) {
   return models;
 }
 
+/**
+ * Pi streams one `message_update` per thinking and text chunk. The chat already
+ * shows that text, and a long reply would fill the Activity log's 500 lines and
+ * push the tool steps out of it. Keep only the start of a thinking or text
+ * block: the live status line still says what Pi is doing, and every tool call
+ * and result stays in the log.
+ * @param {string} line
+ */
+export function piKeepLog(line) {
+  if (!line.trim().startsWith("{")) return true;
+  try {
+    const event = JSON.parse(line);
+    if (event?.type !== "message_update") return true;
+    const kind = event.assistantMessageEvent?.type;
+    return kind === "thinking_start" || kind === "text_start";
+  } catch {
+    return true;
+  }
+}
+
 export const pi = defineCliAgent({
   id: "pi",
   name: "Pi Agent",
@@ -76,6 +96,7 @@ export const pi = defineCliAgent({
   installHint: "Install from https://pi.dev/",
   tools: "read, edit, write, grep, find, ls (no shell), plus ADE's agent computer tools",
   wireComputer,
+  keepLog: piKeepLog,
   /**
    * Pi is multi-provider. Probe credential-store provider names (never
    * inspect or log credential values), falling back to known names when the
@@ -168,10 +189,12 @@ export const pi = defineCliAgent({
     const fileTools = permission === "plan" ? "read,grep,find,ls" : "read,edit,write,grep,find,ls";
     // ADE's agent computer arrives as a Pi extension (-e) with its tool names
     // added to the allowlist. The same extension registers the user's
-    // connectors with Pi's built-in MCP client (pi.registerMcpServer); Pi's
-    // --tools allowlist leaves MCP tools alone unless an entry starts mcp__.
+    // connectors with Pi's built-in MCP client (pi.registerMcpServer). Once an
+    // entry starts with mcp__, --tools filters MCP declarations too, so each
+    // connector needs its own `mcp__<server>__*` pattern or its tools never
+    // reach the model (the allowlist would leave them undeclared).
     const wired = wireComputer(computer, workspaceAssistant, connectors);
-    const tools = [fileTools, ...wired.toolNames].join(",");
+    const tools = [fileTools, ...wired.toolNames, ...wired.toolPatterns].join(",");
     return [
       "pi",
       [

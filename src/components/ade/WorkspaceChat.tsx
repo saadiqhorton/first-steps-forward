@@ -16,10 +16,15 @@ import {
   X,
 } from "lucide-react";
 import { type AgentSelection } from "@/components/ade/AgentPicker";
+import { AssistantActivityPanel } from "@/components/ade/AssistantActivityPanel";
 import { Composer } from "@/components/ade/Composer";
+import { RightPanePortal } from "@/components/ade/RightPanePortal";
 import { SessionMessage } from "@/components/ade/SessionMessage";
+import { useShell } from "@/components/ade/shellContext";
 import SegmentedControl from "@/components/arc/segmented-control/segmented-control";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
+import { selectionMode, threadSelection } from "./workspaceChatSelection.mjs";
+import { threadTrace } from "./workspaceChatTrace.mjs";
 import { optionCapabilities, uploadAttachment, useAdeState } from "@/lib/ade/store";
 import type { Message } from "@/lib/ade/types";
 import {
@@ -60,6 +65,9 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const stickToBottomRef = useRef(true);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+  // The thread a pick is being saved to, so a fetch from before the save cannot put the old
+  // permission back on screen.
+  const localPickRef = useRef<string | null>(null);
 
   const threads = useQuery({
     queryKey: ["workspace-assistant-threads", search],
@@ -83,6 +91,19 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const messages = useMemo(() => detail.data?.messages ?? [], [detail.data?.messages]);
   const running = thread?.status === "thinking";
   const agent = agents.find((item) => item.id === (selection?.agentId ?? thread?.agentId));
+  // Luna's activity belongs in the Shell's right pane, exactly where a project
+  // conversation keeps its Activity tab.
+  const { rightTab, selectTab } = useShell();
+  // The Shell rebuilds `selectTab` on every render. Keep it in a ref so entering the
+  // chat (or opening another thread) picks Activity once, instead of re-expanding the
+  // pane every render and undoing a collapse the reader asked for.
+  const selectTabRef = useRef(selectTab);
+  useEffect(() => {
+    selectTabRef.current = selectTab;
+  }, [selectTab]);
+  useEffect(() => {
+    selectTabRef.current("activity");
+  }, [threadId]);
   const threadPermission = (thread?.permission ?? "plan") as AgentSelection["permission"];
   const activeSelection: AgentSelection =
     selection ??
@@ -98,7 +119,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
     queryFn: () => optionCapabilities(activeSelection.agentId, activeSelection.model || undefined),
     enabled: !!activeSelection.agentId,
   });
-  const mode = activeSelection.permission === "plan" ? "chat" : "work";
+  const mode = selectionMode(activeSelection);
   const writablePermissions = (caps.data?.permissions ?? []).filter(
     (permission) => permission !== "plan",
   );
@@ -143,6 +164,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const threadAgent = thread?.agentId ?? "";
   const threadModel = thread?.model ?? "";
   const threadEffort = thread?.effort ?? "";
+  const trace = useMemo(() => threadTrace(detail.data?.activity), [detail.data?.activity]);
   // Like a project conversation, the opening request already sits in the
   // header. Hide it from the transcript only when the title is the same text
   // (a truncated title keeps the full prompt visible below).
@@ -160,14 +182,17 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   }, [messages, rows, thread?.title, threadId]);
   useEffect(() => {
     if (!threadKey) return;
-    setSelection({
+    const saved = {
       agentId: threadAgent,
       model: threadModel,
       effort: threadEffort,
-      speed: "",
-      permission: "plan",
-    });
-  }, [threadKey, threadAgent, threadModel, threadEffort]);
+      permission: threadPermission,
+    };
+    // The thread's permission is what Chat/Work follows. While a pick is being saved, a fetch
+    // from before that save still carries the old value; the pick stays on screen until then.
+    if (localPickRef.current === threadKey) return;
+    setSelection(threadSelection(saved));
+  }, [threadKey, threadAgent, threadModel, threadEffort, threadPermission]);
 
   useEffect(() => {
     if (!threadId) return;
@@ -179,6 +204,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   useEffect(() => {
     setCatchup([]);
     setError(null);
+    localPickRef.current = null;
     stickToBottomRef.current = true;
   }, [threadId]);
 
@@ -263,6 +289,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const onSelectionChange = (next: AgentSelection) => {
     setSelection(next);
     if (!threadId || running) return;
+    localPickRef.current = threadId;
     // Permission is only written when it actually changed; a stale value from a
     // previous agent must not follow the thread into a new adapter.
     const permissionChanged = next.permission !== threadPermission;
@@ -274,12 +301,14 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
       ...(permissionChanged ? { permission: next.permission } : {}),
     })
       .then(() => {
+        localPickRef.current = null;
         // The service resets model/effort/permission when the agent changes; let
         // the thread be the source of truth again.
         if (agentChanged) setSelection(null);
         return client.invalidateQueries({ queryKey: ["workspace-assistant-thread", threadId] });
       })
       .catch((e) => {
+        localPickRef.current = null;
         setSelection(null);
         setError(e instanceof Error ? e.message : String(e));
       });
@@ -299,9 +328,14 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
     const updated: AgentSelection = { ...activeSelection, permission };
     setSelection(updated);
     if (!threadId) return;
+    localPickRef.current = threadId;
     void patchAssistantThread(threadId, { permission })
-      .then(() => client.invalidateQueries({ queryKey: ["workspace-assistant-thread", threadId] }))
+      .then(() => {
+        localPickRef.current = null;
+        return client.invalidateQueries({ queryKey: ["workspace-assistant-thread", threadId] });
+      })
       .catch((e) => {
+        localPickRef.current = null;
         setSelection(null);
         setError(e instanceof Error ? e.message : String(e));
       });
@@ -362,282 +396,308 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const agentLabel = agent?.name && agent.name !== "Luna" ? agent.name : null;
 
   return (
-    <main className="workspace-chat relative flex min-h-0 min-w-0 flex-1 flex-col @container">
-      <header className="relative shrink-0 border-b border-line px-4 pb-4 pt-5 @lg:px-7">
-        <div className="relative mx-auto w-full max-w-3xl">
-          <div className="flex items-center gap-2">
-            <Link to="/workspace" className="label-mono hover:text-ink">
-              Workspace
-            </Link>
-            <span className="label-mono">/ Luna</span>
-          </div>
-          <h1 className="mt-2 line-clamp-1 text-lg font-medium leading-snug">{title}</h1>
-          <div className="mt-3 flex items-center gap-3">
-            <span
-              className={`size-1.5 shrink-0 rounded-full ${running ? "animate-pulse-soft bg-teal" : thread?.status === "failed" ? "bg-danger" : "bg-line"}`}
-              aria-hidden
-            />
-            <span className="min-w-0 truncate text-xs text-dim">
-              {status}
-              {agentLabel ? ` · ${agentLabel}` : null} ·{" "}
-              {activeSelection.model ? (
-                <span className="font-mono">{activeSelection.model}</span>
-              ) : (
-                "agent default"
-              )}
-            </span>
-            <div className="ml-auto flex shrink-0 items-center gap-2">
-              <button
-                ref={historyButtonRef}
-                type="button"
-                className="btn-quiet inline-flex h-7 w-7 shrink-0 items-center justify-center gap-2 whitespace-nowrap text-xs @md:w-auto @md:px-3"
-                onClick={() => setHistoryOpen((open) => !open)}
-                aria-expanded={historyOpen}
-                aria-label="Chat history"
-                title="Chat history"
-              >
-                <History className="size-4" strokeWidth={1.5} aria-hidden />
-                <span className="hidden @md:inline">History</span>
-              </button>
-              <button
-                type="button"
-                className="btn-quiet inline-flex h-7 w-7 shrink-0 items-center justify-center gap-2 whitespace-nowrap text-xs @md:w-auto @md:px-3"
-                onClick={() => void newChat()}
-                aria-label="New chat"
-                title="New chat"
-              >
-                <Plus className="size-4" strokeWidth={1.5} aria-hidden />
-                <span className="hidden @md:inline">New chat</span>
-              </button>
-              {running && (
+    <>
+      <main className="workspace-chat workspace-assistant relative flex min-h-0 min-w-0 flex-1 flex-col @container">
+        <header className="relative shrink-0 border-b border-line px-4 pb-4 pt-5 @lg:px-7">
+          <div className="relative mx-auto w-full max-w-3xl">
+            <div className="flex items-center gap-2">
+              <Link to="/workspace" className="label-mono hover:text-ink">
+                Workspace
+              </Link>
+              <span className="label-mono">/ Luna</span>
+            </div>
+            <h1 className="mt-2 line-clamp-1 text-lg font-medium leading-snug">{title}</h1>
+            <div className="mt-3 flex items-center gap-3">
+              <span
+                className={`size-1.5 shrink-0 rounded-full ${running ? "animate-pulse-soft bg-teal" : thread?.status === "failed" ? "bg-danger" : "bg-line"}`}
+                aria-hidden
+              />
+              <span className="min-w-0 truncate text-xs text-dim">
+                {status}
+                {agentLabel ? ` · ${agentLabel}` : null} ·{" "}
+                {activeSelection.model ? (
+                  <span className="font-mono">{activeSelection.model}</span>
+                ) : (
+                  "agent default"
+                )}
+              </span>
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <button
+                  ref={historyButtonRef}
+                  type="button"
+                  className="btn-quiet inline-flex h-7 w-7 shrink-0 items-center justify-center gap-2 whitespace-nowrap text-xs @md:w-auto @md:px-3"
+                  onClick={() => setHistoryOpen((open) => !open)}
+                  aria-expanded={historyOpen}
+                  aria-label="Chat history"
+                  title="Chat history"
+                >
+                  <History className="size-4" strokeWidth={1.5} aria-hidden />
+                  <span className="hidden @md:inline">History</span>
+                </button>
                 <button
                   type="button"
                   className="btn-quiet inline-flex h-7 w-7 shrink-0 items-center justify-center gap-2 whitespace-nowrap text-xs @md:w-auto @md:px-3"
-                  onClick={() => stop.mutate()}
-                  aria-label="Stop Luna"
-                  title="Stop Luna"
+                  onClick={() => void newChat()}
+                  aria-label="New chat"
+                  title="New chat"
                 >
-                  <Square className="size-4" strokeWidth={1.5} aria-hidden />
-                  <span className="hidden @md:inline">Stop</span>
+                  <Plus className="size-4" strokeWidth={1.5} aria-hidden />
+                  <span className="hidden @md:inline">New chat</span>
                 </button>
-              )}
-              <Link
-                to="/workspace/settings"
-                className="btn-quiet inline-flex size-7 shrink-0 items-center justify-center"
-                aria-label="Luna settings"
-                title="Luna settings"
-              >
-                <Settings2 className="size-4" strokeWidth={1.5} aria-hidden />
-              </Link>
-            </div>
-          </div>
-
-          {historyOpen && (
-            <div
-              ref={historyRef}
-              className="card-panel absolute right-0 top-[calc(100%-4px)] z-20 w-[min(380px,calc(100vw-2rem))] p-2 shadow-lg"
-            >
-              <label className="flex items-center gap-2 border-b border-line px-2 pb-2">
-                <History className="size-4 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
-                <span className="sr-only">Search chat history</span>
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search chat history"
-                  className="min-w-0 flex-1 bg-transparent py-1 text-sm focus-visible:outline-none"
-                  autoFocus
-                />
-              </label>
-              <div className="max-h-[min(420px,60vh)] overflow-y-auto py-1">
-                {(threads.data?.threads ?? []).length === 0 && (
-                  <p className="px-2 py-3 text-xs text-dim">
-                    {search.trim() ? "No matching chats." : "No chats yet."}
-                  </p>
-                )}
-                {(threads.data?.threads ?? []).map((item) => (
-                  <HistoryRow
-                    key={item.id}
-                    thread={item}
-                    active={item.id === threadId}
-                    onOpen={() => {
-                      setHistoryOpen(false);
-                      void navigate({
-                        to: "/workspace/assistant/$threadId",
-                        params: { threadId: item.id },
-                      });
-                    }}
-                    onDeleted={() => {
-                      void client.invalidateQueries({ queryKey: ["workspace-assistant-threads"] });
-                      if (item.id === threadId) {
-                        setHistoryOpen(false);
-                        void navigate({ to: "/workspace/assistant" });
-                      }
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </header>
-
-      <div
-        ref={scrollRef}
-        onScroll={onMessagesScroll}
-        className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 @lg:px-7"
-      >
-        <div className="mx-auto w-full max-w-3xl space-y-3">
-          {threadId && (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                className="workspace-text-link text-xs disabled:opacity-60"
-                onClick={() => void catchMeUp()}
-              >
-                <Clock3 className="size-4" strokeWidth={1.5} aria-hidden />
-                Catch me up
-              </button>
-            </div>
-          )}
-
-          {!messages.length && (
-            <div className="max-w-2xl">
-              <div className="card-panel px-4 py-3">
-                <div className="label-section mb-1">Luna</div>
-                <p className="text-sm leading-5.5 text-ink">
-                  I can catch you up on what changed, start work in another project, or ask a
-                  project how its work is going.
-                </p>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {[
-                  "What changed while I was away?",
-                  "Start a task in another project",
-                  "Ask a project how its work is going",
-                ].map((prompt) => (
+                {running && (
                   <button
-                    key={prompt}
                     type="button"
-                    className="btn-quiet px-3 py-1.5 text-xs"
-                    onClick={() =>
-                      setPromptSeed((seed) => ({ text: prompt, nonce: seed.nonce + 1 }))
-                    }
+                    className="btn-quiet inline-flex h-7 w-7 shrink-0 items-center justify-center gap-2 whitespace-nowrap text-xs @md:w-auto @md:px-3"
+                    onClick={() => stop.mutate()}
+                    aria-label="Stop Luna"
+                    title="Stop Luna"
                   >
-                    {prompt}
+                    <Square className="size-4" strokeWidth={1.5} aria-hidden />
+                    <span className="hidden @md:inline">Stop</span>
                   </button>
-                ))}
+                )}
+                <Link
+                  to="/workspace/settings"
+                  className="btn-quiet inline-flex size-7 shrink-0 items-center justify-center"
+                  aria-label="Luna settings"
+                  title="Luna settings"
+                >
+                  <Settings2 className="size-4" strokeWidth={1.5} aria-hidden />
+                </Link>
               </div>
             </div>
-          )}
 
-          {visibleRows.map((message) => (
-            <SessionMessage key={message.id} message={message} agentName={agent?.short ?? "Luna"} />
-          ))}
+            {historyOpen && (
+              <div
+                ref={historyRef}
+                className="card-panel absolute right-0 top-[calc(100%-4px)] z-20 w-[min(380px,calc(100vw-2rem))] p-2 shadow-lg"
+              >
+                <label className="flex items-center gap-2 border-b border-line px-2 pb-2">
+                  <History className="size-4 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
+                  <span className="sr-only">Search chat history</span>
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search chat history"
+                    className="min-w-0 flex-1 bg-transparent py-1 text-sm focus-visible:outline-none"
+                    autoFocus
+                  />
+                </label>
+                <div className="max-h-[min(420px,60vh)] overflow-y-auto py-1">
+                  {(threads.data?.threads ?? []).length === 0 && (
+                    <p className="px-2 py-3 text-xs text-dim">
+                      {search.trim() ? "No matching chats." : "No chats yet."}
+                    </p>
+                  )}
+                  {(threads.data?.threads ?? []).map((item) => (
+                    <HistoryRow
+                      key={item.id}
+                      thread={item}
+                      active={item.id === threadId}
+                      onOpen={() => {
+                        setHistoryOpen(false);
+                        void navigate({
+                          to: "/workspace/assistant/$threadId",
+                          params: { threadId: item.id },
+                        });
+                      }}
+                      onDeleted={() => {
+                        void client.invalidateQueries({
+                          queryKey: ["workspace-assistant-threads"],
+                        });
+                        if (item.id === threadId) {
+                          setHistoryOpen(false);
+                          void navigate({ to: "/workspace/assistant" });
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </header>
 
-          {running && (
-            <div className="flex flex-wrap items-center gap-3 text-ui text-dim">
-              <span className="size-1.5 animate-pulse-soft rounded-full bg-teal" aria-hidden />
-              <TextShimmer>Luna is working…</TextShimmer>
-            </div>
-          )}
-
-          {catchup.length > 0 && (
-            <div className="card-panel p-4">
-              <div className="flex items-center gap-2">
-                <Clock3 className="size-4 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
-                <span className="text-sm font-medium">Since your last catch-up</span>
+        <div
+          ref={scrollRef}
+          onScroll={onMessagesScroll}
+          className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 @lg:px-7"
+        >
+          <div className="mx-auto w-full max-w-3xl space-y-3">
+            {threadId && (
+              <div className="flex justify-end">
                 <button
                   type="button"
-                  className="ml-auto text-dim hover:text-ink"
-                  aria-label="Dismiss catch-up"
-                  onClick={() => setCatchup([])}
+                  className="workspace-text-link text-xs disabled:opacity-60"
+                  onClick={() => void catchMeUp()}
                 >
-                  <X className="size-4" strokeWidth={1.5} aria-hidden />
+                  <Clock3 className="size-4" strokeWidth={1.5} aria-hidden />
+                  Catch me up
                 </button>
               </div>
-              <ul className="mt-2 space-y-1.5">
-                {catchup.map((item, index) => (
-                  <li key={`${item.href ?? index}:${index}`} className="text-ui leading-5">
-                    {item.href ? (
-                      <a className="text-teal-deep underline underline-offset-2" href={item.href}>
-                        {item.text}
-                      </a>
-                    ) : (
-                      item.text
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+            )}
 
-          {pendingApprovals.map((handoff) => (
-            <ApprovalCard
-              key={handoff.id}
-              handoff={handoff}
-              onDone={() =>
-                void client.invalidateQueries({ queryKey: ["workspace-handoffs", threadId] })
-              }
-            />
-          ))}
-
-          {otherHandoffs.length > 0 && (
-            <details className="card-panel px-4 py-3">
-              <summary className="cursor-pointer text-xs text-dim">
-                Project updates · {otherHandoffs.length}
-              </summary>
-              <div className="mt-2 space-y-2">
-                {otherHandoffs.map((item) => (
-                  <HandoffLine key={item.id} handoff={item} />
-                ))}
+            {!messages.length && (
+              <div className="max-w-2xl">
+                <div className="card-panel px-4 py-3">
+                  <div className="label-section mb-1">Luna</div>
+                  <p className="text-sm leading-5.5 text-ink">
+                    I can catch you up on what changed, start work in another project, or ask a
+                    project how its work is going.
+                  </p>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {[
+                    "What changed while I was away?",
+                    "Start a task in another project",
+                    "Ask a project how its work is going",
+                  ].map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="btn-quiet px-3 py-1.5 text-xs"
+                      onClick={() =>
+                        setPromptSeed((seed) => ({ text: prompt, nonce: seed.nonce + 1 }))
+                      }
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </details>
-          )}
-          <div ref={endRef} />
-        </div>
-      </div>
+            )}
 
-      <div className="shrink-0 border-t border-line px-4 py-4 @lg:px-7">
-        <div className="mx-auto w-full max-w-3xl">
-          <div className="mb-3 flex flex-wrap items-center gap-3">
-            <SegmentedControl
-              label="Luna mode"
-              value={mode}
-              onValueChange={setMode}
-              options={[
-                { value: "chat", label: "Chat" },
-                {
-                  value: "work",
-                  label: "Work",
-                  ...(workAvailable ? {} : { accessory: <Lock className="size-3" aria-hidden /> }),
-                },
-              ]}
-            />
-            <span className="min-w-0 truncate text-xs text-dim">
-              {!workAvailable
-                ? `Work unavailable: ${workBlockedReason}`
-                : mode === "work"
-                  ? (workNote ?? thread?.workspacePath ?? "Files stay in this chat's folder")
-                  : "Read-only answers"}
-            </span>
+            {visibleRows.map((message) => (
+              <SessionMessage
+                key={message.id}
+                message={message}
+                agentName={agent?.short ?? "Luna"}
+              />
+            ))}
+
+            {running && (
+              <div className="flex flex-wrap items-center gap-3 text-ui text-dim">
+                <span className="size-1.5 animate-pulse-soft rounded-full bg-teal" aria-hidden />
+                <TextShimmer>Luna is working…</TextShimmer>
+              </div>
+            )}
+
+            {catchup.length > 0 && (
+              <div className="card-panel p-4">
+                <div className="flex items-center gap-2">
+                  <Clock3 className="size-4 shrink-0 text-dim" strokeWidth={1.5} aria-hidden />
+                  <span className="text-sm font-medium">Since your last catch-up</span>
+                  <button
+                    type="button"
+                    className="ml-auto text-dim hover:text-ink"
+                    aria-label="Dismiss catch-up"
+                    onClick={() => setCatchup([])}
+                  >
+                    <X className="size-4" strokeWidth={1.5} aria-hidden />
+                  </button>
+                </div>
+                <ul className="mt-2 space-y-1.5">
+                  {catchup.map((item, index) => (
+                    <li key={`${item.href ?? index}:${index}`} className="text-ui leading-5">
+                      {item.href ? (
+                        <a className="text-teal-deep underline underline-offset-2" href={item.href}>
+                          {item.text}
+                        </a>
+                      ) : (
+                        item.text
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {pendingApprovals.map((handoff) => (
+              <ApprovalCard
+                key={handoff.id}
+                handoff={handoff}
+                onDone={() =>
+                  void client.invalidateQueries({ queryKey: ["workspace-handoffs", threadId] })
+                }
+              />
+            ))}
+
+            {otherHandoffs.length > 0 && (
+              <details className="card-panel px-4 py-3">
+                <summary className="cursor-pointer text-xs text-dim">
+                  Project updates · {otherHandoffs.length}
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {otherHandoffs.map((item) => (
+                    <HandoffLine key={item.id} handoff={item} />
+                  ))}
+                </div>
+              </details>
+            )}
+            <div ref={endRef} />
           </div>
-          <Composer
-            key={`${threadId ?? "new"}:${promptSeed.nonce}`}
-            mode={threadId ? "follow-up" : "new"}
-            selection={activeSelection}
-            onSelectionChange={onSelectionChange}
-            branch=""
-            placeholder={threadId ? "Ask a follow-up" : "Ask Luna"}
-            initialText={promptSeed.text}
-            sending={sending}
-            error={error}
-            onSend={send}
-            running={running}
-            {...(running ? { agentLocked: "Unavailable while Luna is working" } : {})}
+        </div>
+
+        <div className="shrink-0 border-t border-line px-4 py-4 @lg:px-7">
+          <div className="mx-auto w-full max-w-3xl">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <SegmentedControl
+                label="Luna mode"
+                value={mode}
+                onValueChange={setMode}
+                options={[
+                  { value: "chat", label: "Chat" },
+                  {
+                    value: "work",
+                    label: "Work",
+                    ...(workAvailable
+                      ? {}
+                      : { accessory: <Lock className="size-3" aria-hidden /> }),
+                  },
+                ]}
+              />
+              <span className="min-w-0 truncate text-xs text-dim">
+                {!workAvailable
+                  ? `Work unavailable: ${workBlockedReason}`
+                  : mode === "work"
+                    ? (workNote ?? thread?.workspacePath ?? "Files stay in this chat's folder")
+                    : "Read-only answers"}
+              </span>
+            </div>
+            <Composer
+              key={`${threadId ?? "new"}:${promptSeed.nonce}`}
+              mode={threadId ? "follow-up" : "new"}
+              selection={activeSelection}
+              onSelectionChange={onSelectionChange}
+              branch=""
+              placeholder={threadId ? "Ask a follow-up" : "Ask Luna"}
+              initialText={promptSeed.text}
+              sending={sending}
+              error={error}
+              onSend={send}
+              running={running}
+              {...(running ? { agentLocked: "Unavailable while Luna is working" } : {})}
+            />
+          </div>
+        </div>
+      </main>
+      <RightPanePortal>
+        <div
+          className={`min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${rightTab === "activity" ? "flex" : "hidden"}`}
+        >
+          <AssistantActivityPanel
+            agentId={activeSelection.agentId}
+            agentName={agent?.name}
+            model={activeSelection.model}
+            mode={mode}
+            workspacePath={thread?.workspacePath}
+            status={status}
+            trace={trace}
+            live={running}
           />
         </div>
-      </div>
-    </main>
+      </RightPanePortal>
+    </>
   );
 }
 

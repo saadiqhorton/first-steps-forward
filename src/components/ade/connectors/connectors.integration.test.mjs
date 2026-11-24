@@ -304,14 +304,20 @@ test(
       .locator('[data-connector="playwright"]')
       .getByText("npx @playwright/mcp@latest")
       .waitFor();
-    await parallel.getByRole("button", { name: "Preview Parallel tools" }).click();
+    assert.equal(await parallel.getByRole("button", { name: "Preview tools" }).count(), 0);
+    await parallel.getByRole("button", { name: "Test Parallel" }).click();
     await parallel.getByText("Connected · 5 tools").waitFor();
+    const previewParallel = parallel.getByRole("button", { name: "Preview tools" });
+    await previewParallel.waitFor();
+    await previewParallel.click();
     await parallel.getByText("Available tools").waitFor();
     await parallel.getByRole("list", { name: "Parallel available tools" }).getByText("a").waitFor();
     const exa = page.locator('[data-connector="exa"]');
-    await exa.getByRole("button", { name: "Preview Exa tools" }).click();
+    await exa.getByRole("button", { name: "Test Exa" }).click();
+    await exa.getByText("Connected · 2 tools").waitFor();
+    await exa.getByRole("button", { name: "Preview tools" }).click();
     await exa.getByRole("list", { name: "Exa available tools" }).getByText("search").waitFor();
-    await page.getByRole("button", { name: "Preview Firecrawl tools" }).click();
+    await page.getByRole("button", { name: "Test Firecrawl" }).click();
     await page.getByText("HTTP 401 · key rejected").waitFor();
     for (const preset of PRESETS)
       await page.locator(`[data-preset="${preset.id}"]`).getByText("Added").waitFor();
@@ -370,9 +376,13 @@ test(
         ["phone", 390, 844],
       ]) {
         const shot = await open({ connectors: FULL, theme, width, height });
-        await shot.getByRole("button", { name: "Preview Parallel tools" }).click();
+        await shot.getByRole("button", { name: "Test Parallel" }).click();
         await shot.getByText("Connected · 5 tools").waitFor();
-        await shot.getByRole("button", { name: "Preview Firecrawl tools" }).click();
+        await shot
+          .locator('[data-connector="parallel"]')
+          .getByRole("button", { name: "Preview tools" })
+          .click();
+        await shot.getByRole("button", { name: "Test Firecrawl" }).click();
         await shot.getByText("HTTP 401 · key rejected").waitFor();
         await shot.screenshot({
           path: path.join(screenshotDir, `connectors-${theme}-${device}.png`),

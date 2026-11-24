@@ -114,13 +114,17 @@ function firstId(...values) {
  * @returns {"read" | "edit" | "run" | "search" | "preview" | "browse" | "tool"}
  */
 function toolKind(tool) {
-  const name = tool.toLowerCase();
+  const name = (mcpToolParts(tool)?.tool ?? tool).toLowerCase();
   if (
     /^(edit|write|multiedit|notebookedit|apply_patch|str_replace|search_replace|create)/.test(name)
   )
     return "edit";
   if (/^(read|view|cat)/.test(name)) return "read";
-  if (/^(find|glob|ls|list|grep|rg|search)/.test(name)) return "search";
+  // A web search is a lookup outside the project: the design already words a
+  // fetch as "Looked up" and summaries as "looked something up".
+  if (/^(fetch|web_fetch|read_url|get_page|web_search|search_web)$/.test(name)) return "fetch";
+  if (/^(find|glob|ls|list|grep|rg|search)/.test(name) || /(^|_)(search|crawl)(_|$)/.test(name))
+    return "search";
   if (/^(bash|shell|exec|terminal|run_terminal)/.test(name)) return "run";
   if (/^dev_server_/.test(name)) return "preview";
   if (/^(computer_|browser_)/.test(name)) return "browse";
@@ -285,17 +289,33 @@ function humanBody(value) {
 }
 
 /**
+ * Every agent names an MCP tool `mcp__<server>__<tool>` (Pi, Codex, OpenCode).
+ * The server tells the user which connector acted; the tool says what it did.
+ * @param {string} tool
+ * @returns {{ server: string, tool: string } | null}
+ */
+function mcpToolParts(tool) {
+  const match = /^mcp__(.+)__(.+)$/.exec(tool);
+  return match ? { server: match[1], tool: match[2] } : null;
+}
+
+/**
  * @param {string} tool
  * @param {unknown} rawInput
  * @returns {{ title: string, body?: string }}
  */
 export function summarizeTool(tool, rawInput) {
-  const name = (tool || "tool").trim() || "tool";
+  const raw = (tool || "tool").trim() || "tool";
+  const mcp = mcpToolParts(raw);
+  // Read the tool's own name for the payload fields; the server prefix is not
+  // a tool name, so matching on it would miss `query` or `path`.
+  const name = mcp?.tool ?? raw;
+  const label = mcp ? `${mcp.server} ${name.replace(/_/g, " ")}` : name;
   const lower = name.toLowerCase();
   const input = unwrapToolPayload(rawInput);
 
   if (typeof input === "string" && input.trim()) {
-    return { title: `Used ${name}`, body: truncate(input, 160) };
+    return { title: `Used ${label}`, body: truncate(input, 160) };
   }
 
   const fields = input && typeof input === "object" ? input : {};
@@ -303,33 +323,42 @@ export function summarizeTool(tool, rawInput) {
   const filePath = asText(
     fields.filePath ?? fields.filepath ?? fields.path ?? fields.file ?? fields.target,
   );
-  const pattern = asText(fields.pattern ?? fields.query ?? fields.regex ?? fields.grep);
+  const pattern = asText(
+    fields.pattern ??
+      fields.query ??
+      fields.regex ??
+      fields.grep ??
+      fields.objective ??
+      (Array.isArray(fields.search_queries) ? fields.search_queries.join(" · ") : ""),
+  );
   const contentHint = asText(fields.description ?? fields.title ?? fields.message);
 
   if (/(bash|shell|exec|terminal|run_terminal_cmd|command)/i.test(lower) && command) {
-    return { title: `Used ${name}`, body: truncate(command, 160) };
+    return { title: `Used ${label}`, body: truncate(command, 160) };
   }
   if (/(read|view|open|cat)/i.test(lower) && filePath) {
-    return { title: `Used ${name}`, body: shortPath(filePath) };
+    return { title: `Used ${label}`, body: shortPath(filePath) };
   }
   if (/(write|create|edit|apply_patch|str_replace|search_replace)/i.test(lower) && filePath) {
-    return { title: `Used ${name}`, body: shortPath(filePath) };
+    return { title: `Used ${label}`, body: shortPath(filePath) };
   }
   if (/(glob|list_dir|ls|search_files)/i.test(lower)) {
     const target = filePath || asText(fields.glob ?? fields.glob_pattern ?? fields.targetDirectory);
-    return target ? { title: `Used ${name}`, body: shortPath(target) } : { title: `Used ${name}` };
+    return target
+      ? { title: `Used ${label}`, body: shortPath(target) }
+      : { title: `Used ${label}` };
   }
   if (/(grep|rg|search)/i.test(lower) && pattern) {
     return {
-      title: `Used ${name}`,
+      title: `Used ${label}`,
       body: filePath ? `${truncate(pattern, 48)} in ${shortPath(filePath)}` : truncate(pattern, 80),
     };
   }
-  if (filePath) return { title: `Used ${name}`, body: shortPath(filePath) };
-  if (command) return { title: `Used ${name}`, body: truncate(command, 160) };
-  if (pattern) return { title: `Used ${name}`, body: truncate(pattern, 80) };
-  if (contentHint) return { title: `Used ${name}`, body: truncate(contentHint, 120) };
-  return { title: `Used ${name}` };
+  if (filePath) return { title: `Used ${label}`, body: shortPath(filePath) };
+  if (command) return { title: `Used ${label}`, body: truncate(command, 160) };
+  if (pattern) return { title: `Used ${label}`, body: truncate(pattern, 80) };
+  if (contentHint) return { title: `Used ${label}`, body: truncate(contentHint, 120) };
+  return { title: `Used ${label}` };
 }
 
 /**

@@ -1,4 +1,5 @@
 import { Globe, Pencil, SquareTerminal, Trash2 } from "lucide-react";
+import { useState } from "react";
 import type { Connector } from "@/lib/ade/connectorsApi";
 import { keySummary, PRESET_LOGOS, scopeSummary, targetLine } from "./connectorText";
 
@@ -46,6 +47,7 @@ export function ConnectorRow({
   onEdit: () => void;
   onRemove: () => void;
 }) {
+  const [toolsOpen, setToolsOpen] = useState(false);
   const off = !connector.enabled;
   const dim = off ? "opacity-(--opacity-disabled)" : "";
   return (
@@ -75,13 +77,27 @@ export function ConnectorRow({
         <TestResult test={test} />
         <button
           type="button"
-          onClick={onTest}
+          onClick={() => {
+            setToolsOpen(false);
+            onTest();
+          }}
           disabled={test?.status === "pending"}
           className="btn-quiet h-7 shrink-0 px-3 text-xs"
-          aria-label={`Preview ${connector.label} tools`}
+          aria-label={`Test ${connector.label}`}
         >
-          {test?.status === "ok" ? "Refresh preview" : "Preview tools"}
+          Test
         </button>
+        {test?.status === "ok" && (
+          <button
+            type="button"
+            onClick={() => setToolsOpen((open) => !open)}
+            className="btn-quiet h-7 shrink-0 px-3 text-xs"
+            aria-expanded={toolsOpen}
+            aria-controls={`connector-tools-${connector.id}`}
+          >
+            {toolsOpen ? "Hide tools" : "Preview tools"}
+          </button>
+        )}
         <label className="inline-flex w-11 shrink-0 cursor-pointer items-center gap-1.5 text-xs text-(--text-secondary)">
           <input
             type="checkbox"
@@ -109,8 +125,11 @@ export function ConnectorRow({
           <Trash2 className="size-3.5" strokeWidth={1.5} aria-hidden />
         </button>
       </div>
-      {test?.status === "ok" && (
-        <div className="ml-10 grid basis-full gap-2 rounded-md border border-line bg-panel p-3">
+      {test?.status === "ok" && toolsOpen && (
+        <div
+          id={`connector-tools-${connector.id}`}
+          className="ml-10 grid basis-full gap-2 rounded-md border border-line bg-panel p-3"
+        >
           <div className="label-mono">Available tools</div>
           {test.tools.length ? (
             <ul className="flex flex-wrap gap-2" aria-label={`${connector.label} available tools`}>

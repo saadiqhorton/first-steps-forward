@@ -6,7 +6,7 @@ import path from "node:path";
 import { claude } from "./claude.agent.mjs";
 import { codex } from "./codex.agent.mjs";
 import { opencode, parseOpencodeAuthJson, parseOpencodeAuthText } from "./opencode.agent.mjs";
-import { pi } from "./pi.agent.mjs";
+import { pi, piKeepLog } from "./pi.agent.mjs";
 import { acpComputerServers, computerMcpScript, computerPiExtension } from "./computer-tools.mjs";
 
 const session = { id: "session-id", agentSessionId: undefined };
@@ -156,6 +156,42 @@ test("parseOpencodeAuthJson rejects streams that are not the 2.x shape", () => {
     signedIn: false,
     providers: [],
   });
+});
+
+test("Pi keeps tool steps in the activity log and drops streaming deltas", () => {
+  const line = (event) => JSON.stringify(event);
+  // One message_update per token would fill the 500-line log and evict the
+  // tool call/result rows the Activity pane exists to show.
+  assert.equal(
+    piKeepLog(line({ type: "message_update", assistantMessageEvent: { type: "text_delta" } })),
+    false,
+  );
+  assert.equal(
+    piKeepLog(line({ type: "message_update", assistantMessageEvent: { type: "thinking_delta" } })),
+    false,
+  );
+  // The start of a block still names what Pi is doing in the live status line.
+  assert.equal(
+    piKeepLog(line({ type: "message_update", assistantMessageEvent: { type: "text_start" } })),
+    true,
+  );
+  assert.equal(
+    piKeepLog(line({ type: "message_update", assistantMessageEvent: { type: "thinking_start" } })),
+    true,
+  );
+  assert.equal(
+    piKeepLog(
+      line({
+        type: "tool_execution_start",
+        toolCallId: "c1",
+        toolName: "mcp__parallel__web_search",
+        args: { query: "insforge" },
+      }),
+    ),
+    true,
+  );
+  assert.equal(piKeepLog("plain stderr-style text"), true);
+  assert.equal(piKeepLog("{not json"), true);
 });
 
 test("Pi adapter restricts shell tools and parses actual JSON events", () => {
@@ -842,7 +878,9 @@ test("connectors alone reach Codex, OpenCode and Pi without leaking a secret int
   const [, piArgs, piEnv] = pi.command(base);
   assert.equal(piArgs[piArgs.indexOf("-e") + 1], piExtension);
   assert.ok(!piArgs.join("\n").includes("sk-argv-secret"));
-  assert.equal(piArgs[piArgs.indexOf("--tools") + 1], "read,edit,write,grep,find,ls");
+  // The mcp__ pattern is what makes Pi declare the connector's tools; without
+  // it the --tools allowlist silently drops every MCP tool.
+  assert.equal(piArgs[piArgs.indexOf("--tools") + 1], "read,edit,write,grep,find,ls,mcp__exa__*");
   assert.ok(!piArgs.includes("--no-mcp"));
   assert.equal(piEnv.ADE_MCP_EXA_0, "sk-argv-secret");
   assert.deepEqual(JSON.parse(piEnv.ADE_CONNECTORS), [

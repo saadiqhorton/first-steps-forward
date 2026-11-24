@@ -18,7 +18,11 @@ import {
   piConnectorWiring,
   splitAcpServers,
 } from "./adapters/connector-wiring.mjs";
-import { opencodeComputerEnv } from "./adapters/computer-tools.mjs";
+import {
+  opencodeComputerEnv,
+  piComputerWiring,
+  piMcpToolPattern,
+} from "./adapters/computer-tools.mjs";
 import { codex } from "./adapters/codex.agent.mjs";
 import { connectorServers, registerConnectors } from "./computer-pi-extension.mjs";
 
@@ -319,6 +323,17 @@ test("OpenCode wiring: remote and local servers, merged with the user's own conf
   assert.deepEqual(Object.keys(config.mcp).sort(), ["exa", "mine"]);
 });
 
+test("Pi declares each connector's MCP tools in its --tools allowlist", () => {
+  const wired = piComputerWiring(null, undefined, [http(), stdio()]);
+  // A bare `--tools` allowlist hides every MCP tool from the model. Each
+  // connector gets its own mcp__<server>__* entry so only its tools come back.
+  assert.deepEqual(wired.toolPatterns, ["mcp__exa__*", "mcp__local_tool__*"]);
+  assert.equal(piMcpToolPattern("a-b.c"), "mcp__a_b_c__*");
+  assert.equal(piMcpToolPattern(""), "");
+  // No connectors, no MCP exposure: an agent's own MCP servers stay undeclared.
+  assert.deepEqual(piComputerWiring(null, undefined, []).toolPatterns, []);
+});
+
 test("Pi wiring references secrets by name; the secrets live only in env", () => {
   const { env, servers } = piConnectorWiring([http(), stdio()]);
   assert.deepEqual(servers[0].headers, {
@@ -346,4 +361,23 @@ test("the Pi extension registers connectors with pi.registerMcpServer, secrets o
   assert.equal(JSON.stringify(registered).includes("sk-secret-1"), false);
   assert.deepEqual(registerConnectors({}, [{ name: "x" }]), []);
   assert.deepEqual(connectorServers("not json"), []);
+});
+
+test("a connector Pi refuses is reported instead of disappearing silently", () => {
+  const errors = [];
+  const pi = {
+    registerMcpServer: (name) => {
+      if (name === "exa") throw new Error("invalid server name");
+    },
+  };
+  const names = registerConnectors(
+    pi,
+    [
+      { name: "exa", url: "https://mcp.exa.ai/mcp" },
+      { name: "ok", url: "https://mcp.example/mcp" },
+    ],
+    (message) => errors.push(message),
+  );
+  assert.deepEqual(names, ["ok"]);
+  assert.deepEqual(errors, ['ADE connector "exa" could not register: invalid server name']);
 });

@@ -1,11 +1,13 @@
 import { type ReactNode, type Ref } from "react";
 import { X } from "lucide-react";
 import { GlideIndicator } from "@/components/ade/motion";
-import { RIGHT_PANE_TABS } from "@/components/ade/rightPaneTabs";
+import { RIGHT_PANE_TABS, type RightPaneTab } from "@/components/ade/rightPaneTabs";
 import { type RightTab } from "@/lib/ade/navigation";
 
 export function RightPaneTabs(props: {
   tab: RightTab;
+  /** Tabs this route can fill; defaults to the full set. */
+  tabs?: ReadonlyArray<RightPaneTab>;
   onSelect: (tab: RightTab) => void;
   terminalOpened: boolean;
   terminalClosing: boolean;
@@ -15,6 +17,7 @@ export function RightPaneTabs(props: {
 }): ReactNode {
   const {
     tab,
+    tabs = RIGHT_PANE_TABS,
     onSelect,
     terminalOpened,
     terminalClosing,
@@ -29,7 +32,7 @@ export function RightPaneTabs(props: {
       aria-label="Right panel"
       className="@container/tabs min-w-0 flex h-9 shrink-0 items-center gap-0.5 border-b border-line bg-panel overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
-      {RIGHT_PANE_TABS.map(({ id, label, Icon }) => {
+      {tabs.map(({ id, label, Icon }) => {
         const isActive = tab === id;
         const isTerminal = id === "terminal";
         const ariaControls =

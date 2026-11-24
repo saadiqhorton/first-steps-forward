@@ -59,10 +59,29 @@ test("a long line that is not JSON is cut to 4 KB with a marker", () => {
   assert.ok(brokenJson.length < 4200 && brokenJson.endsWith("chars]"));
 });
 
-test("JSON that is still large after shrinking falls back to the 4 KB cut", () => {
+test("JSON too large after shrinking keeps a small valid event, never a cut dump", () => {
   const wide = JSON.stringify({ type: "x", items: Array.from({ length: 5000 }, (_, i) => i) });
-  const shrunk = shrinkLogLine(wide);
-  assert.ok(shrunk.length < 4200);
+  const parsed = JSON.parse(shrinkLogLine(wide));
+  assert.equal(parsed.type, "x");
+  assert.equal(parsed.items.length, 20);
+
+  const hugeResult = JSON.stringify({
+    type: "tool_execution_end",
+    toolCallId: "c1",
+    toolName: "mcp__parallel__web_search",
+    result: {
+      content: Array.from({ length: 80 }, () => ({ type: "text", text: "r".repeat(600) })),
+    },
+    isError: false,
+  });
+  const shrunk = JSON.parse(shrinkLogLine(hugeResult));
+  assert.equal(shrunk.type, "tool_execution_end");
+  assert.equal(shrunk.toolCallId, "c1");
+  assert.equal(shrunk.toolName, "mcp__parallel__web_search");
+  assert.equal("result" in shrunk, false);
+  assert.equal(shrunk.isError, false);
+  // The completed call still reads in the Activity pane.
+  assert.equal(formatLogLine(JSON.stringify(shrunk))?.title, "Tool finished");
 });
 
 test("the Activity pane reads a shrunk line the same way", () => {

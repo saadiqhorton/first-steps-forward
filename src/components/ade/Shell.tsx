@@ -19,6 +19,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentType,
@@ -32,6 +33,7 @@ import {
   type RightTab,
 } from "@/lib/ade/navigation";
 import { useAppPathname } from "@/lib/ade/useAppPathname";
+import { isRightTabVisible, isAssistantPath } from "@/lib/ade/rightPane.mjs";
 import { useActiveProjectSelection, useAdeState } from "@/lib/ade/store";
 import type { Project } from "@/lib/ade/types";
 import { AddProjectDialog } from "./AddProjectDialog";
@@ -46,6 +48,7 @@ import { PROCESSES_OPEN_EVENT } from "@/lib/ade/openProcesses.mjs";
 import { ProcessesPane } from "@/components/ade/processes/ProcessesPane";
 import { RightPaneHostContext } from "./rightPaneContext";
 import { RightPaneTabs } from "./RightPaneTabs";
+import { rightPaneTabsFor } from "./rightPaneTabs";
 import { RightRail } from "./RightRail";
 import type { ComputerTone, RightDock } from "./rightPaneTypes";
 import { SectionTabs } from "./SectionTabs";
@@ -240,15 +243,24 @@ function ShellInner({
         return section === "workflows" || section === "skills" || section === "processes";
       }),
   });
+  // The right pane is the one thing a workspace route may keep: Luna's chat uses it for its
+  // Activity tab, while every other workspace page stays full width.
   const fullWidthSection =
-    pathname === "/" ||
-    focusedSection === "workflows" ||
-    focusedSection === "skills" ||
-    focusedSection === "processes" ||
-    fullWidthMatch ||
-    pathname.startsWith("/workspace");
+    !isAssistantPath(pathname) &&
+    (pathname === "/" ||
+      focusedSection === "workflows" ||
+      focusedSection === "skills" ||
+      focusedSection === "processes" ||
+      fullWidthMatch ||
+      pathname.startsWith("/workspace"));
   const searchStr = useRouterState({ select: (s) => s.location.searchStr });
-  const [rightTab, setRightTab] = useState<RightTab>("computer");
+  const [tabPreference, setRightTab] = useState<RightTab>("computer");
+  // Tabs this route can fill. Luna's chat hides Diff and Terminal, so its pane cannot show an
+  // empty diff or open a project terminal behind a read-only conversation.
+  const rightPaneTabs = useMemo(() => rightPaneTabsFor(pathname), [pathname]);
+  const rightTab: RightTab = rightPaneTabs.some((tab) => tab.id === tabPreference)
+    ? tabPreference
+    : "activity";
   const [dialog, setDialog] = useState<ShellDialog | null>(null);
   const [terminalOpened, setTerminalOpened] = useState(false);
   const [terminalClosing, setTerminalClosing] = useState(false);
@@ -295,6 +307,9 @@ function ShellInner({
   };
 
   const selectTab = (tab: RightTab) => {
+    // A route that hides a tab (Luna's chat hides Diff and Terminal) must not open it from a
+    // stale shortcut or event.
+    if (!rightPaneTabs.some((candidate) => candidate.id === tab)) return;
     if (tab === "terminal" && !terminalOpened) {
       openTerminal();
       return;
@@ -339,7 +354,7 @@ function ShellInner({
       dialogRaw === "agents" || dialogRaw === "add-project" ? dialogRaw : undefined;
     if (!pane && !nextDialog && !obsoleteEditor) return;
 
-    if (pane) {
+    if (pane && isRightTabVisible(pathname, pane)) {
       if (pane === "terminal") setTerminalOpened(true);
       setRightTab(pane);
     }
@@ -585,6 +600,7 @@ function ShellInner({
         <div className="min-w-0 flex-1">
           <RightPaneTabs
             tab={rightTab}
+            tabs={rightPaneTabs}
             onSelect={selectTab}
             terminalOpened={terminalOpened}
             terminalClosing={terminalClosing}
@@ -713,6 +729,7 @@ function ShellInner({
     <RightRail
       orientation={railOrientation}
       tab={rightTab}
+      tabs={rightPaneTabs}
       computerTone={computerTone}
       onSelect={railSelect}
       onExpand={expandRight}

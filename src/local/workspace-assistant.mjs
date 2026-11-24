@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { spawnCommand } from "./spawn.mjs";
+import { shrinkLogLine } from "./session-turns.mjs";
 import { TOOLS, runWorkspaceTool } from "./workspace-tools.mjs";
 import { resolveAttachments, formatAttachmentPrompt } from "./attachments.mjs";
 import { lunaBrief } from "./luna-brief.mjs";
@@ -164,12 +165,15 @@ export function createWorkspaceAssistant({
     // Set once the turn is registered; io.spawn reads it when the adapter runs.
     let cwd = "";
     const activity = (type, text) => {
+      // A CLI log line is a JSON event. Cutting it at 1,000 chars turns valid
+      // JSON into an unreadable dump in the trace, so bound it like a session
+      // log does: keep it valid JSON and drop repeated transcripts.
       state.assistantActivity.push({
         id: id(),
         threadId: thread.id,
         runId,
         type,
-        text: clean(text, 1000),
+        text: type === "log" ? shrinkLogLine(text) : clean(text, 1000),
         at: now(),
       });
       state.assistantActivity = state.assistantActivity.slice(-5000);

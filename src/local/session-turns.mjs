@@ -49,20 +49,25 @@ const SETTLED = ["stopped", "complete"];
 
 const LOG_LINE_LIMIT = 4096;
 const LOG_STRING_LIMIT = 500;
+const LOG_ARRAY_LIMIT = 20;
 // Whole transcripts a CLI repeats on every event (Pi's agent_end and turn_end); the chat has them.
-const LOG_DROPPED_KEYS = new Set(["messages", "toolResults"]);
+const LOG_DROPPED_KEYS = new Set(["messages", "toolResults", "partialResult"]);
+// A payload too large even after shrinking keeps only the event around it: the
+// Activity pane reads its type, ids, tool name and outcome flags, never a dump.
+const LOG_HEAVY_KEYS = ["message", "messages", "result", "toolResults", "partialResult", "entry"];
 
-function shrinkValue(value) {
+function shrinkValue(value, stringLimit = LOG_STRING_LIMIT, arrayLimit = LOG_ARRAY_LIMIT) {
   if (typeof value === "string")
-    return value.length > LOG_STRING_LIMIT
-      ? `${value.slice(0, LOG_STRING_LIMIT)}…[+${value.length - LOG_STRING_LIMIT} chars]`
+    return value.length > stringLimit
+      ? `${value.slice(0, stringLimit)}…[+${value.length - stringLimit} chars]`
       : value;
-  if (Array.isArray(value)) return value.map(shrinkValue);
+  if (Array.isArray(value))
+    return value.slice(0, arrayLimit).map((item) => shrinkValue(item, stringLimit, arrayLimit));
   if (value && typeof value === "object")
     return Object.fromEntries(
       Object.entries(value)
         .filter(([key]) => !LOG_DROPPED_KEYS.has(key))
-        .map(([key, item]) => [key, shrinkValue(item)]),
+        .map(([key, item]) => [key, shrinkValue(item, stringLimit, arrayLimit)]),
     );
   return value;
 }
@@ -76,8 +81,15 @@ function shrinkValue(value) {
 export function shrinkLogLine(line) {
   if (typeof line !== "string" || line.length <= LOG_LINE_LIMIT) return line;
   try {
-    const shrunk = JSON.stringify(shrinkValue(JSON.parse(line)));
+    const parsed = JSON.parse(line);
+    const shrunk = JSON.stringify(shrinkValue(parsed));
     if (shrunk.length <= LOG_LINE_LIMIT * 2) return shrunk;
+    // Still too long: a cut string would stop being JSON and show up in the
+    // trace as an unreadable CLI dump. Keep the event, drop the bulk.
+    const light = Array.isArray(parsed) ? parsed : { ...parsed };
+    if (!Array.isArray(light)) for (const key of LOG_HEAVY_KEYS) delete light[key];
+    const text = JSON.stringify(shrinkValue(light, 200, 5));
+    if (text.length <= LOG_LINE_LIMIT * 2) return text;
   } catch {}
   return `${line.slice(0, LOG_LINE_LIMIT)}…[+${line.length - LOG_LINE_LIMIT} chars]`;
 }
