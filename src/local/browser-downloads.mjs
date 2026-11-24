@@ -34,6 +34,10 @@ export function createBrowserDownloads(notify) {
   };
   return {
     list,
+    /** Files are saved or being saved; closing removes them. */
+    get holdsFiles() {
+      return downloads.size > 0 || pending.size > 0;
+    },
     get(id) {
       return downloads.get(id) ?? null;
     },

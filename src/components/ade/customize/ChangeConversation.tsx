@@ -212,7 +212,11 @@ export function ChangeConversation({ change }: { change: Change }) {
                       {agent?.short ?? "The agent"} answered the same again.
                     </p>
                   ) : (
-                    <SessionMessage message={message} agentName={agent?.short} />
+                    <SessionMessage
+                      message={message}
+                      agentName={agent?.short}
+                      streaming={busy && message === last && message.role === "agent"}
+                    />
                   )}
                 </MotionItem>
               );

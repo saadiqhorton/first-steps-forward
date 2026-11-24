@@ -26,6 +26,7 @@
 - `message: Message`
 - `agentName?: string`
 - `projectId?: string` (workspace file preview opens)
+- `streaming?: boolean` (still being written: finished Markdown blocks are not parsed again)
 
 ## 6. States
 - role variants: user / agent / system

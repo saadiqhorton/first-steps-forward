@@ -25,6 +25,11 @@ export function supportsBrowserPictureInPicture() {
   );
 }
 
+/** Whether the preview is showing in its own window, which stays visible when the tab does not. */
+export function browserPictureInPictureOpen() {
+  return active !== null;
+}
+
 export function closeBrowserPictureInPicture() {
   const current = active;
   active = null;

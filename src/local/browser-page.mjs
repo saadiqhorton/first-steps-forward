@@ -190,6 +190,25 @@ const noop = () => {};
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 /** Resolves to `promise`'s value, or `fallback` on rejection or after `ms`. */
+/** Runs in the page: does a field or an editable area hold text, other than a search box? */
+function hasTypedText() {
+  const isSearch = (field) =>
+    field.type === "search" ||
+    /^(search|combobox|searchbox)$/.test(field.getAttribute("role") ?? "") ||
+    /^(q|query|search)$/i.test(field.name ?? "");
+  const typed = (field) =>
+    !field.disabled && !field.readOnly && !isSearch(field) && field.value.trim() !== "";
+  const text =
+    "input:not([type]),input[type=text],input[type=email],input[type=password]," +
+    "input[type=tel],input[type=url],input[type=number],textarea";
+  return (
+    [...document.querySelectorAll(text)].some(typed) ||
+    [...document.querySelectorAll('[contenteditable=""],[contenteditable=true]')].some(
+      (area) => area.textContent.trim() !== "",
+    )
+  );
+}
+
 const withTimeout = (promise, ms, fallback) => {
   let timer;
   const late = new Promise((resolve) => {
@@ -282,6 +301,8 @@ class BrowserSession {
   #validProfile;
   #closePromise;
   #active = null;
+  /** CDP sessions holding the pages' animations, while at rest. @type {Set<any> | null} */
+  #resting = null;
   #closed = false;
   #listeners = new Map();
   #controls = new WeakMap();
@@ -470,6 +491,62 @@ class BrowserSession {
   /** How many viewers are streaming this session's screen. */
   get viewerCount() {
     return this.#screencasts.size + this.#devtoolsSessions.size;
+  }
+
+  /**
+   * Nobody uses or watches the browser: stop its pages' animations, which otherwise keep several
+   * processes busy drawing. Page state, scripts and connections are left alone; `wake` undoes it.
+   */
+  async rest() {
+    if (this.#closed || this.#resting) return;
+    const resting = (this.#resting = new Set());
+    await Promise.all(
+      this.#usable().map(async (page) => {
+        try {
+          const cdp = await page.context().newCDPSession(page);
+          resting.add(cdp);
+          await cdp.send("Animation.enable");
+          await cdp.send("Animation.setPlaybackRate", { playbackRate: 0 });
+          // Used again while this was being sent.
+          if (this.#resting !== resting) await this.#resume(cdp);
+        } catch {
+          /* a page that is closing needs no rest */
+        }
+      }),
+    );
+  }
+
+  async wake() {
+    const resting = this.#resting;
+    if (!resting) return;
+    this.#resting = null;
+    await Promise.all([...resting].map((cdp) => this.#resume(cdp)));
+  }
+
+  async #resume(cdp) {
+    await cdp.send("Animation.setPlaybackRate", { playbackRate: 1 }).catch(noop);
+    await cdp.detach().catch(noop);
+  }
+
+  /**
+   * Whether closing the browser would lose something: downloaded files, private tabs, an open
+   * dialog or file picker, or text someone typed. A page that does not answer counts as yes.
+   */
+  async holdsUnsaved() {
+    if (this.#downloads.holdsFiles || this.#dialog || this.fileChooser()) return true;
+    if (this.tabs().tabs.some((tab) => tab.profileId === "incognito")) return true;
+    const answers = await Promise.all(
+      this.#usable().flatMap((page) =>
+        page.frames().map((frame) =>
+          withTimeout(
+            frame.evaluate(hasTypedText).catch(() => false),
+            1500,
+            true,
+          ),
+        ),
+      ),
+    );
+    return answers.some(Boolean);
   }
 
   /** Current navigation state. canGoBack and canGoForward are cached from CDP history. */
@@ -959,6 +1036,7 @@ class BrowserSession {
         ? { ackPaceMs: Math.max(1000 / 60, Math.min(100, options.ackPaceMs)) }
         : {}),
     };
+    await this.wake();
     // A viewer attaching re-reads the real viewport, so its first frame matches the mapping.
     if (this.#active) void this.#syncViewport(this.#active);
     const stream = new Screencast(
@@ -2122,6 +2200,8 @@ function requireString(value, name) {
 }
 
 const DEFAULT_IDLE_MS = 15 * 60_000;
+/** How long a browser goes unused and unwatched before its pages stop animating. */
+const REST_MS = 60_000;
 
 /** `ADE_BROWSER_IDLE_MS` overrides the idle timeout, for tests. */
 function browserIdleMs() {
@@ -2141,6 +2221,7 @@ export function createBrowserHub({
   defaultProfile,
   validProfile,
   idleMs = browserIdleMs(),
+  restMs = REST_MS,
   sessionStore,
   shouldPersist = () => true,
 }) {
@@ -2230,12 +2311,33 @@ export function createBrowserHub({
     }
   }
 
-  /** Closes sessions that have no viewer and went unused for `idleMs`. */
+  const unusedFor = (key) => Date.now() - (lastUsed.get(key) ?? 0);
+  /** Sessions being asked whether they can be closed. */
+  const asking = new Set();
+
+  /** Closes an unused session, unless that would lose something: it stays, at rest, until used. */
+  async function closeUnused(key, session) {
+    if (asking.has(key)) return;
+    asking.add(key);
+    try {
+      if (await session.holdsUnsaved?.()) return void (await session.rest?.());
+      // Someone may have come back while the pages were asked.
+      if (open.get(key) === session && session.viewerCount === 0 && unusedFor(key) > idleMs)
+        await close(key);
+    } catch {
+      /* looked at again by the next sweep */
+    } finally {
+      asking.delete(key);
+    }
+  }
+
+  /** Rests sessions that have no viewer and went unused, and closes them after `idleMs`. */
   function sweep() {
     const time = Date.now();
     for (const [key, session] of open) {
       if (session.viewerCount > 0) lastUsed.set(key, time);
-      else if (time - (lastUsed.get(key) ?? 0) > idleMs) void close(key);
+      else if (unusedFor(key) > idleMs) void closeUnused(key, session);
+      else if (unusedFor(key) > restMs) void session.rest?.().catch(noop);
     }
   }
 
@@ -2245,7 +2347,7 @@ export function createBrowserHub({
       clearInterval(sweeper);
       sweeper = undefined;
     } else if (!sweeper) {
-      sweeper = setInterval(sweep, Math.min(60_000, Math.max(10, idleMs / 2)));
+      sweeper = setInterval(sweep, Math.min(60_000, Math.max(10, Math.min(idleMs, restMs) / 2)));
       sweeper.unref?.();
     }
   }
@@ -2293,7 +2395,10 @@ export function createBrowserHub({
       if (current) {
         try {
           const session = await current;
-          if (!session.closed) return session;
+          if (!session.closed) {
+            await session.wake?.();
+            return session;
+          }
         } catch {
           // A failed connect is retried below.
         }

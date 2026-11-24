@@ -383,6 +383,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             messages={threadMessages}
             agentName={agent?.short}
             projectId={project.id}
+            running={running}
           />
           <ConversationProcesses sessionId={session.id} />
           {session.pendingDevCommand && (

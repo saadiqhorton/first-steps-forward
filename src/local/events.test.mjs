@@ -42,3 +42,20 @@ test("SSE sends ready and coalesced invalidations, and disconnect removes the cl
   assert.equal(hub.clientCount(), 0);
   hub.close();
 });
+
+test("a burst of log lines is one update, and other news is not held back for it", async () => {
+  const hub = createEventHub({ coalesceMs: 5, logsMs: 60, heartbeatMs: 1000 });
+  const res = new Response();
+  hub.connect(new EventEmitter(), res);
+  const sent = (event) => (res.body.match(new RegExp(`event: ${event}`, "g")) ?? []).length;
+  for (let i = 0; i < 10; i++) {
+    hub.emit("logs:s");
+    hub.emit("session:s");
+    await new Promise((resolve) => setTimeout(resolve, 3));
+  }
+  assert.equal(sent("logs"), 0);
+  assert.ok(sent("session") >= 1);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(sent("logs"), 1);
+  hub.close();
+});

@@ -594,6 +594,7 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
                 key={message.id}
                 message={message}
                 agentName={agent?.short ?? "Luna"}
+                streaming={running && message.role === "agent" && message === visibleRows.at(-1)}
               />
             ))}
 

@@ -2,7 +2,12 @@
  * A small SSE fan-out. `emit` sends invalidations (payloads name the data to
  * refetch); `push` sends the data itself, for text that grows as it streams.
  */
-export function createEventHub({ heartbeatMs = 25_000, coalesceMs = 100, pushMs = 50 } = {}) {
+export function createEventHub({
+  heartbeatMs = 25_000,
+  coalesceMs = 100,
+  logsMs = 250,
+  pushMs = 100,
+} = {}) {
   const clients = new Set();
   const pending = new Map();
   const versions = new Map();
@@ -59,16 +64,20 @@ export function createEventHub({ heartbeatMs = 25_000, coalesceMs = 100, pushMs 
       if (typeof scope !== "string" || !scope) return;
       const previous = pending.get(scope);
       if (previous) return;
-      const timer = setTimeout(() => {
-        pending.delete(scope);
-        const version = (versions.get(scope) ?? 0) + 1;
-        versions.set(scope, version);
-        const category = scope.split(":", 1)[0];
-        const event =
-          category === "computer" ? "computer" : category === "logs" ? "logs" : category;
-        const data = { scope, version };
-        for (const client of clients) send(client, event, data);
-      }, coalesceMs);
+      const timer = setTimeout(
+        () => {
+          pending.delete(scope);
+          const version = (versions.get(scope) ?? 0) + 1;
+          versions.set(scope, version);
+          const category = scope.split(":", 1)[0];
+          const event =
+            category === "computer" ? "computer" : category === "logs" ? "logs" : category;
+          const data = { scope, version };
+          for (const client of clients) send(client, event, data);
+          // Log lines come in bursts and each update redraws the Activity list.
+        },
+        Math.max(coalesceMs, scope.startsWith("logs:") ? logsMs : 0),
+      );
       timer.unref?.();
       pending.set(scope, timer);
     },

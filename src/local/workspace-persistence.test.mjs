@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -224,5 +226,70 @@ test("a deletion is applied even when the file is not read back", async () => {
     assert.deepEqual(JSON.parse(await readFile(file, "utf8")).sessions, []);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/** A lock as a process leaves it: the folder, and who took it. */
+async function leaveLock(file, owner) {
+  const lock = `${file}.lock`;
+  await mkdir(lock);
+  const info = await stat(lock, { bigint: true });
+  const identity = `${info.dev}:${info.ino}:${info.birthtimeNs}:${info.mtimeNs}`;
+  await writeFile(
+    `${lock}-owner`,
+    JSON.stringify({ host: os.hostname(), lock: identity, ...owner(identity) }),
+  );
+}
+async function deadPid() {
+  const child = spawn(process.execPath, ["-e", ""]);
+  await once(child, "exit");
+  return child.pid;
+}
+
+test("a lock left by a killed ADE does not hold up the next save", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ade-persistence-"));
+  const file = path.join(dir, "workspace.json");
+  try {
+    const state = snapshot([message("first", 1)]);
+    await saveWorkspace(file, state);
+    const pid = await deadPid();
+    await leaveLock(file, () => ({ pid }));
+    const started = Date.now();
+    state.sessions[0].messages.push(message("second", 2));
+    // Several at once: only one of them may remove the lock, and none may lose its data.
+    const other = snapshot([message("other", 3)]);
+    other.sessions[0].updatedAt = 3;
+    await Promise.all([saveWorkspace(file, state), saveWorkspace(file, other)]);
+    assert.ok(Date.now() - started < 3000, "waited for the lock to expire");
+    assert.deepEqual(
+      JSON.parse(await readFile(file, "utf8"))
+        .sessions[0].messages.map((m) => m.id)
+        .sort(),
+      ["first", "other", "second"],
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a lock is never taken from a running process, another computer, or a later owner", async () => {
+  const pid = await deadPid();
+  for (const [why, owner] of [
+    ["running", () => ({ pid: process.pid })],
+    ["another computer", () => ({ pid, host: "elsewhere" })],
+    ["a different lock", (identity) => ({ pid, lock: `${identity}0` })],
+    ["nonsense", () => ({ pid: "x" })],
+  ]) {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "ade-persistence-"));
+    const file = path.join(dir, "workspace.json");
+    try {
+      const state = snapshot([message("first", 1)]);
+      await saveWorkspace(file, state);
+      await leaveLock(file, owner);
+      await assert.rejects(saveWorkspace(file, state), /busy/, why);
+      assert.ok((await stat(`${file}.lock`)).isDirectory(), why);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
 });

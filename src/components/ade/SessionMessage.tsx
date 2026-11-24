@@ -1,4 +1,4 @@
-import { memo, type ComponentPropsWithoutRef } from "react";
+import { memo, useMemo, type ComponentPropsWithoutRef } from "react";
 import { File } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -75,15 +75,55 @@ function AttachmentVideos({ attachments }: { attachments: MessageAttachment[] })
     ));
 }
 
+// Links open in ADE's browser tab, as T3 does: web addresses and local HTML/PDF files.
+function markdownComponents(projectId: string | undefined) {
+  return {
+    a: function MarkdownLink({
+      href,
+      children,
+      node: _node,
+      ...props
+    }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+      return (
+        <a
+          href={href}
+          {...props}
+          onClick={(event) => {
+            if (typeof href !== "string") return;
+            const web = isPreviewableUrl(href);
+            const file = web ? null : workspaceFileFromLink(href);
+            if (!web && !file) return;
+            event.preventDefault();
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) {
+              window.open(href, "_blank", "noopener,noreferrer");
+              return;
+            }
+            if (web) {
+              requestPreviewOpen(href);
+              return;
+            }
+            if (file && projectId) requestPreviewFileOpen(projectId, file);
+          }}
+        >
+          {children}
+        </a>
+      );
+    },
+  };
+}
+
 /** Memoized: parsing a reply's Markdown is the costliest part of a conversation. */
 export const SessionMessage = memo(function SessionMessage({
   message,
   agentName,
   projectId,
+  streaming = false,
 }: {
   message: Message;
   agentName?: string | undefined;
   projectId?: string | undefined;
+  /** The message is still being written. */
+  streaming?: boolean;
 }) {
   const { role, attachments = [] } = message;
   const text = role === "user" && message.presentation ? message.presentation.text : message.text;
@@ -100,36 +140,8 @@ export const SessionMessage = memo(function SessionMessage({
   const longUser = role === "user" && (text.length > 480 || lineCount > 8);
   const attachmentRow = attachments.length ? <AttachmentChips attachments={attachments} /> : null;
 
-  // Links open in ADE's browser tab, as T3 does: web addresses and local HTML/PDF files.
-  const markdownLink = ({
-    href,
-    children,
-    node: _node,
-    ...props
-  }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) => (
-    <a
-      href={href}
-      {...props}
-      onClick={(event) => {
-        if (typeof href !== "string") return;
-        const web = isPreviewableUrl(href);
-        const file = web ? null : workspaceFileFromLink(href);
-        if (!web && !file) return;
-        event.preventDefault();
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) {
-          window.open(href, "_blank", "noopener,noreferrer");
-          return;
-        }
-        if (web) {
-          requestPreviewOpen(href);
-          return;
-        }
-        if (file && projectId) requestPreviewFileOpen(projectId, file);
-      }}
-    >
-      {children}
-    </a>
-  );
+  // The same object until the project changes, so parsed Markdown is kept (see AdeMarkdown).
+  const components = useMemo(() => markdownComponents(projectId), [projectId]);
 
   const content = structured ? (
     <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-ink/5 p-3 font-mono text-xs leading-relaxed">
@@ -137,7 +149,9 @@ export const SessionMessage = memo(function SessionMessage({
     </pre>
   ) : role === "agent" ? (
     <div className="ade-markdown break-words">
-      <AdeMarkdown components={{ a: markdownLink }}>{text}</AdeMarkdown>
+      <AdeMarkdown components={components} streaming={streaming}>
+        {text}
+      </AdeMarkdown>
     </div>
   ) : (
     <div className="whitespace-pre-wrap break-words">{text}</div>

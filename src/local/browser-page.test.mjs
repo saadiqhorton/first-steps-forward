@@ -135,7 +135,10 @@ class FakeContext extends EventEmitter {
     title: async () => "",
     isClosed: () => false,
     mainFrame: () => ({}),
+    frames: () => [{ evaluate: async () => this.typedText }],
+    context: () => this,
   });
+  typedText = false;
   pages() {
     return [this.#page];
   }
@@ -273,5 +276,52 @@ test("computer status goes running, then stopped when idle, then running on the 
   await waitFor(() => computers.status("p").status === "stopped", "computer session to stop");
   await computers.start("p");
   assert.equal(computers.status("p").status, "running");
+  await hub.closeAll();
+});
+
+test("a browser that holds typed text is not closed when idle, and closes once it is gone", async () => {
+  const { hub, opened } = fakeHub({ idleMs: 60 });
+  const session = await hub.get("form");
+  opened[0].context.typedText = true;
+  await sleep(300);
+  assert.equal(hub.peek("form"), session, "closing would lose the text");
+  assert.equal(session.closed, false);
+  opened[0].context.typedText = false;
+  await waitFor(() => hub.peek("form") === null, "the browser to close");
+});
+
+test("a browser holding a downloaded file or a private tab is not closed when idle", async () => {
+  for (const held of ["downloads", "incognito"]) {
+    const { hub } = fakeHub({ idleMs: 60 });
+    const session = await hub.get("p");
+    const tabs = session.tabs();
+    if (held === "incognito")
+      session.tabs = () => ({ ...tabs, tabs: [{ ...tabs.tabs[0], profileId: "incognito" }] });
+    else session.fileChooser = () => ({ id: "open" });
+    await sleep(250);
+    assert.equal(hub.peek("p"), session, held);
+    await hub.closeAll();
+  }
+});
+
+test("an unused, unwatched browser stops animating and resumes when it is used or watched", async () => {
+  const { hub, opened } = fakeHub({ idleMs: 60_000, restMs: 40 });
+  const session = await hub.get("p");
+  const rates = () =>
+    opened[0].context.calls
+      .filter(({ method }) => method === "Animation.setPlaybackRate")
+      .map(({ params }) => params.playbackRate);
+  await waitFor(() => rates().length === 1, "the pages to rest");
+  assert.deepEqual(rates(), [0]);
+  await sleep(120);
+  assert.deepEqual(rates(), [0], "rested once");
+  assert.equal(await hub.get("p"), session, "resting keeps the same browser");
+  assert.deepEqual(rates(), [0, 1]);
+  await waitFor(() => rates().length === 3, "it to rest again");
+  const stop = await session.startScreencast({}, () => {});
+  assert.deepEqual(rates(), [0, 1, 0, 1]);
+  await sleep(120);
+  assert.deepEqual(rates(), [0, 1, 0, 1], "a watched browser does not rest");
+  await stop();
   await hub.closeAll();
 });

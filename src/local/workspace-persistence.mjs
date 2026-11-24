@@ -1,4 +1,5 @@
-import { promises as fs } from "node:fs";
+import { mkdirSync, promises as fs, statSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -193,6 +194,83 @@ export async function reconcileWorkspaceMessages(file, current) {
   mergeWorkspaceRecords(current, saved);
 }
 
+/** What tells one lock folder from a later one at the same path. */
+const lockIdentity = (stat) => `${stat.dev}:${stat.ino}:${stat.birthtimeNs}:${stat.mtimeNs}`;
+
+/**
+ * Take the lock and sign it, so others can tell a crash from a slow write. In one go: between
+ * two awaits a busy process could be killed holding a lock nobody can attribute.
+ * @throws EEXIST when it is taken
+ */
+function takeLock(lock) {
+  mkdirSync(lock, { mode: 0o700 });
+  try {
+    const owner = {
+      pid: process.pid,
+      host: os.hostname(),
+      lock: lockIdentity(statSync(lock, { bigint: true })),
+    };
+    writeFileSync(`${lock}-owner`, JSON.stringify(owner), { mode: 0o600 });
+  } catch {
+    /* Saving does not depend on it: an unsigned lock is given up on after a minute. */
+  }
+}
+
+/** Whether `pid` no longer runs. Anything uncertain counts as running. */
+function processGone(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return error.code === "ESRCH";
+  }
+}
+
+/** Whether the process that took this very lock has died (it says who it is beside the lock). */
+async function lockAbandoned(lock) {
+  try {
+    const owner = JSON.parse(await fs.readFile(`${lock}-owner`, "utf8"));
+    return (
+      owner.host === os.hostname() &&
+      Number.isInteger(owner.pid) &&
+      owner.pid > 0 &&
+      processGone(owner.pid) &&
+      owner.lock === lockIdentity(await fs.stat(lock, { bigint: true }))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Remove the lock of a process that died holding it, instead of refusing saves for a minute.
+ * Only one process may do it at a time, and it looks again once it is that process, so a lock
+ * someone has just taken is never removed.
+ */
+async function breakAbandonedLock(lock) {
+  if (!(await lockAbandoned(lock))) return;
+  const breaking = `${lock}-breaking`;
+  try {
+    await fs.mkdir(breaking, { mode: 0o700 });
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    try {
+      // Left by a process that died doing this; it takes milliseconds.
+      if (Date.now() - (await fs.stat(breaking)).mtimeMs > 10_000) await fs.rmdir(breaking);
+    } catch (staleError) {
+      if (staleError.code !== "ENOENT") throw staleError;
+    }
+    return;
+  }
+  try {
+    if (await lockAbandoned(lock)) await fs.rmdir(lock);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  } finally {
+    await fs.rmdir(breaking).catch(() => {});
+  }
+}
+
 /**
  * Serialize read/merge/write across ADE processes sharing this file: a dev and a
  * production ADE (or a dev server mid-restart) may run against the same ~/.ade.
@@ -203,11 +281,12 @@ export async function saveWorkspace(file, current, options = {}) {
   let acquired = false;
   for (let attempt = 0; attempt < 200; attempt++) {
     try {
-      await fs.mkdir(lock, { mode: 0o700 });
+      takeLock(lock);
       acquired = true;
       break;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
+      await breakAbandonedLock(lock);
       // An interrupted process may leave a lock. Remove it only after it has
       // been idle for a minute; normal writes take milliseconds.
       try {
