@@ -1,12 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import type { SessionSummary } from "@/lib/ade/types";
 import { sessionTitle } from "@/lib/ade/sessionTitle";
-import { needsYou, timeAgo, useAdeState, useNow } from "@/lib/ade/store";
+import { needsYou, useAdeState } from "@/lib/ade/store";
 import { StatusPill } from "./StatusPill";
+import { TimeAgo } from "./TimeAgo";
 
 export function SessionCard({ session, delay = 0 }: { session: SessionSummary; delay?: number }) {
   const agents = useAdeState((state) => state.agents);
-  const now = useNow();
   const agent = agents.find((a) => a.id === session.agentId);
   const ring = session.status === "ready" ? "ring-1 ring-teal/40" : "ring-1 ring-teal/25";
   return (
@@ -14,7 +14,7 @@ export function SessionCard({ session, delay = 0 }: { session: SessionSummary; d
       <div className="mb-2 flex items-center gap-2">
         <StatusPill status={session.status} needsYou={needsYou(session)} />
         <span className="font-mono text-2xs text-dim">
-          {agent?.short} · {timeAgo(now, session.updatedAt)}
+          {agent?.short} · <TimeAgo at={session.updatedAt} />
         </span>
         <Link
           to="/sessions/$sessionId"

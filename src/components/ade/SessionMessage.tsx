@@ -1,4 +1,4 @@
-import type { ComponentPropsWithoutRef } from "react";
+import { memo, type ComponentPropsWithoutRef } from "react";
 import { File } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -75,7 +75,8 @@ function AttachmentVideos({ attachments }: { attachments: MessageAttachment[] })
     ));
 }
 
-export function SessionMessage({
+/** Memoized: parsing a reply's Markdown is the costliest part of a conversation. */
+export const SessionMessage = memo(function SessionMessage({
   message,
   agentName,
   projectId,
@@ -204,4 +205,4 @@ export function SessionMessage({
       </div>
     </div>
   );
-}
+});

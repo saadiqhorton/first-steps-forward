@@ -757,10 +757,7 @@
    which keeps hydration markup stable on direct loads. */
 .shell-full-width [data-testid="shell-right"],.shell-full-width [data-testid="seam-shell-right"]{display:none!important;}
 
-/* First-paint guard before React has run: workspace content marks its own page,
-   so the pane is already gone as soon as that content is in the DOM. Luna's chat
-   (`.workspace-assistant`) keeps the pane: it is where its Activity tab lives. */
-body:has(.workspace-page) [data-testid="shell-right"],
-body:has(.workspace-page) [data-testid="seam-shell-right"],
-body:has(.workspace-chat:not(.workspace-assistant)) [data-testid="shell-right"],
-body:has(.workspace-chat:not(.workspace-assistant)) [data-testid="seam-shell-right"]{display:none!important;}
+/* First-paint guard before React has run: shellInitScript marks <html> from the
+   URL, and Shell.tsx takes the mark off once its own class is in charge. Never
+   `body:has(...)`: that restyles the whole page for every change inside it. */
+[data-shell-boot="full"] [data-testid="shell-right"],[data-shell-boot="full"] [data-testid="seam-shell-right"]{display:none!important;}

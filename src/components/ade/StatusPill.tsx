@@ -32,7 +32,7 @@ export function StatusPill({
         className={`size-1.5 rounded-full ${m.dot} ${m.pulse ? "animate-pulse-soft" : ""}`}
         aria-hidden
       />
-      <TextShimmer active={!!m.pulse}>{m.label}</TextShimmer>
+      {m.pulse ? <TextShimmer>{m.label}</TextShimmer> : m.label}
     </span>
   );
 }

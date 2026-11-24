@@ -394,15 +394,19 @@ const PLAN_VERBS = {
  *   clientVersion?: string,
  *   on: {
  *     sessionId(id: string): void,
- *     text(text: string): void,
+ *     text(text: string, continues?: boolean): void,
  *     log(line: string): void,
  *     notice(text: string): void,
+ *     prompting?(): void,
  *     models?(models: { id: string, label?: string, meta?: string }[]): void,
  *     defaultModel?(value: string): void,
  *     permission(request: object): Promise<{ outcome: string, optionId?: string }>,
  *   },
  * }} options
  */
+/** How long pieces of a reply are gathered before they are shown. */
+const STREAM_MS = 50;
+
 export async function runAcpTurn(options) {
   const { child, name, on } = options;
   let sessionId = null;
@@ -410,16 +414,26 @@ export async function runAcpTurn(options) {
   let text = "";
   let lastRun = "";
   let emitted = false;
+  /** Part of the current run of text has been sent; what follows continues it. */
+  let open = false;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let streamTimer;
   let declinedModeSwitch = false;
   let skippedUpdate = false;
   // Text runs between tool calls are separate paragraphs; ADE's message list
   // joins an agent's consecutive output, so the break has to be in the text.
-  const flush = () => {
-    if (text.trim()) {
-      on.text(emitted ? `\n\n${text}` : text);
-      emitted = true;
-    }
+  const stream = () => {
+    clearTimeout(streamTimer);
+    streamTimer = undefined;
+    if (!text || (!open && !text.trim())) return;
+    on.text(emitted && !open ? `\n\n${text}` : text, open);
+    emitted = open = true;
     text = "";
+  };
+  const flush = () => {
+    stream();
+    text = "";
+    open = false;
   };
   const run = (kind) => {
     if (lastRun === kind) return;
@@ -551,6 +565,8 @@ export async function runAcpTurn(options) {
         if (update.content?.type === "text" && typeof update.content.text === "string") {
           run("text");
           text += update.content.text;
+          // The reply shows as it is written, a few pieces at a time.
+          streamTimer ??= setTimeout(stream, STREAM_MS);
         }
         return;
       case "agent_thought_chunk":
@@ -703,12 +719,23 @@ export async function runAcpTurn(options) {
   on.sessionId(sessionId);
 
   const wanted = options.modes?.[options.permission ?? "build"] ?? [];
-  const available = (opened?.modes?.availableModes ?? []).map((mode) => mode?.id);
+  // Some agents offer their modes as a config option instead.
+  const modeOption = opened?.modes
+    ? undefined
+    : (opened?.configOptions ?? []).find((option) => option?.category === "mode");
+  const available = opened?.modes
+    ? (opened.modes.availableModes ?? []).map((mode) => mode?.id)
+    : selectValues(modeOption).map((entry) => entry.value);
+  const currentMode = opened?.modes?.currentModeId ?? modeOption?.currentValue;
   const mode =
     wanted.find((id) => available.includes(id)) ??
     (options.unadvertisedModes ? wanted[0] : undefined);
-  if (mode && opened.modes?.currentModeId !== mode)
-    await call("session/set_mode", { sessionId, modeId: mode });
+  if (currentMode && options.keepMode?.(currentMode, options.permission ?? "build")) {
+    // The agent's own choice stands.
+  } else if (mode && currentMode !== mode)
+    await (modeOption
+      ? call("session/set_config_option", { sessionId, configId: modeOption.id, value: mode })
+      : call("session/set_mode", { sessionId, modeId: mode }));
   else if (!mode && options.permission === "plan")
     on.log(`${name} offers no plan mode; ADE declines edit and command requests itself.`);
   else if (!mode && wanted.length)
@@ -776,6 +803,7 @@ export async function runAcpTurn(options) {
       );
   }
 
+  /** @type {object[]} */
   const prompt = [{ type: "text", text: options.prompt }];
   if (caps.promptCapabilities?.image)
     for (const image of options.images ?? [])
@@ -784,8 +812,13 @@ export async function runAcpTurn(options) {
         mimeType: image.mime,
         data: (await fsp.readFile(image.path)).toString("base64"),
       });
-  const result = await call("session/prompt", { sessionId, prompt });
-  flush();
+  on.prompting?.();
+  let result;
+  try {
+    result = await call("session/prompt", { sessionId, prompt });
+  } finally {
+    flush();
+  }
   return {
     stopReason: typeof result?.stopReason === "string" ? result.stopReason : "end_turn",
     // Declining a mode switch can stop the turn (Claude ends it "cancelled").

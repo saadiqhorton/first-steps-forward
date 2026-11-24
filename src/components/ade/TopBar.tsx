@@ -47,7 +47,6 @@ export function TopBar({ isDesktop }: { isDesktop: boolean }) {
     queryKey: ["workspace-assistant-threads", "global"],
     queryFn: () => getAssistantThreads(),
     enabled: serviceAvailable,
-    refetchInterval: 5000,
   });
   const unreadChats = (assistant.data?.threads ?? []).filter((thread) =>
     thread.readAt !== undefined ? thread.readAt < thread.updatedAt : thread.unread,

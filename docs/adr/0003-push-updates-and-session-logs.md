@@ -34,3 +34,10 @@ on a server timer only while an event client is connected, and immediately after
   detects a missing stream, and the fallback keeps the UI current at a lower rate.
 - A legacy workspace migrates its embedded logs on startup; subsequent writes use the per-session
   JSONL files.
+
+## Amended 2026-11-24
+
+A reply being written is pushed as its new text (`message-delta`, `assistant-message`) instead of
+being refetched, and a log line invalidates only its log. Pages poll for nothing the server
+announces, so a reconnect refetches everything. Workspace writes go through one queue
+(`src/local/save-queue.mjs`) and read the file back only when another process has written it.

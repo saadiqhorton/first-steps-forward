@@ -188,3 +188,41 @@ test("voice choices survive a merge with another process's older snapshot", () =
   mergeWorkspaceRecords(current, { voice: { chimeDuringDictation: true } });
   assert.deepEqual(current.voice, { chimeDuringDictation: false });
 });
+
+test("an untouched file is not read back, and another process's write still is", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ade-persistence-"));
+  const file = path.join(dir, "workspace.json");
+  try {
+    const mine = snapshot([message("first", 1)]);
+    await saveWorkspace(file, mine);
+    // Removing it in memory sticks only if the save did not merge the old file back in.
+    mine.sessions[0].messages = [];
+    await saveWorkspace(file, mine);
+    assert.deepEqual(JSON.parse(await readFile(file, "utf8")).sessions[0].messages, []);
+    const other = snapshot([message("theirs", 3)]);
+    other.sessions[0].updatedAt = 3;
+    await saveWorkspace(file, other);
+    mine.sessions[0].messages.push(message("mine", 4));
+    await saveWorkspace(file, mine);
+    assert.deepEqual(
+      JSON.parse(await readFile(file, "utf8")).sessions[0].messages.map((m) => m.id),
+      ["theirs", "mine"],
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a deletion is applied even when the file is not read back", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ade-persistence-"));
+  const file = path.join(dir, "workspace.json");
+  try {
+    const mine = snapshot([message("first", 1)]);
+    await saveWorkspace(file, mine);
+    mine.deletedSessions = { s: 5 };
+    await saveWorkspace(file, mine);
+    assert.deepEqual(JSON.parse(await readFile(file, "utf8")).sessions, []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

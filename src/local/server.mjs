@@ -2,6 +2,8 @@
 // local API, and the agent-browser stream. `npm run dev` mounts the same API
 // and stream on Vite's server instead (adeLocalApi in ade-local.mjs).
 import { createReadStream, promises as fs } from "node:fs";
+import { promisify } from "node:util";
+import { constants, brotliCompress, gzip } from "node:zlib";
 import http from "node:http";
 import path from "node:path";
 import { handle, handleUpgrade, setListenAddress, signInFromLink, start } from "./ade-local.mjs";
@@ -119,6 +121,42 @@ async function serveStatic(root, pathname, req, res) {
   return sendFile(shell, shellStat, false, req, res);
 }
 
+const COMPRESSIBLE = new Set([
+  ".html",
+  ".js",
+  ".mjs",
+  ".css",
+  ".json",
+  ".svg",
+  ".txt",
+  ".webmanifest",
+]);
+const compress = {
+  br: (data) =>
+    promisify(brotliCompress)(data, { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }),
+  gzip: promisify(gzip),
+};
+/** Compressed copies of the build's files, made once each: file, version and encoding to bytes. */
+const compressed = new Map();
+
+/** The build is a few megabytes, which a phone on Wi-Fi feels; this machine does not. */
+function encodingFor(file, stat, req) {
+  if (stat.size < 1024 || !COMPRESSIBLE.has(path.extname(file).toLowerCase())) return null;
+  const accepted = String(req.headers["accept-encoding"] ?? "");
+  return /\bbr\b/.test(accepted) ? "br" : /\bgzip\b/.test(accepted) ? "gzip" : null;
+}
+
+function compressedFile(file, tag, encoding) {
+  const key = `${encoding} ${tag} ${file}`;
+  let data = compressed.get(key);
+  if (!data) {
+    data = fs.readFile(file).then(compress[encoding]);
+    data.catch(() => compressed.delete(key));
+    compressed.set(key, data);
+  }
+  return data;
+}
+
 async function sendFile(file, stat, immutable, req, res) {
   const tag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
   res.setHeader(
@@ -128,11 +166,19 @@ async function sendFile(file, stat, immutable, req, res) {
   res.setHeader("x-content-type-options", "nosniff");
   res.setHeader("etag", tag);
   res.setHeader("cache-control", immutable ? "public, max-age=31536000, immutable" : "no-cache");
+  const encoding = encodingFor(file, stat, req);
+  if (COMPRESSIBLE.has(path.extname(file).toLowerCase())) res.setHeader("vary", "accept-encoding");
   if (req.headers["if-none-match"] === tag) {
     res.statusCode = 304;
     return res.end();
   }
   res.statusCode = 200;
+  if (encoding) {
+    const data = await compressedFile(file, tag, encoding);
+    res.setHeader("content-encoding", encoding);
+    res.setHeader("content-length", data.length);
+    return res.end(req.method === "HEAD" ? undefined : data);
+  }
   res.setHeader("content-length", stat.size);
   if (req.method === "HEAD") return res.end();
   await new Promise((resolve, reject) => {

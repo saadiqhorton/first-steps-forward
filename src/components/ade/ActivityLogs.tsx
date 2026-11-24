@@ -23,6 +23,7 @@ import { AgentActivity, type AgentActivityItem } from "@/components/agents/agent
 import { groupActivityTurns, trimmedFromFront } from "@/lib/ade/activityTurns.mjs";
 import type { SummaryPart, TurnGroup, TurnItem } from "@/lib/ade/activityTurns.mjs";
 import { currentActivity, formatSessionLogs } from "@/lib/ade/formatLogs.mjs";
+import { scrollToEnd } from "@/lib/ade/scrollToEnd";
 import { cn } from "@/lib/utils";
 
 const STEP_ICON: Record<string, LucideIcon> = {
@@ -284,12 +285,13 @@ export function ActivityLogs({
     [live, activity, current],
   );
   const rootRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLElement | null>(null);
   // Follow new events only while the reader is already near the bottom.
   const stickToBottomRef = useRef(true);
 
   useEffect(() => {
     const scroller = scrollParent(rootRef.current);
+    scrollerRef.current = scroller;
     if (!scroller) return;
     const onScroll = () => {
       stickToBottomRef.current =
@@ -301,8 +303,8 @@ export function ActivityLogs({
 
   // Keyed on the log itself: once it holds 500 lines its length stops changing.
   useEffect(() => {
-    if (!stickToBottomRef.current) return;
-    endRef.current?.scrollIntoView({ block: "end" });
+    if (!stickToBottomRef.current) return undefined;
+    return scrollToEnd(scrollerRef.current);
   }, [current]);
 
   // A turn with nothing to show is left out, unless it is the live one (it says what is next).
@@ -327,7 +329,6 @@ export function ActivityLogs({
             activity={status}
           />
         ))}
-        <div ref={endRef} aria-hidden className="h-0" />
       </div>
     );
   }

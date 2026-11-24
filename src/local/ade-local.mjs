@@ -25,6 +25,7 @@ import { createBrowserDevtools, DEVTOOLS_SOCKET_PATH } from "./browser-devtools.
 import { STREAM_PATH } from "../shared/browser-contract.mjs";
 import { createControlRegistry } from "./browser-control.mjs";
 import { saveWorkspace } from "./workspace-persistence.mjs";
+import { createSaveQueue } from "./save-queue.mjs";
 import { createEventHub } from "./events.mjs";
 import { createSessionLogs } from "./session-logs.mjs";
 import { SourceError } from "./project-sources.mjs";
@@ -65,6 +66,13 @@ const DATA_DIR = path.join(os.homedir(), ".ade");
 const DATA_FILE = path.join(DATA_DIR, "workspace.json");
 const sessionLogs = createSessionLogs(path.join(DATA_DIR, "session-logs"));
 const eventHub = createEventHub();
+// Hoisted: services created below are given these before the queue exists.
+function save() {
+  return saves.save();
+}
+function saveSoon() {
+  saves.saveSoon();
+}
 const state = { projects: [], sessions: [], processes: [], agents: [], workflows: [] };
 const id = () => randomUUID();
 const now = () => Date.now();
@@ -136,6 +144,8 @@ let organizationService = null;
 const turns = createSessionTurns({
   state,
   save,
+  saveSoon,
+  push: (event, key, build) => eventHub.push(event, key, build),
   adapters,
   dataDir: DATA_DIR,
   logs: sessionLogs,
@@ -164,6 +174,8 @@ const turns = createSessionTurns({
 const workspaceAssistant = createWorkspaceAssistant({
   state,
   save,
+  saveSoon,
+  push: (event, key, build) => eventHub.push(event, key, build),
   id: () => randomUUID(),
   now: () => Date.now(),
   emit: (scope) => eventHub.emit(scope),
@@ -500,7 +512,7 @@ const bootstrapPayload = () => ({
     .map(({ output, ...process }) => process),
   agents: state.agents,
 });
-async function save() {
+async function writeWorkspace() {
   await saveWorkspace(DATA_FILE, state, {
     livePendingDevCommands() {
       const live = new Map();
@@ -517,6 +529,9 @@ async function save() {
     eventHub.emit("bootstrap");
   }
 }
+const saves = createSaveQueue(writeWorkspace, {
+  onError: (error) => console.warn("ADE could not save the workspace:", error),
+});
 async function load() {
   try {
     const saved = JSON.parse(await fs.readFile(DATA_FILE, "utf8"));
@@ -643,7 +658,7 @@ function refreshBootstrapInBackground(activeProjectIds = []) {
     );
     if (bootstrapChanged || changedSessions.length || devStateChanged) {
       for (const session of changedSessions) eventHub.emit(`session:${session.id}`);
-      save().catch(() => {});
+      saveSoon();
     }
   })()
     .catch((error) => console.warn("ADE background bootstrap refresh failed:", error))
@@ -1076,6 +1091,7 @@ export async function stop() {
   if (computerWatchTimer) clearInterval(computerWatchTimer);
   computerWatchTimer = null;
   eventHub.close();
+  await saves.flush().catch(() => {});
   await browserDevtools.close();
   await browserStream.close();
   await browserHub.closeAll();

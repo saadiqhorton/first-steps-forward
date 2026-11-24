@@ -22,6 +22,8 @@ import { appendFileSync, existsSync } from "node:fs";
 
 const [agent, ...args] = process.argv.slice(2);
 const env = process.env;
+// This stand-in is a CLI from before the streaming servers: ADE falls back to a plain run.
+if (args[0] === "app-server" || args[0] === "acp") process.exit(2);
 if (env.FAKE_CLI_LOG)
   appendFileSync(
     env.FAKE_CLI_LOG,

@@ -14,6 +14,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { formatAttachmentPrompt } from "./attachments.mjs";
 import { classifyFailure, modelSuggestion, retryHint } from "./classify.mjs";
+import { createMessageStream } from "./message-stream.mjs";
 import { getDiff, projectFiles, projectInfo } from "./project-git.mjs";
 import { checksFor, otherServicesNote } from "./project-scripts.mjs";
 import { processRunsIn, runCommand, spawnCommand, stopProcess } from "./spawn.mjs";
@@ -28,7 +29,7 @@ import { canAttemptAgent } from "../shared/agent-availability.mjs";
 /** @typedef {{ id: string, name: string, path: string, branch?: string, uncommittedFiles?: string[], missing?: boolean, workspaceInstructions?: string, color?: string | null, icon?: { kind: string, value: string } | null }} Project */
 /** @typedef {{ id: string, name: string, short?: string, installed?: boolean, signedIn?: boolean, version?: string, providers?: string[], account?: string, tools?: string }} AgentRow */
 /** @typedef {{ id: string, name: string, mime: string, size: number, kind: string, absPath: string, recording?: boolean }} ResolvedFile */
-/** @typedef {{ text: string, files?: ResolvedFile[], presentation?: { text: string, references: { kind: string, label: string, detail: string }[] } }} Message */
+/** @typedef {{ id?: string, text: string, files?: ResolvedFile[], presentation?: { text: string, references: { kind: string, label: string, detail: string }[] } }} Message */
 /** @typedef {Record<string, any> & { id: string, projectId: string, agentId: string, status: string, messages: any[], logs: string[] }} Session */
 /**
  * What ADE knows about a project at the start of a turn, beyond Git.
@@ -99,9 +100,9 @@ export function addLog(session, text) {
   session.logs = [...(session.logs ?? []), text].slice(-500);
   session.updatedAt = now();
 }
-/** Add a message; an agent's output arriving in quick succession joins its last message. */
+/** Add a message; an agent's output arriving in quick succession joins its last message. Returns the message. */
 export function addMessage(session, role, text, extra = {}) {
-  if (!text.trim()) return;
+  if (!text.trim()) return undefined;
   if (role === "user") session.lastUserMessageAt = now();
   const last = session.messages.at(-1);
   if (role === "agent" && last?.role === "agent" && now() - last.at < 1200) {
@@ -109,6 +110,7 @@ export function addMessage(session, role, text, extra = {}) {
     last.at = now();
   } else session.messages.push({ id: randomUUID(), role, text, at: now(), ...extra });
   session.updatedAt = now();
+  return session.messages.at(-1);
 }
 
 /** @param {ResolvedFile[]} files */
@@ -141,6 +143,8 @@ const SAFETY_PREAMBLE =
  * @param {object} deps
  * @param {{ sessions: Session[], projects: Project[], agents: AgentRow[] }} deps.state the workspace
  * @param {() => Promise<void>} deps.save persists the workspace
+ * @param {() => void} [deps.saveSoon] persists it shortly, for changes nothing waits on
+ * @param {(event: string, key: string, build: () => object | null) => void} [deps.push] sends data to open pages
  * @param {Record<string, AgentAdapter>} deps.adapters agent adapters by id
  * @param {string} deps.dataDir ADE's data folder
  * @param {(project: Project, session: Session) => TurnContext | Promise<TurnContext>} deps.turnContext dev server, agent browser and tool wiring for a project's turn
@@ -155,6 +159,8 @@ const SAFETY_PREAMBLE =
 export function createSessionTurns({
   state,
   save,
+  saveSoon = () => void save().catch((error) => console.warn("ADE could not save:", error)),
+  push = () => {},
   adapters,
   dataDir,
   turnContext,
@@ -170,6 +176,7 @@ export function createSessionTurns({
   const slots = new Map();
   /** Permission requests waiting on the user: request id → answer. */
   const waiters = new Map();
+  const messageStream = createMessageStream(push, "message-delta");
 
   const projectOf = (session) => state.projects.find((p) => p.id === session.projectId);
   const busy = (session) => slots.has(session.id);
@@ -185,6 +192,11 @@ export function createSessionTurns({
     await logs?.flush(session.id);
     await save();
   };
+  /** Like `persist`, for changes made while a turn runs: nothing waits on the write. */
+  const persistSoon = (session) => {
+    emit(`session:${session.id}`);
+    saveSoon();
+  };
   const recordLog = (session, text) => {
     if (logs)
       void logs
@@ -192,7 +204,7 @@ export function createSessionTurns({
         .catch((error) => console.warn(`ADE could not append log for ${session.id}:`, error));
     else addLog(session, text);
     if (logs) session.updatedAt = now();
-    emit(`session:${session.id}`);
+    // Only the log changed: the conversation and the project list are not refetched for it.
     emit(`logs:${session.id}`);
   };
   /** @param {Session} session @param {string} status */
@@ -419,13 +431,25 @@ export function createSessionTurns({
       return;
     }
     // Only this turn's own output decides its outcome, never earlier history.
-    const turn = { texts: /** @type {string[]} */ ([]), sawText: false, spawned: false };
+    const turn = {
+      texts: /** @type {string[]} */ ([]),
+      sawText: false,
+      spawned: false,
+      /** @type {{ id: string, role: string, text: string, at: number } | undefined} the agent message being written */
+      reply: undefined,
+    };
     /** @type {TurnIO} */
     const io = {
       signal: slot.controller.signal,
       emit(event) {
         if (event.type === "text") {
-          addMessage(session, "agent", event.text);
+          // A streamed reply grows one message, however slowly its pieces come.
+          if (event.continues && turn.reply) {
+            turn.reply.text += event.text;
+            turn.reply.at = now();
+            session.updatedAt = now();
+          } else turn.reply = addMessage(session, "agent", event.text) ?? turn.reply;
+          if (turn.reply) messageStream.update(session.id, turn.reply);
           if (event.text.trim()) turn.sawText = true;
         } else if (event.type === "log") {
           // The adapter already parsed the raw line; what is kept only needs the failure wording,
@@ -436,7 +460,7 @@ export function createSessionTurns({
         } else if (event.type === "notice" || event.type === "error") {
           addMessage(session, "system", event.text);
           turn.texts.push(event.text);
-          if (event.type === "notice") void persist(session);
+          persistSoon(session);
         } else if (event.type === "conversation") session.agentSessionId = event.id;
         else if (event.type === "default-model") session.acpDefaultModel = event.id;
       },
@@ -450,7 +474,7 @@ export function createSessionTurns({
             session,
             JSON.stringify({ type: "permission", decision: "asked", title: request.title }),
           );
-          void persist(session);
+          persistSoon(session);
         });
       },
       spawn(bin, args, { env = {}, stdin = "ignore" } = {}) {
@@ -499,6 +523,8 @@ export function createSessionTurns({
           `Connectors could not be read, so this turn runs without them: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
+      // The turn's context is known now; its log lines alone do not refetch the conversation.
+      emit(`session:${session.id}`);
       end = await adapter.runTurn(
         {
           projectPath: project.path,
@@ -654,13 +680,14 @@ export function createSessionTurns({
      * interrupts the current run and goes next ("now").
      * @param {Session} session @param {Message & { handoffId?: string, source?: object }} message @param {"now" | "later"} [when]
      */
-    async send(session, { text, files = [], presentation, handoffId, source }, when = "later") {
+    async send(session, { id, text, files = [], presentation, handoffId, source }, when = "later") {
       refuseIfComplete(session, "sending a message");
       refuseDuringAgentUpdate(session.agentId);
       const fresh = session.agentStartFresh === true;
       const rawPrompt = `${text}${formatAttachmentPrompt(files)}`;
       const prompt = fresh ? agentHandoffPrompt(session, rawPrompt) : rawPrompt;
       addMessage(session, "user", text, {
+        ...(id ? { id } : {}),
         ...attachmentMeta(files),
         ...(presentation ? { presentation } : {}),
         ...(handoffId ? { handoffId } : {}),

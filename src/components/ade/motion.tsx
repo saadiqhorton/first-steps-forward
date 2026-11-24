@@ -9,21 +9,24 @@ const exitTween = {
 
 /** A list or grid item that rises in, slides to its new place when siblings change, and fades out.
  *  Render inside <AnimatePresence initial={false} mode="popLayout"> with a stable key.
+ *  Pass enter={false} for items that were there already and are only now rendered.
  *  Pass layout={false} for append-only lists such as a chat thread, where siblings never reorder. */
 export function MotionItem({
   children,
   className,
   layout = true,
+  enter = true,
 }: {
   children: ReactNode;
   className?: string;
   layout?: boolean;
+  enter?: boolean;
 }) {
   const reduce = useReducedMotion();
   return (
     <motion.div
       layout={reduce || !layout ? false : "position"}
-      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
+      initial={!enter ? false : reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, transition: exitTween }}
       transition={reduce ? { duration: 0 } : motionTokens.spring.smooth}

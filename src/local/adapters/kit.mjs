@@ -37,7 +37,8 @@ import { findOnPath, runCommand, spawnCommand, stopProcess } from "../spawn.mjs"
 
 /**
  * One thing that happened during a turn.
- * @typedef {{ type: "text", text: string }
+ * A `text` that `continues` is the next piece of the reply the last one began.
+ * @typedef {{ type: "text", text: string, continues?: boolean }
  *   | { type: "log", line: string }
  *   | { type: "notice", text: string }
  *   | { type: "error", text: string, fatal?: boolean }
@@ -138,7 +139,7 @@ export function describeAgent(agent) {
 }
 
 /** Calls `onLine` for each complete, non-blank line, buffering partial ones. */
-function lines(onLine) {
+export function lines(onLine) {
   let buffer = "";
   return {
     push(data) {
@@ -155,7 +156,7 @@ function lines(onLine) {
 }
 
 /** Settles once the process has exited (`code`, `signal`) or could not start (`error`). */
-function exited(child) {
+export function exited(child) {
   return new Promise((resolve) => {
     child.once("error", (error) => resolve({ error }));
     child.once("close", (code, signal) => resolve({ code, signal }));
@@ -168,13 +169,14 @@ function exited(child) {
  * - `command(input)` → `[bin, args, env?]` for the turn.
  * - `wireComputer(computer)` (optional) → spawn extras (`args`, `env`, …) the
  *   agent's `command` merges in; harness-specific shape stays at the leaf.
- * - `parse(line)` → the session events one stdout line carries.
+ * - `parse(line, turn)` → the session events one stdout line carries; `turn` is an
+ *   object of its own to remember things in until the process ends.
  * - `keepLog(line)` (optional) → whether the line belongs in the Activity log;
  *   return false for streaming deltas that would evict the steps around them.
  * - `stderr(line)` (optional) → session events a stderr line carries.
  * - `prepare(input)` (optional) runs before the process starts.
  * - `probeModels(run)` (optional) → the CLI's own model listing.
- * @template {{ command: (input: TurnInput) => any[], wireComputer?: (computer: ComputerContext | null) => ComputerWiring, parse: (line: string) => SessionEvent[], keepLog?: (line: string) => boolean, stderr?: (line: string) => SessionEvent[], prepare?: (input: TurnInput) => Promise<void> }} T
+ * @template {{ command: (input: TurnInput) => any[], wireComputer?: (computer: ComputerContext | null) => ComputerWiring, parse: (line: string, turn?: any) => SessionEvent[], keepLog?: (line: string) => boolean, stderr?: (line: string) => SessionEvent[], prepare?: (input: TurnInput) => Promise<void> }} T
  * @param {T} spec
  */
 export function defineCliAgent(spec) {
@@ -197,6 +199,8 @@ export function defineCliAgent(spec) {
       const [bin, args, env = {}] = spec.command(input);
       const child = io.spawn(bin, args, { env, stdin: "ignore" });
       let fatal = false;
+      /** What `parse` remembers between this turn's lines. */
+      const turn = {};
       /** @param {SessionEvent[] | undefined} events */
       const forward = (events) => {
         for (const event of events ?? []) {
@@ -205,7 +209,7 @@ export function defineCliAgent(spec) {
         }
       };
       const stdout = lines((line) => {
-        const events = spec.parse(line);
+        const events = spec.parse(line, turn);
         if (spec.keepLog?.(line) !== false) io.emit({ type: "log", line });
         forward(events);
       });
@@ -260,6 +264,11 @@ export async function acpLaunch(spec, { dataDir, onInstall }) {
  * - `bridge` (optional): an npm package that adapts the user's CLI to ACP.
  * - `wireComputer(computer)` (optional): spawn extras (`mcpServers`, …) for the turn.
  * - `sessionMeta({ computer, permission, ephemeral })` (optional): `_meta` for session/new.
+ * - `keepMode(current, permission)` (optional): leave the agent in the mode it is in.
+ * - `rememberModels: false` (optional): its models come from elsewhere; do not cache ACP's.
+ * - `answer(request, io)` (optional): answers its permission requests instead of the user.
+ * - `fallback(input, io, error)` (optional): runs the turn another way when ACP failed before
+ *   the prompt was sent.
  * @template {{ id: string, name: string, bin: string, installHint: string, modes: { build: string[], plan: string[] }, command: (launch: any) => any[], bridge?: { pkg: string, version: string, bin: string, entry: string }, acpAuth?: () => {methods: string[], meta?: object, missingMessage?: string}, wireComputer?: (computer: ComputerContext | null) => ComputerWiring, sessionMeta?: (options: { computer: boolean, permission?: string, ephemeral?: boolean }) => object }} T
  * @param {T} spec
  */
@@ -329,6 +338,14 @@ export function defineAcpAgent(spec) {
       child.once("error", (error) => (start.error = error));
       /** @type {TurnEnd} */
       let end;
+      let prompted = false;
+      /** @type {unknown} */
+      let failure;
+      const fallsBack = () =>
+        failure !== undefined &&
+        !prompted &&
+        !io.signal.aborted &&
+        !!(/** @type {any} */ (spec).fallback);
       try {
         const { stopReason, declinedModeSwitch } = await runAcpTurn({
           child,
@@ -340,6 +357,7 @@ export function defineAcpAgent(spec) {
           permission: input.permission ?? "build",
           modes: spec.modes,
           unadvertisedModes: /** @type {any} */ (spec).unadvertisedModes,
+          keepMode: /** @type {any} */ (spec).keepMode,
           model: input.model,
           defaultModel: input.defaultModel,
           effort: input.effort,
@@ -369,14 +387,20 @@ export function defineAcpAgent(spec) {
           on: {
             sessionId: (id) => io.emit({ type: "conversation", id }),
             defaultModel: (id) => io.emit({ type: "default-model", id }),
-            text: (text) => io.emit({ type: "text", text }),
+            text: (text, continues) =>
+              io.emit({ type: "text", text, ...(continues ? { continues: true } : {}) }),
             log: (line) => io.emit({ type: "log", line }),
             notice: (text) => io.emit({ type: "notice", text }),
+            prompting: () => (prompted = true),
             models: (models) =>
+              /** @type {any} */ (spec).rememberModels !== false &&
               void rememberAcpModels(input.dataDir, spec.id, input.version, models, {
                 complete: false,
               }),
-            permission: (request) => io.ask(request),
+            permission: (request) =>
+              /** @type {any} */ (spec).answer
+                ? /** @type {any} */ (spec).answer(request, io)
+                : io.ask(request),
           },
         });
         // Plan's own decline of "leave plan mode" ends Claude's turn as
@@ -398,7 +422,8 @@ export function defineAcpAgent(spec) {
       } catch (error) {
         // ADE stopping the turn on purpose is not news, and a process that
         // never started is reported once, below.
-        if (child.pid && !start.error && !io.signal.aborted)
+        failure = error;
+        if (!fallsBack() && child.pid && !start.error && !io.signal.aborted)
           io.emit({ type: "error", text: error instanceof Error ? error.message : String(error) });
         end = { ok: false, reason: "unfinished" };
       }
@@ -412,6 +437,7 @@ export function defineAcpAgent(spec) {
       await done;
       clearTimeout(linger);
       stderr.flush();
+      if (fallsBack()) return /** @type {any} */ (spec).fallback(input, io, failure);
       if (start.error) {
         io.emit({ type: "error", text: `${bin} failed to start: ${start.error.message}` });
         return { ok: false, reason: "spawn" };

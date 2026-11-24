@@ -6,6 +6,7 @@ import { spawnCommand } from "./spawn.mjs";
 import { shrinkLogLine } from "./session-turns.mjs";
 import { TOOLS, runWorkspaceTool } from "./workspace-tools.mjs";
 import { resolveAttachments, formatAttachmentPrompt } from "./attachments.mjs";
+import { createMessageStream } from "./message-stream.mjs";
 import { lunaBrief } from "./luna-brief.mjs";
 
 const clean = (s, n = 4000) => String(s ?? "").slice(0, n);
@@ -40,6 +41,8 @@ const nativeAttachments = (files) =>
 export function createWorkspaceAssistant({
   state,
   save,
+  saveSoon = () => void save().catch((error) => console.warn("ADE could not save:", error)),
+  push = () => {},
   id = randomUUID,
   now = Date.now,
   emit = () => {},
@@ -57,6 +60,7 @@ export function createWorkspaceAssistant({
   state.assistantMessages ??= [];
   state.assistantActivity ??= [];
   const running = new Map();
+  const messageStream = createMessageStream(push, "assistant-message");
 
   // Luna's folders live under the ADE data dir, never in the directory ADE
   // happened to be launched from. Chat shares the root; Work gets one folder
@@ -179,16 +183,21 @@ export function createWorkspaceAssistant({
       state.assistantActivity = state.assistantActivity.slice(-5000);
     };
     let sawText = false;
+    /** The assistant message being written. */
+    let reply;
     const io = {
       signal: controller.signal,
       emit(event) {
-        if (event.type === "text" && event.text?.trim()) {
+        if (event.type === "text" && (event.text?.trim() || (event.continues && reply))) {
           sawText = true;
           const last = state.assistantMessages.at(-1);
           // Streamed replies arrive as many text events; merge the ones from the
           // same run that arrive in quick succession into one message (like
           // session-turns), keeping the first message's agentId/model attribution.
-          if (
+          if (event.continues && reply) {
+            reply.text = clean(`${reply.text}${event.text}`);
+            reply.at = now();
+          } else if (
             last?.role === "assistant" &&
             last.threadId === thread.id &&
             last.runId === runId &&
@@ -196,8 +205,9 @@ export function createWorkspaceAssistant({
           ) {
             last.text = clean(`${last.text}${event.text}`);
             last.at = now();
+            reply = last;
           } else {
-            state.assistantMessages.push({
+            reply = {
               id: id(),
               threadId: thread.id,
               runId,
@@ -206,15 +216,21 @@ export function createWorkspaceAssistant({
               at: now(),
               agentId: thread.agentId,
               model: thread.model,
-            });
+            };
+            state.assistantMessages.push(reply);
           }
+          // The page gets the new text itself; only other changes need a refetch.
+          messageStream.update(thread.id, reply);
+          thread.updatedAt = now();
+          saveSoon();
+          return;
         } else if (event.type === "log") activity("log", event.line);
         else if (event.type === "notice" || event.type === "error")
           activity(event.type, event.text);
         else if (event.type === "conversation") thread.agentSessionId = event.id;
         else if (event.type === "default-model") thread.defaultModel = event.id;
         thread.updatedAt = now();
-        void save();
+        saveSoon();
         emit("workspace-assistant");
       },
       ask: async (request) => {

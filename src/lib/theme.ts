@@ -7,6 +7,9 @@ export const THEME_KEY = "ade-theme";
 /** Runs in <head> before first paint so a stored or system dark theme never flashes light. */
 export const themeInitScript = `(function(){try{var t=localStorage.getItem("${THEME_KEY}");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}})()`;
 
+/** Runs in <head> too: pages that take the whole window hide the right pane from the first paint. */
+export const shellInitScript = `(function(){var p=location.pathname;if(p==="/"||(/^\\/workspace(\\/|$)/.test(p)&&!/^\\/workspace\\/assistant(\\/|$)/.test(p))||/^\\/p\\/[^/]+\\/(workflows|skills|processes)(\\/|$)/.test(p))document.documentElement.dataset.shellBoot="full"})()`;
+
 /** The veil never starts fully transparent: frame one already carries most of the change. */
 const VEIL_START = 0.35;
 /** Toggling faster than this shortens (or skips) the veil, so a deliberate double-click stays instant. */

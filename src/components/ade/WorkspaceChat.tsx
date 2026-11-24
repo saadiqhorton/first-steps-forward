@@ -39,9 +39,12 @@ import {
   sendAssistantMessage,
   startAssistantThread,
   stopAssistantThread,
+  type AssistantDetail,
+  type AssistantMessage,
   type AssistantThread,
   type Handoff,
 } from "@/lib/ade/workspaceApi";
+import { scrollToEnd } from "@/lib/ade/scrollToEnd";
 
 /**
  * Luna uses the same conversation header, messages and Composer as a project
@@ -60,7 +63,6 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   // A prompt chip must fill the composer every time it is pressed, even when
   // the same chip was pressed before (or the text was edited in between).
   const [promptSeed, setPromptSeed] = useState({ text: "", nonce: 0 });
-  const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
@@ -72,19 +74,16 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const threads = useQuery({
     queryKey: ["workspace-assistant-threads", search],
     queryFn: () => getAssistantThreads(search ? `query=${encodeURIComponent(search)}` : ""),
-    refetchInterval: 5000,
   });
   const detail = useQuery({
     queryKey: ["workspace-assistant-thread", threadId],
     queryFn: () => getAssistantThread(threadId!),
     enabled: !!threadId,
-    refetchInterval: 2500,
   });
   const handoffs = useQuery({
     queryKey: ["workspace-handoffs", threadId],
     queryFn: () => getHandoffs(threadId),
     enabled: !!threadId,
-    refetchInterval: 3500,
   });
 
   const thread = detail.data?.thread;
@@ -138,27 +137,32 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const otherHandoffs = (handoffs.data?.handoffs ?? []).filter(
     (item) => item.status !== "approval_pending",
   );
-  const rows = useMemo<Message[]>(
-    () =>
-      messages.map((message) => ({
-        id: message.id,
-        role: message.role === "assistant" ? "agent" : message.role,
-        text: message.text,
-        at: message.at,
-        ...(message.attachments?.length
-          ? {
-              attachments: message.attachments.map((attachment) => ({
-                id: attachment.id,
-                name: attachment.name,
-                mime: attachment.mime,
-                size: attachment.size,
-                kind: attachment.mime.startsWith("image/") ? ("image" as const) : ("file" as const),
-              })),
-            }
-          : {}),
-      })),
-    [messages],
-  );
+  // A message keeps its row until it changes, so only a changed one renders again.
+  const rowCache = useRef(new WeakMap<AssistantMessage, Message>());
+  const rows = useMemo<Message[]>(() => {
+    const toRow = (message: AssistantMessage): Message => ({
+      id: message.id,
+      role: message.role === "assistant" ? "agent" : message.role,
+      text: message.text,
+      at: message.at,
+      ...(message.attachments?.length
+        ? {
+            attachments: message.attachments.map((attachment) => ({
+              id: attachment.id,
+              name: attachment.name,
+              mime: attachment.mime,
+              size: attachment.size,
+              kind: attachment.mime.startsWith("image/") ? ("image" as const) : ("file" as const),
+            })),
+          }
+        : {}),
+    });
+    return messages.map((message) => {
+      let row = rowCache.current.get(message);
+      if (!row) rowCache.current.set(message, (row = toRow(message)));
+      return row;
+    });
+  }, [messages]);
 
   const threadKey = thread?.id ?? "";
   const threadAgent = thread?.agentId ?? "";
@@ -195,9 +199,10 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   }, [threadKey, threadAgent, threadModel, threadEffort, threadPermission]);
 
   useEffect(() => {
-    if (!threadId) return;
+    // Once a reply has settled: marking every piece of it read would save the workspace each time.
+    if (!threadId || running) return;
     void patchAssistantThread(threadId, { readAt: Date.now() }).catch(() => {});
-  }, [threadId, thread?.updatedAt]);
+  }, [threadId, thread?.updatedAt, running]);
 
   // A different chat is a different conversation: drop the previous chat's
   // catch-up list, error, and scroll position instead of carrying them over.
@@ -212,7 +217,8 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
   const lastMessageLength = messages.at(-1)?.text.length;
   useEffect(() => {
     if (stickToBottomRef.current || lastMessageRole === "user")
-      endRef.current?.scrollIntoView({ block: "end" });
+      return scrollToEnd(scrollRef.current);
+    return undefined;
   }, [
     messages.length,
     lastMessageRole,
@@ -254,6 +260,20 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
         ? (await Promise.all(files.map((file) => uploadAttachment(file)))).map((a) => a.id)
         : [];
       if (threadId) {
+        // Shown at once; the refetch below replaces it with the saved message.
+        if (!files.length)
+          client.setQueryData<AssistantDetail>(
+            ["workspace-assistant-thread", threadId],
+            (shown) =>
+              shown && {
+                ...shown,
+                thread: { ...shown.thread, status: "thinking" },
+                messages: [
+                  ...shown.messages,
+                  { id: `sending-${Date.now()}`, role: "user", text: outgoing, at: Date.now() },
+                ],
+              },
+          );
         await sendAssistantMessage(threadId, {
           text: outgoing,
           ...(attachmentIds.length ? { attachmentIds } : {}),
@@ -280,6 +300,8 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
       return true;
     } catch (e) {
       setError(`Couldn't send: ${e instanceof Error ? e.message : String(e)}`);
+      if (threadId)
+        void client.invalidateQueries({ queryKey: ["workspace-assistant-thread", threadId] });
       return false;
     } finally {
       setSending(false);
@@ -634,7 +656,6 @@ export function WorkspaceChat({ threadId }: { threadId?: string }) {
                 </div>
               </details>
             )}
-            <div ref={endRef} />
           </div>
         </div>
 

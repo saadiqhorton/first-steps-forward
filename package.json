@@ -11,6 +11,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "start": "node scripts/start-local.mjs",
+    "app": "vite build && node scripts/start-local.mjs",
     "package": "vite build && node scripts/package.mjs",
     "browser:setup": "node scripts/browser-setup.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.local.json",

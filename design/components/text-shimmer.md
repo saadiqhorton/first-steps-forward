@@ -12,8 +12,8 @@
 
 ## 3. Anatomy
 - Outer tag (`as`) with `data-state` and `aria-busy` when active
-- Stage wrapper measuring visibility
-- Label span with clipped gradient fill; label crossfade on children change
+- Stage wrapper positioning the label
+- Label span with label crossfade on children change; a masked highlight band swept by CSS transforms (compositor only: no per-frame JavaScript or repaint)
 
 ## 4. Tokens used
 - `--ts-highlight` ← `--text-shimmer-highlight` or `currentColor`
@@ -29,7 +29,7 @@
 
 ## 6. States
 - active (`data-state="active"`, `aria-busy`), idle (`data-state="idle"`)
-- paused when off-screen, page hidden, or reduced motion
+- no sweep under reduced motion; browsers pause it off-screen and in hidden pages
 - hover / disabled / error: N/A
 
 ## 7. Code example

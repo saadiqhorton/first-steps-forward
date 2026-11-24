@@ -1049,3 +1049,27 @@ test("every CLI adapter receives the one-turn workspace capability", () => {
   // The capability is a capability, not a permission: the token names the thread.
   assert.equal(capability.threadId, "session-1");
 });
+
+test("Pi's reply streams piece by piece, and its final message is not repeated", () => {
+  const turn = {};
+  const parse = (event) => pi.parse(JSON.stringify(event), turn);
+  const delta = (text) =>
+    parse({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: text },
+    });
+  const end = (text) =>
+    parse({
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text }] },
+    });
+  parse({ type: "message_start", message: { role: "assistant", content: [] } });
+  assert.deepEqual(delta("\n"), [], "nothing to show yet");
+  assert.deepEqual(delta("Hello"), [{ type: "text", text: "\nHello" }]);
+  assert.deepEqual(delta(" "), [{ type: "text", text: " ", continues: true }]);
+  assert.deepEqual(end("\nHello world"), [{ type: "text", text: "world", continues: true }]);
+  // The next message of the turn is its own paragraph.
+  parse({ type: "message_start", message: { role: "assistant", content: [] } });
+  assert.deepEqual(delta("Next"), [{ type: "text", text: "\n\nNext" }]);
+  assert.deepEqual(end("Next"), []);
+});

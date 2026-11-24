@@ -5,30 +5,28 @@ import { type AgentSelection } from "@/components/ade/AgentPicker";
 import { Composer } from "@/components/ade/Composer";
 import { DiffPanel } from "@/components/ade/DiffPanel";
 import { RightPanePortal } from "@/components/ade/RightPanePortal";
-import { SessionMessage } from "@/components/ade/SessionMessage";
+import { SessionThread } from "@/components/ade/SessionThread";
+import { TimeAgo } from "@/components/ade/TimeAgo";
 import { ConversationProcesses } from "@/components/ade/processes/ConversationProcesses";
-import { MotionItem } from "@/components/ade/motion";
 import { DevCommandRequestCard } from "@/components/ade/DevCommandRequestCard";
 import { PermissionRequestCard } from "@/components/ade/PermissionRequestCard";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
-import { AnimatePresence } from "motion/react";
 import { StatusPill } from "@/components/ade/StatusPill";
 import { useShell } from "@/components/ade/shellContext";
 import { writeLastModel } from "@/lib/ade/lastModels";
 import { currentActivity } from "@/lib/ade/formatLogs.mjs";
+import { scrollToEnd } from "@/lib/ade/scrollToEnd";
 import { sessionTitle } from "@/lib/ade/sessionTitle";
 import { askConfirm, warnUser } from "@/lib/ade/userNotices";
 import { sessionPairKey } from "@/shared/session-scope.mjs";
 import {
   answerDevCommand,
   needsYou,
-  timeAgo,
   uploadAttachment,
   uploadBrowserRecording,
   useAde,
   useSession,
   useSessionLogs,
-  useNow,
   useAdeState,
 } from "@/lib/ade/store";
 import { isBrowserRecording } from "@/lib/ade/browser/composerFeedback";
@@ -64,15 +62,17 @@ function selectionFromSession(session: {
 export function SessionView({ sessionId }: { sessionId: string }) {
   const { steer, complete, reopen, stop, switchAgent, setSessionOptions, runChecks, refresh } =
     useAde();
-  const state = useAdeState((state) => ({
-    sessions: state.sessions,
-    projects: state.projects,
-    agents: state.agents,
-    hydrated: state.hydrated,
-  }));
+  // Only this conversation's rows: another session's progress must not re-render this one.
+  const { summary, project, agent, hydrated } = useAdeState((state) => {
+    const summary = state.sessions.find((s) => s.id === sessionId);
+    return {
+      summary,
+      project: state.projects.find((p) => p.id === summary?.projectId),
+      agent: state.agents.find((a) => a.id === summary?.agentId),
+      hydrated: state.hydrated,
+    };
+  });
   const { rightTab } = useShell();
-  const now = useNow();
-  const summary = state.sessions.find((s) => s.id === sessionId);
   const detailQuery = useSession(summary?.id ?? "");
   const logsQuery = useSessionLogs(summary?.id ?? "");
   const session = useMemo(
@@ -92,7 +92,6 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   const [completing, setCompleting] = useState(false);
   const [checksBusy, setChecksBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Auto-scroll only if the reader is already near the bottom (or sent the
   // last message); updated from scroll events below.
@@ -112,7 +111,8 @@ export function SessionView({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     if (stickToBottomRef.current || lastMessageRole === "user")
-      endRef.current?.scrollIntoView({ block: "end" });
+      return scrollToEnd(scrollRef.current);
+    return undefined;
   }, [session?.messages.length, session?.status, lastMessageRole, lastMessageLength, pendingCount]);
 
   useEffect(() => {
@@ -130,27 +130,21 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     session?.permission,
   ]);
 
-  const project = state.projects.find((p) => p.id === session?.projectId);
-  const agent = state.agents.find((a) => a.id === session?.agentId);
-
   // Opening user turn duplicates session.request in the header — skip it so the
   // thread starts on agent work instead of a second wall of the same brief.
+  const messages = session?.messages;
+  const request = session?.request;
   const threadMessages = useMemo(() => {
-    if (!session) return [];
-    const msgs = session.messages;
-    const first = msgs[0];
-    if (
-      first?.role === "user" &&
-      !first.presentation &&
-      first.text.trim() === session.request.trim()
-    ) {
-      return msgs.slice(1);
+    if (!messages) return [];
+    const first = messages[0];
+    if (first?.role === "user" && !first.presentation && first.text.trim() === request?.trim()) {
+      return messages.slice(1);
     }
-    return msgs;
-  }, [session]);
+    return messages;
+  }, [messages, request]);
 
   if (!summary) {
-    if (!state.hydrated) return <main className="flex-1" />;
+    if (!hydrated) return <main className="flex-1" />;
     throw notFound();
   }
   if (!session)
@@ -330,7 +324,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
             </Link>
             <span className="label-mono">/ task</span>
             <span className="ml-auto font-mono text-xs text-dim">
-              started {timeAgo(now, session.createdAt)} · {agent?.short ?? session.agentId}
+              started <TimeAgo at={session.createdAt} /> · {agent?.short ?? session.agentId}
             </span>
           </div>
           <h1
@@ -384,13 +378,12 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           onScroll={onMessagesScroll}
           className="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-4 @lg:px-7 py-5"
         >
-          <AnimatePresence initial={false}>
-            {threadMessages.map((m) => (
-              <MotionItem key={m.id} layout={false}>
-                <SessionMessage message={m} agentName={agent?.short} projectId={project.id} />
-              </MotionItem>
-            ))}
-          </AnimatePresence>
+          <SessionThread
+            key={session.id}
+            messages={threadMessages}
+            agentName={agent?.short}
+            projectId={project.id}
+          />
           <ConversationProcesses sessionId={session.id} />
           {session.pendingDevCommand && (
             <DevCommandRequestCard
@@ -492,7 +485,6 @@ export function SessionView({ sessionId }: { sessionId: string }) {
               </div>
             </div>
           )}
-          <div ref={endRef} />
         </div>
 
         <div className="shrink-0 border-t border-line px-4 @lg:px-7 py-4">

@@ -45,7 +45,8 @@ function usePollingQuery<T>(key: unknown[], queryFn: () => Promise<T>, enabled =
     queryKey: key,
     queryFn,
     enabled,
-    refetchInterval: 3500,
+    // Changes are pushed (see store.tsx); this catches what only time changes, like a snooze ending.
+    refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   });
 }

@@ -1,6 +1,17 @@
-.shimmer { --ts-highlight: var(--text-shimmer-highlight, currentColor); --ts-base: var(--text-shimmer-base, color-mix(in oklab, currentColor 12%, var(--text-muted))); }
+.shimmer { --ts-highlight: var(--text-shimmer-highlight, currentColor); --ts-base: var(--text-shimmer-base, color-mix(in oklab, currentColor 12%, var(--text-muted))); --ts-half: 2.2em; --ts-soft: color-mix(in oklab, currentColor 50%, transparent); }
 .stage { position: relative; display: inline-block; max-width: 100%; }
-.label { display: inline-block; max-width: 100%; background-repeat: no-repeat; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-.label::selection { -webkit-text-fill-color: currentColor; }
-@supports not (color: color-mix(in oklab, red, blue)) { .label { background: none !important; -webkit-text-fill-color: currentColor; } }
-@media (forced-colors: active) { .label { background: none !important; -webkit-text-fill-color: currentColor; } }
+.label { position: relative; display: inline-block; max-width: 100%; overflow: clip; color: var(--ts-highlight); }
+.base { transition: color var(--duration-standard) var(--ease-standard); }
+.shimmer[data-state="active"] .base { color: var(--ts-base); }
+/* A window with soft edges slides across while its text slides back by the same amount: the lit
+   text stays put and only the window moves. Both are transforms, so no frame restyles or repaints. */
+.band { position: absolute; inset: 0; overflow: hidden; pointer-events: none; opacity: 0; transition: opacity var(--duration-standard) var(--ease-standard); mask-image: linear-gradient(90deg, transparent calc(50% - var(--ts-half)), var(--ts-soft) calc(50% - var(--ts-half) / 2), currentColor 50%, var(--ts-soft) calc(50% + var(--ts-half) / 2), transparent calc(50% + var(--ts-half))); }
+.lit { position: absolute; inset: 0; }
+.lit::after { content: attr(data-text); }
+.shimmer[data-state="active"] .band { opacity: 1; animation: sweep var(--ts-duration) linear infinite; }
+.shimmer[data-state="active"] .lit { animation: counter var(--ts-duration) linear infinite; }
+@keyframes sweep { 0% { transform: translateX(calc(-50% - var(--ts-half))); } 76%, 100% { transform: translateX(calc(50% + var(--ts-half))); } }
+@keyframes counter { 0% { transform: translateX(calc(50% + var(--ts-half))); } 76%, 100% { transform: translateX(calc(-50% - var(--ts-half))); } }
+@supports not (color: color-mix(in oklab, red, blue)) { .shimmer[data-state="active"] .base { color: inherit; } .band { display: none; } }
+@media (forced-colors: active) { .shimmer[data-state="active"] .base { color: CanvasText; } .band { display: none; } }
+@media (prefers-reduced-motion: reduce) { .band { display: none; } }

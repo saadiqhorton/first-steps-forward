@@ -717,6 +717,7 @@ function ShellInner({
     }
     const root = document.body;
     root.classList.toggle("shell-full-width", fullWidthSection);
+    document.documentElement.removeAttribute("data-shell-boot");
     if (!fullWidthSection && wasFullWidth.current) {
       if (collapsedBeforeFullWidth.current) panel?.collapse();
       else panel?.expand();

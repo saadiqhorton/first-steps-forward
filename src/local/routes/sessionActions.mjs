@@ -6,6 +6,8 @@ import { resolveAttachments } from "../attachments.mjs";
 import { body } from "../http.mjs";
 import { readMessagePresentation } from "../message-presentation.mjs";
 
+const MESSAGE_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+
 /** `/api/sessions/:id/*`: logs, follow-ups and actions, the diff, and model or option changes. */
 export async function sessionActions(ctx) {
   const {
@@ -84,7 +86,12 @@ export async function sessionActions(ctx) {
       // "now" stops the current turn (or checks) and runs this message as
       // soon as it has stopped; otherwise it waits for the turn to end.
       const when = data.when === "now" ? "now" : "later";
-      return json(res, 200, await turns.send(s, { text, files, presentation }, when));
+      // The page already shows the message under this id.
+      const id =
+        MESSAGE_ID.test(data.messageId) && !s.messages.some((item) => item.id === data.messageId)
+          ? data.messageId
+          : undefined;
+      return json(res, 200, await turns.send(s, { id, text, files, presentation }, when));
     } else if (parts[2] === "switch-agent") {
       const data = await body(req);
       if (s.status === "complete")

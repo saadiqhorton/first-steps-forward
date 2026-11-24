@@ -7,6 +7,7 @@ import { SessionMessage } from "@/components/ade/SessionMessage";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { BUSY, type Change } from "@/lib/ade/customizeApi";
 import { currentActivity } from "@/lib/ade/formatLogs.mjs";
+import { scrollToEnd } from "@/lib/ade/scrollToEnd";
 import { useAde, useAdeState, useSession, useSessionLogs } from "@/lib/ade/store";
 import type { Message } from "@/lib/ade/types";
 import { FilesList } from "./FilesPanel";
@@ -149,7 +150,6 @@ export function ChangeConversation({ change }: { change: Change }) {
   const agent = agents.find((a) => a.id === change.agentId);
   const session = useSession(change.sessionId);
   const logs = useSessionLogs(change.status === "working" ? change.sessionId : "");
-  const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const messages = session.data?.messages ?? [];
@@ -163,7 +163,7 @@ export function ChangeConversation({ change }: { change: Change }) {
   const resolved = change.status === "ready" || change.status === "kept";
 
   useEffect(() => {
-    if (stick.current) endRef.current?.scrollIntoView({ block: "end" });
+    return stick.current ? scrollToEnd(scrollRef.current) : undefined;
   }, [messages.length, last?.text.length, change.status, permissions.length]);
 
   return (
@@ -267,7 +267,6 @@ export function ChangeConversation({ change }: { change: Change }) {
             </div>
           </div>
         )}
-        <div ref={endRef} />
       </div>
     </div>
   );

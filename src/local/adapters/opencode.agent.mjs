@@ -1,5 +1,5 @@
-import { opencodeComputerEnv } from "./computer-tools.mjs";
-import { defineCliAgent } from "./kit.mjs";
+import { acpComputerServers, opencodeComputerEnv } from "./computer-tools.mjs";
+import { defineAcpAgent, defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
 /** @param {import("./kit.mjs").ComputerContext | null} computer */
@@ -126,7 +126,7 @@ export function parseOpencodeVerboseModels(stdout) {
   return models.length ? models : null;
 }
 
-export const opencode = defineCliAgent({
+const run = defineCliAgent({
   id: "opencode",
   name: "OpenCode",
   short: "OpenCode",
@@ -303,3 +303,54 @@ export const opencode = defineCliAgent({
       : [];
   },
 });
+
+/** OpenCode versions whose ACP server could not take a turn; they are not asked again. */
+const withoutAcp = new Set();
+
+const rejectionNotice = (what) =>
+  `OpenCode requested permission for ${what}; ADE's OpenCode runs are non-interactive, so it was rejected. ADE did not approve or run that action.`;
+
+const acp = defineAcpAgent({
+  ...run,
+  command: () => ["opencode", ["acp"]],
+  wireComputer: (computer) => ({ mcpServers: acpComputerServers(computer) }),
+  modes: { build: ["build"], plan: ["plan"] },
+  // Build is whichever agent the user's own configuration starts; only leave plan for it.
+  keepMode: (current, permission) => permission !== "plan" && current !== "plan",
+  // The model list comes from `opencode models`.
+  rememberModels: false,
+  // As with `opencode run`: nothing is approved on the user's behalf, and they are told.
+  answer(request, io) {
+    io.emit({ type: "notice", text: rejectionNotice(request.title) });
+    const reject =
+      request.options.find((option) => option.kind === "reject_once") ??
+      request.options.find((option) => option.kind === "reject_always");
+    return reject ? { outcome: "selected", optionId: reject.optionId } : { outcome: "cancelled" };
+  },
+  fallback(input, io, error) {
+    // Method not found, or it exited instead of answering: this version has no such server.
+    if (error?.code === -32601 || /exited|failed to start/.test(error?.message ?? ""))
+      withoutAcp.add(input.version);
+    io.emit({
+      type: "log",
+      line: `OpenCode's ACP server could not take this turn (${error?.message ?? error}); running opencode run, which shows the reply when it is finished.`,
+    });
+    return run.runTurn(input, io);
+  },
+});
+
+export const opencode = {
+  ...run,
+  /**
+   * OpenCode 2 streams its reply over ACP. `opencode run` prints it once it is finished.
+   * Files other than images have a native form only there.
+   * @param {import("./kit.mjs").TurnInput} input @param {import("./kit.mjs").TurnIO} io
+   */
+  runTurn(input, io) {
+    const streams =
+      Number.parseInt(input.version, 10) >= 2 &&
+      !withoutAcp.has(input.version) &&
+      input.attachments.every((file) => file.kind === "image");
+    return streams ? acp.runTurn(input, io) : run.runTurn(input, io);
+  },
+};

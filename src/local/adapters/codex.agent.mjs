@@ -1,5 +1,6 @@
 import { codexComputerArgs } from "./computer-tools.mjs";
 import { codexConnectorWiring } from "./connector-wiring.mjs";
+import { runCodexAppServerTurn, AppServerUnavailable } from "./codex-app-server.mjs";
 import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
@@ -39,7 +40,10 @@ export function parseCodexModels(stdout) {
     });
 }
 
-export const codex = defineCliAgent({
+/** Codex versions whose app server could not take a turn; they are not asked again. */
+const withoutAppServer = new Set();
+
+const exec = defineCliAgent({
   id: "codex",
   name: "OpenAI Codex",
   short: "Codex",
@@ -214,3 +218,39 @@ export const codex = defineCliAgent({
     return [];
   },
 });
+
+export const codex = {
+  ...exec,
+  /**
+   * The app server streams the reply. A Codex whose app server cannot open the conversation
+   * runs the turn with `codex exec` instead; nothing has been sent to the model by then.
+   * @param {import("./kit.mjs").TurnInput} input @param {import("./kit.mjs").TurnIO} io
+   */
+  async runTurn(input, io) {
+    if (withoutAppServer.has(input.version)) return exec.runTurn(input, io);
+    const { args: computerArgs = [] } = wireComputer(
+      input.computer,
+      /** @type {any} */ (input.workspaceAssistant),
+    );
+    const { args: connectorArgs, env } = codexConnectorWiring(
+      /** @type {any} */ (input.connectors),
+    );
+    const args = [
+      ...(input.effort ? ["-c", `model_reasoning_effort="${input.effort}"`] : []),
+      ...(input.speed ? ["-c", `service_tier="${input.speed}"`] : []),
+      ...computerArgs,
+      ...connectorArgs,
+    ];
+    try {
+      return await runCodexAppServerTurn(input, io, { args, env });
+    } catch (error) {
+      if (!(error instanceof AppServerUnavailable)) throw error;
+      if (error.unsupported) withoutAppServer.add(input.version);
+      io.emit({
+        type: "log",
+        line: `Codex's app server could not take this turn (${error.message}); running codex exec, which shows the reply when it is finished.`,
+      });
+      return exec.runTurn(input, io);
+    }
+  },
+};

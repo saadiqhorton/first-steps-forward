@@ -168,6 +168,19 @@ export function mergeWorkspaceRecords(
   }
 }
 
+/** What each in-memory workspace last wrote: that exact file needs no reading back. */
+const lastWrites = new WeakMap();
+
+async function fileSignature(file) {
+  try {
+    const stat = await fs.stat(file, { bigint: true });
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 export async function reconcileWorkspaceMessages(file, current) {
   let saved;
   try {
@@ -217,7 +230,14 @@ export async function saveWorkspace(file, current, options = {}) {
         .filter((session) => session.pendingDevCommand)
         .map((session) => [session.id, session.pendingDevCommand]),
     );
-    await reconcileWorkspaceMessages(file, current);
+    // Reading and parsing a large workspace blocks the server, so it is done
+    // only when another process wrote the file since this one did. Merging
+    // with nothing still applies this process's own deletions.
+    const signature = await fileSignature(file);
+    if (signature !== null && lastWrites.get(current) === signature) {
+      mergeWorkspaceMessages(current, {});
+      mergeWorkspaceRecords(current, {});
+    } else await reconcileWorkspaceMessages(file, current);
     const pendingDevCommands =
       typeof options.livePendingDevCommands === "function"
         ? options.livePendingDevCommands()
@@ -229,32 +249,30 @@ export async function saveWorkspace(file, current, options = {}) {
     }
     await fs.writeFile(
       tmp,
-      JSON.stringify(
-        {
-          projects: current.projects,
-          sessions: current.sessions.map(
-            ({ logs, pendingDevCommand: _pending, ...session }) => session,
-          ),
-          deletedProjects: current.deletedProjects ?? {},
-          deletedSessions: current.deletedSessions ?? {},
-          processes: current.processes,
-          workflows: current.workflows ?? [],
-          assistantThreads: current.assistantThreads ?? [],
-          assistantMessages: current.assistantMessages ?? [],
-          assistantActivity: current.assistantActivity ?? [],
-          assistantDeleted: current.assistantDeleted ?? [],
-          handoffs: current.handoffs ?? [],
-          inboxState: current.inboxState ?? [],
-          workspaceOrganization: current.workspaceOrganization ?? {},
-          voice: current.voice ?? {},
-          workspaceAssistant: current.workspaceAssistant ?? {},
-        },
-        null,
-        2,
-      ),
+      JSON.stringify({
+        projects: current.projects,
+        sessions: current.sessions.map(
+          ({ logs, pendingDevCommand: _pending, ...session }) => session,
+        ),
+        deletedProjects: current.deletedProjects ?? {},
+        deletedSessions: current.deletedSessions ?? {},
+        processes: current.processes,
+        workflows: current.workflows ?? [],
+        assistantThreads: current.assistantThreads ?? [],
+        assistantMessages: current.assistantMessages ?? [],
+        assistantActivity: current.assistantActivity ?? [],
+        assistantDeleted: current.assistantDeleted ?? [],
+        handoffs: current.handoffs ?? [],
+        inboxState: current.inboxState ?? [],
+        workspaceOrganization: current.workspaceOrganization ?? {},
+        voice: current.voice ?? {},
+        workspaceAssistant: current.workspaceAssistant ?? {},
+      }),
       { mode: 0o600 },
     );
     await fs.rename(tmp, file);
+    const written = await fileSignature(file);
+    if (written) lastWrites.set(current, written);
   } finally {
     await fs.rm(tmp, { force: true });
     await fs.rmdir(lock);

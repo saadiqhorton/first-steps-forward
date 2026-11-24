@@ -27,6 +27,7 @@ import type {
   Workflow,
 } from "./types";
 import { recordingAttachment } from "@/lib/ade/browser/recordingUpload";
+import { applyMessageDelta, type MessageDelta } from "@/lib/ade/messageDelta.mjs";
 import { hasPendingUserRequest } from "@/lib/ade/sessionAttention.mjs";
 import { warnUser } from "@/lib/ade/userNotices";
 
@@ -342,6 +343,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let ready = false;
     let errors = 0;
+    let missed = false;
     let fallback: number | undefined;
     const invalidateAll = () => void queryClient.invalidateQueries();
     const pauseFallback = () => {
@@ -377,6 +379,9 @@ export function AdeProvider({ children }: { children: ReactNode }) {
       errors = 0;
       if (readyTimeout) window.clearTimeout(readyTimeout);
       pauseFallback();
+      // Nothing polls behind these events, so whatever changed while they were down is fetched.
+      if (missed) invalidateAll();
+      missed = false;
     });
     const onEvent = (event: MessageEvent<string>) => {
       let detail: { scope?: string } = {};
@@ -386,7 +391,21 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         // Ignore malformed invalidations; reconnect/fallback will refresh state.
       }
       const scope = detail.scope ?? "";
-      if (scope === "bootstrap") void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      if (scope === "bootstrap") {
+        void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+        void queryClient.invalidateQueries({ queryKey: ["workspace-inbox"] });
+      } else if (scope === "workspace-assistant") {
+        void queryClient.invalidateQueries({ queryKey: ["workspace-assistant-threads"] });
+        void queryClient.invalidateQueries({ queryKey: ["workspace-assistant-thread"] });
+        void queryClient.invalidateQueries({ queryKey: ["workspace-assistant"] });
+      } else if (scope === "workspace:handoffs") {
+        void queryClient.invalidateQueries({ queryKey: ["workspace-handoffs"] });
+        void queryClient.invalidateQueries({ queryKey: ["workspace-inbox"] });
+      } else if (scope === "workspace:inbox")
+        void queryClient.invalidateQueries({ queryKey: ["workspace-inbox"] });
+      else if (scope === "workspace:projects")
+        for (const key of ["workspace-project-settings", "workspace-workflows"])
+          void queryClient.invalidateQueries({ queryKey: [key] });
       else if (scope.startsWith("session:")) {
         void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
         void queryClient.invalidateQueries({ queryKey: ["session", scope.slice(8)] });
@@ -411,11 +430,33 @@ export function AdeProvider({ children }: { children: ReactNode }) {
       "agents",
       "harness",
       "customize",
+      "workspace-assistant",
+      "workspace",
     ])
       source.addEventListener(type, onEvent as EventListener);
+    // A reply being written arrives as its new text, so nothing is refetched for it.
+    const onDelta =
+      <T extends { messages: { id: string; text: string }[] }>(queryKey: string) =>
+      (event: Event) => {
+        let delta: MessageDelta;
+        try {
+          delta = JSON.parse((event as MessageEvent<string>).data);
+        } catch {
+          return;
+        }
+        const key = [queryKey, delta.parentId];
+        const shown = queryClient.getQueryData<T>(key);
+        if (!shown) return;
+        const messages = applyMessageDelta(shown.messages, delta);
+        if (!messages) void queryClient.invalidateQueries({ queryKey: key });
+        else if (messages !== shown.messages)
+          queryClient.setQueryData<T>(key, { ...shown, messages });
+      };
+    source.addEventListener("message-delta", onDelta<Session>("session"));
+    source.addEventListener("assistant-message", onDelta("workspace-assistant-thread"));
     source.onerror = () => {
       errors += 1;
-      if (ready) invalidateAll();
+      missed = true;
       ready = false;
       if (errors >= 3) resumeFallback();
     };
@@ -471,13 +512,39 @@ export function AdeProvider({ children }: { children: ReactNode }) {
       // Resolves only after the POST and the refresh; rejects on 4xx/5xx or
       // network failure so the caller can keep the draft and show the error.
       steer: async (sessionId, text, attachmentIds, when, presentation) => {
+        // The message shows at once. The server keeps its id, so it stays the same row; a
+        // refused one goes away again with the refetch.
+        const messageId = text && !attachmentIds?.length ? crypto.randomUUID?.() : undefined;
+        const key = sessionQuery(sessionId).queryKey;
+        if (messageId)
+          queryClient.setQueryData(key, (shown) =>
+            shown
+              ? {
+                  ...shown,
+                  messages: [
+                    ...shown.messages,
+                    {
+                      id: messageId,
+                      role: "user" as const,
+                      text,
+                      at: Date.now(),
+                      ...(presentation ? { presentation } : {}),
+                    },
+                  ],
+                }
+              : shown,
+          );
         await request(`/api/sessions/${sessionId}/messages`, "POST", {
+          ...(messageId ? { messageId } : {}),
           ...(text ? { text } : {}),
           ...(when ? { when } : {}),
           ...(attachmentIds?.length ? { attachmentIds } : {}),
           ...(presentation ? { presentation } : {}),
+        }).catch((error) => {
+          if (messageId) void queryClient.invalidateQueries({ queryKey: key });
+          throw error;
         });
-        await refresh();
+        void refresh();
       },
       complete: (id) => {
         const inFlight = completeCalls.current.get(id);
@@ -540,7 +607,7 @@ export function AdeProvider({ children }: { children: ReactNode }) {
         await refresh();
       },
     }),
-    [refresh],
+    [refresh, queryClient],
   );
   return (
     <ActiveProjectCtx.Provider value={activeProjectValue}>

@@ -1,5 +1,8 @@
-/** A small SSE fan-out for invalidation events. Payloads name the data to refetch. */
-export function createEventHub({ heartbeatMs = 25_000, coalesceMs = 100 } = {}) {
+/**
+ * A small SSE fan-out. `emit` sends invalidations (payloads name the data to
+ * refetch); `push` sends the data itself, for text that grows as it streams.
+ */
+export function createEventHub({ heartbeatMs = 25_000, coalesceMs = 100, pushMs = 50 } = {}) {
   const clients = new Set();
   const pending = new Map();
   const versions = new Map();
@@ -68,6 +71,22 @@ export function createEventHub({ heartbeatMs = 25_000, coalesceMs = 100 } = {}) 
       }, coalesceMs);
       timer.unref?.();
       pending.set(scope, timer);
+    },
+    /**
+     * Send `event` with what `build` returns when the push is due, so calls in
+     * quick succession for one `key` go out as one. Null sends nothing.
+     * @param {string} event @param {string} key @param {() => object | null} build
+     */
+    push(event, key, build) {
+      const id = `push ${event} ${key}`;
+      if (pending.has(id)) return;
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        const data = build();
+        if (data) for (const client of clients) send(client, event, data);
+      }, pushMs);
+      timer.unref?.();
+      pending.set(id, timer);
     },
     clientCount: () => clients.size,
     activeProjects: () => [

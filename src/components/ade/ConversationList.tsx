@@ -49,6 +49,11 @@ function formatElapsed(now: number, from: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+/** Ticks on its own so the list does not render every second. */
+function Elapsed({ from }: { from: number }) {
+  return <>{formatElapsed(useNow(), from)}</>;
+}
+
 export function ConversationList() {
   const { projectId } = useParams({ from: "/p/$projectId/conversations" });
   const { sessionId: activeSessionId } = useParams({ strict: false });
@@ -58,7 +63,6 @@ export function ConversationList() {
     sessions: state.sessions,
     agents: state.agents,
   }));
-  const now = useNow();
   const viewed = useViewed();
   const [filter, setFilter] = useState<ConversationFilter>("all");
   const [query, setQuery] = useState("");
@@ -199,7 +203,7 @@ export function ConversationList() {
                         <StatusPill status={session.status} needsYou={needsYou(session)} />
                         {showElapsed && (
                           <span className="font-mono text-xs tabular-nums text-teal">
-                            {formatElapsed(now, turnStart)}
+                            <Elapsed from={turnStart} />
                           </span>
                         )}
                       </div>

@@ -13,7 +13,7 @@ import appCss from "../styles.css?url";
 import { AdeHosts } from "@/components/ade/AdeHosts";
 import { Shell } from "@/components/ade/Shell";
 import { AdeProvider } from "@/lib/ade/store";
-import { themeInitScript } from "@/lib/theme";
+import { shellInitScript, themeInitScript } from "@/lib/theme";
 
 function NotFoundComponent() {
   return (
@@ -96,6 +96,7 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script dangerouslySetInnerHTML={{ __html: shellInitScript }} />
         <HeadContent />
       </head>
       <body>

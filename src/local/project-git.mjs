@@ -57,9 +57,11 @@ export async function projectInfo(project) {
   const branches = [];
   let ahead = 0;
   for (const repo of repositories) {
-    const branchRes = await gitAt(repo.directory, ["branch", "--show-current"]);
-    const statusRes = await gitAt(repo.directory, ["status", "--porcelain=v1", "-uall"]);
-    const aheadRes = await gitAt(repo.directory, ["rev-list", "--count", "@{upstream}..HEAD"]);
+    const [branchRes, statusRes, aheadRes] = await Promise.all([
+      gitAt(repo.directory, ["branch", "--show-current"]),
+      gitAt(repo.directory, ["status", "--porcelain=v1", "-uall"]),
+      gitAt(repo.directory, ["rev-list", "--count", "@{upstream}..HEAD"]),
+    ]);
     branches.push(branchRes.code === 0 ? branchRes.stdout.trim() || "(detached)" : "unknown");
     changedFiles.push(
       ...statusRes.stdout
@@ -87,8 +89,10 @@ export async function getDiff(project) {
   const files = [];
   const changes = [];
   for (const repo of repositories) {
-    const tracked = await gitAt(repo.directory, ["diff", "HEAD", "--no-ext-diff", "--unified=3"]);
-    const names = await gitAt(repo.directory, ["status", "--porcelain=v1", "-uall"]);
+    const [tracked, names] = await Promise.all([
+      gitAt(repo.directory, ["diff", "HEAD", "--no-ext-diff", "--unified=3"]),
+      gitAt(repo.directory, ["status", "--porcelain=v1", "-uall"]),
+    ]);
     const diff = tracked.stdout;
     diffs.push(diff);
     let current;

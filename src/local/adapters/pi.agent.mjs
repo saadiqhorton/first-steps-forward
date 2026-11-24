@@ -2,6 +2,7 @@ import { promises as fsp } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { piComputerWiring } from "./computer-tools.mjs";
+import { createReplyStream } from "./reply-stream.mjs";
 import { defineCliAgent } from "./kit.mjs";
 import { MANUAL_HINT } from "../models.mjs";
 
@@ -228,7 +229,7 @@ export const pi = defineCliAgent({
       wired.env,
     ];
   },
-  parse(line) {
+  parse(line, turn = {}) {
     let event;
     try {
       event = JSON.parse(line);
@@ -239,12 +240,18 @@ export const pi = defineCliAgent({
     // Pi emits message_end for the system preamble and the user's own prompt
     // too. Only assistant messages are agent output — reporting the prompt
     // back would fabricate a reply the agent never produced.
+    // The reply as it is written: pi sends each piece, then the whole message again.
+    turn.reply ??= createReplyStream();
+    if (event.type === "message_start") turn.reply.begin();
+    const update = event.type === "message_update" ? event.assistantMessageEvent : undefined;
+    if (update?.type === "text_delta" && typeof update.delta === "string")
+      return turn.reply.delta(update.delta);
     if (event.type === "message_end" && event.message?.role === "assistant") {
       const text = (event.message.content ?? [])
         .filter?.((part) => part.type === "text")
         .map((part) => part.text)
         .join("");
-      return [{ type: "text", text: text ?? "" }];
+      return turn.reply.end(text ?? "");
     }
     // Print mode's JSON path always exits 0, even when every retry failed and
     // the run produced no answer. `agent_end` with willRetry === false is the

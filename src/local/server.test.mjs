@@ -74,6 +74,22 @@ test("hashed assets are immutable; other files revalidate; missing files are 404
   assert.equal((await raw("/assets/app-Ab12Cd.js", { method: "POST" })).status, 405);
 });
 
+test("text files are compressed for clients that accept it, and come back the same", async () => {
+  const text = "const value = 1;\n".repeat(400);
+  writeFileSync(path.join(staticDir, "assets", "big-Zz9.js"), text);
+  for (const encoding of ["br", "gzip"]) {
+    const res = await fetch(`${origin}/assets/big-Zz9.js`, {
+      headers: { "accept-encoding": encoding },
+    });
+    assert.equal(res.headers.get("content-encoding"), encoding);
+    assert.equal(res.headers.get("vary"), "accept-encoding");
+    assert.equal(await res.text(), text);
+  }
+  const plain = await raw("/assets/big-Zz9.js");
+  assert.equal(plain.headers["content-encoding"], undefined);
+  assert.equal(plain.body, text);
+});
+
 test("no request path escapes the static directory", async () => {
   for (const attempt of [
     "/../secret.txt",
