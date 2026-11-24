@@ -22,7 +22,7 @@ import {
 import { browserViewerId } from "@/lib/ade/browser/viewer";
 import { browserPageKey, shouldRevealBrowser } from "@/lib/ade/browser/reveal.mjs";
 import { persistFeedbackFile, restoreFeedbackFile } from "@/lib/ade/browser/feedbackPersistence";
-import { BROWSER_RENDER_SCALE, DEFAULT_VIEWPORT } from "@/shared/browser-contract.mjs";
+import { BROWSER_PREVIEW_STREAM_SCALE, DEFAULT_VIEWPORT } from "@/shared/browser-contract.mjs";
 import { useBrowserPlacement } from "./browserPresentationContext";
 import { BrowserPresentationProvider } from "./BrowserPresentationProvider";
 import { useBrowserCapture } from "./useBrowserCapture";
@@ -38,8 +38,8 @@ import {
 } from "./browserPreviewContext";
 
 // Frames are decoded at up to this size. The page is sized to the docked surface.
-const FRAME_MAX_WIDTH = DEFAULT_VIEWPORT.width * BROWSER_RENDER_SCALE;
-const FRAME_MAX_HEIGHT = DEFAULT_VIEWPORT.height * BROWSER_RENDER_SCALE;
+const FRAME_MAX_WIDTH = DEFAULT_VIEWPORT.width * BROWSER_PREVIEW_STREAM_SCALE;
+const FRAME_MAX_HEIGHT = DEFAULT_VIEWPORT.height * BROWSER_PREVIEW_STREAM_SCALE;
 type StoredAnnotationDraft = Omit<BrowserAnnotationDraft, "file" | "detail"> & {
   file: ReturnType<typeof persistFeedbackFile>;
   detail: ReturnType<typeof persistFeedbackFile> | null;

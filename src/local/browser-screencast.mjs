@@ -1,16 +1,14 @@
-// One viewer's CDP screencast. It follows the session's active page, paces acks like T3, and
+// One viewer's CDP screencast. It follows the session's active page, paces recording acks, and
 // drops to half scale while the viewer scrolls, then settles with a full-scale still.
 
 const noop = () => {};
-// Chromium allows three unacked frames, so 100 ms pacing caps viewers near 30 fps.
-const SCREENCAST_ACK_PACE_MS = 100;
 const SCREENCAST_SETTLE_MS = 200;
 const SCREENCAST_MOTION_FRAMES = 4;
 const SCREENCAST_MOTION_WINDOW_MS = 300;
 const SCREENCAST_MOTION_QUALITY = 50;
 
 /**
- * One viewer's CDP screencast. It follows the session's active page, paces acks like T3, and
+ * One viewer's CDP screencast. It follows the session's active page, paces recording acks, and
  * drops to half scale while the viewer scrolls, then settles with a full-scale still.
  */
 export class Screencast {
@@ -159,17 +157,18 @@ export class Screencast {
       void this.#still();
     }, SCREENCAST_SETTLE_MS);
     let acked = false;
-    // Called once the viewer acks. Chromium gets its ack no sooner than the pacing allows.
+    // Interactive viewers release the capture slot as soon as they receive the frame.
+    // Recording viewers can request extra pacing to limit the capture rate.
     const ack = () => {
       if (acked) return;
       acked = true;
-      setTimeout(
-        () => {
-          this.#framesInFlight -= 1;
-          void session.send("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(noop);
-        },
-        arrivedAt + (this.#params.ackPaceMs ?? SCREENCAST_ACK_PACE_MS) - Date.now(),
-      );
+      const release = () => {
+        this.#framesInFlight -= 1;
+        void session.send("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(noop);
+      };
+      const delay = arrivedAt + (this.#params.ackPaceMs ?? 0) - Date.now();
+      if (delay > 0) setTimeout(release, delay);
+      else release();
     };
     this.#onFrame(Buffer.from(frame.data, "base64"), ack);
   }

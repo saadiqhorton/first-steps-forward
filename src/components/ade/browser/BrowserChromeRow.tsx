@@ -567,17 +567,13 @@ export function BrowserChromeRow({
         </button>
         <button
           type="button"
-          aria-label={nav?.loading ? "Stop loading" : "Reload"}
-          title={takeToNavigate ?? (nav?.loading ? "Stop loading" : "Reload")}
+          aria-label="Reload"
+          title={takeToNavigate ?? "Reload"}
           disabled={!canOperate}
-          onClick={() => send(nav?.loading ? { type: "stop-loading" } : { type: "reload" })}
+          onClick={() => send({ type: "reload" })}
           className={ICON_BUTTON}
         >
-          {nav?.loading ? (
-            <X className="size-4" strokeWidth={1.5} aria-hidden />
-          ) : (
-            <RotateCw className="size-4" strokeWidth={1.5} aria-hidden />
-          )}
+          <RotateCw className="size-4" strokeWidth={1.5} aria-hidden />
         </button>
 
         <form onSubmit={submit} className="group relative flex min-w-0 flex-1">
@@ -724,6 +720,14 @@ export function BrowserChromeRow({
               className="rounded px-2 py-1.5 text-left text-xs hover:bg-surface-muted disabled:opacity-40"
             >
               Pop out window
+            </button>
+            <button
+              type="button"
+              className="rounded px-2 py-1.5 text-left text-xs hover:bg-surface-muted"
+              disabled={!canOperate || !nav?.loading}
+              onClick={() => send({ type: "stop-loading" })}
+            >
+              Stop loading
             </button>
             <button
               type="button"

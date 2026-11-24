@@ -1,6 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clampViewport } from "./browser-contract.mjs";
+import {
+  BROWSER_PREVIEW_STREAM_SCALE,
+  BROWSER_RENDER_SCALE,
+  clampViewport,
+} from "./browser-contract.mjs";
+
+test("the live preview streams at CSS resolution while Chromium renders at 2×", () => {
+  assert.equal(BROWSER_PREVIEW_STREAM_SCALE, 1);
+  assert.equal(BROWSER_RENDER_SCALE, 2);
+});
 
 test("clampViewport keeps sizes inside 240..3840 x 240..2160 and rounds", () => {
   assert.deepEqual(clampViewport({ width: 100, height: 99 }), { width: 240, height: 240 });

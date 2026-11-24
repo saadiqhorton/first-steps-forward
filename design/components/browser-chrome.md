@@ -12,7 +12,7 @@
 
 ## 3. Anatomy
 - Optional tablist (tab select/mute/close, new tab, profile select)
-- Nav row: back / forward / reload-or-stop, address form, annotate, capture, float, more `<details>` menu
+- Nav row: back / forward / reload, address form, annotate, capture, float, more `<details>` menu with a separate stop-loading action
 - Optional device toolbar form (presets, size, lock, rotate)
 - Error / capture-error alerts
 - Capture and annotation review dialogs (fixed bottom sheets)

@@ -25,6 +25,8 @@ export const RECORDING_STORAGE_KEYS = Object.freeze({
 });
 export const MAX_INPUT_TEXT_CHARS = 10_000;
 export const BROWSER_RENDER_SCALE = 2;
+// Stream the live preview at CSS pixel resolution to keep interaction responsive.
+export const BROWSER_PREVIEW_STREAM_SCALE = 1;
 export const WEBSOCKET_CLOSE_REASON_MAX_BYTES = 123;
 export const STREAM_CLOSE_CODES = Object.freeze({
   policyViolation: 1008,

@@ -23,6 +23,7 @@ export const RECORDING_STORAGE_KEYS: Readonly<{
 }>;
 export const MAX_INPUT_TEXT_CHARS: number;
 export const BROWSER_RENDER_SCALE: number;
+export const BROWSER_PREVIEW_STREAM_SCALE: number;
 export const WEBSOCKET_CLOSE_REASON_MAX_BYTES: number;
 export const STREAM_CLOSE_CODES: Readonly<{
   policyViolation: 1008;

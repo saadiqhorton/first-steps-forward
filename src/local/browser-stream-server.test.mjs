@@ -31,6 +31,9 @@ function fakeSession() {
     calls,
     screencasts,
     nav: () => ({ ...nav }),
+    setLoading(value) {
+      nav.loading = value;
+    },
     tabs: () => ({ activeId: "tab-1", tabs: [{ id: "tab-1", url: nav.url, title: nav.title }] }),
     viewport: () => ({ ...viewport }),
     fileChooser: () => null,
@@ -337,6 +340,28 @@ test("forwards JPEG frames and acks Chromium only after the viewer acks", async 
   client.ws.close();
 });
 
+test("reload still reaches the browser while navigation is marked as loading", async (t) => {
+  const sessions = new Map();
+  const { server, controls } = setup(t, { sessions });
+  await listen(t, server);
+  const client = await open(streamUrl(server, "p1", "A"));
+  await until(() => sessions.get("p1")?.screencasts.length === 1, "screencast");
+  const session = sessions.get("p1");
+  session.setLoading(true);
+  controls.for("p1").take("A");
+
+  client.send({ type: "reload" });
+  await until(() => session.calls.some((call) => call.name === "reload"), "reload");
+  assert.deepEqual(
+    session.calls.find((call) => call.name === "reload"),
+    {
+      name: "reload",
+      opts: { ignoreCache: false },
+    },
+  );
+  client.ws.close();
+});
+
 test("gates input to the owner and broadcasts control to the second viewer", async (t) => {
   const sessions = new Map();
   const { server, controls } = setup(t, { sessions });
@@ -583,4 +608,97 @@ test("a slow viewer is dropped with 1013 after 64 unacked frames, and every fram
   assert.equal(client.frames.length, 64);
   assert.equal(acks[64].count, 1, "the dropped frame is still acked");
   await until(() => session.screencasts[0].stopped, "screencast stopped");
+});
+
+test("wheel bursts preserve scroll distance and click order behind a busy browser", async (t) => {
+  const { server, controls, sessions } = setup(t);
+  await listen(t, server);
+  const client = await open(streamUrl(server, "p1", "A"));
+  const session = sessions.get("p1");
+  await until(() => session.screencasts.length === 1, "screencast");
+  controls.for("p1").take("A");
+  let resume;
+  const busy = new Promise((resolve) => {
+    resume = resolve;
+  });
+  const input = session.input.bind(session);
+  session.input = async (message) => {
+    await input(message);
+    await busy;
+  };
+  const wheel = { type: "wheel", x: 10, y: 10, modifiers: 0, deltaX: 0, deltaY: 4 };
+  client.send(wheel);
+  await until(() => session.calls.length, "first wheel in flight");
+  for (let i = 0; i < 20; i++) client.send(wheel);
+  client.send({ ...wheel, deltaY: -4 });
+  client.send({ type: "mouse", action: "down", x: 10, y: 10, modifiers: 0, button: "left" });
+  client.send(wheel);
+  for (const x of [31, 41, 51]) {
+    client.send({ type: "mouse", action: "move", x, y: 4, modifiers: 0, button: "none" });
+  }
+  client.send({ ...wheel, x: 30 });
+  client.send({ ...wheel, x: 31 });
+  client.send({ ...wheel, x: 31, modifiers: 2 });
+  client.send({ type: "key", action: "down", code: "KeyA", key: "a", modifiers: 0 });
+  client.send({ ...wheel, x: 31, modifiers: 2 });
+  for (const x of [60, 61])
+    client.send({
+      type: "mouse",
+      action: "move",
+      x,
+      y: 4,
+      modifiers: 0,
+      button: "left",
+      buttons: 1,
+    });
+  const ack = session.pushFrame(0, Buffer.from([0]));
+  client.send({ type: "ack" });
+  try {
+    await until(() => ack.count, "all input has reached the socket");
+  } finally {
+    resume();
+  }
+  await until(() => session.calls.length >= 13, "queued events");
+  assert.deepEqual(
+    session.calls.map(({ msg }) => msg.deltaY ?? (msg.action === "move" ? msg.x : msg.action)),
+    [4, 80, -4, "down", 4, 51, 4, 4, 4, "down", 4, 60, 61],
+  );
+  client.ws.close();
+});
+
+test("a wheel waiting under an old control grant cannot absorb a new owner's input", async (t) => {
+  const { server, controls, sessions } = setup(t);
+  await listen(t, server);
+  const client = await open(streamUrl(server, "p1", "A"));
+  const session = sessions.get("p1");
+  await until(() => session.screencasts.length === 1, "screencast");
+  const control = controls.for("p1");
+  control.take("A");
+  let resume;
+  const busy = new Promise((resolve) => {
+    resume = resolve;
+  });
+  const barrier = control.system(() => busy);
+  const wheel = { type: "wheel", x: 0, y: 0, modifiers: 0, deltaX: 0, deltaY: 4 };
+  try {
+    client.send(wheel);
+    const ack = session.pushFrame(0, Buffer.from([0]));
+    client.send({ type: "ack" });
+    await until(() => ack.count, "first wheel queued");
+    control.release("A");
+    control.take("A");
+    client.send({ ...wheel, deltaY: 8 });
+    const secondAck = session.pushFrame(0, Buffer.from([0]));
+    client.send({ type: "ack" });
+    await until(() => secondAck.count, "second wheel queued");
+  } finally {
+    resume();
+  }
+  await barrier;
+  await until(() => session.calls.length, "new grant delivers the wheel");
+  assert.deepEqual(
+    session.calls.map(({ msg }) => msg.deltaY),
+    [8],
+  );
+  client.ws.close();
 });

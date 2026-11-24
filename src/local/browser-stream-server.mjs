@@ -126,6 +126,25 @@ function inputFrom(msg) {
   }
 }
 
+// Both inputs are either wheel events or hover moves from the same viewer.
+function mergeMotion(previous, next) {
+  if (next.type === "mouse") {
+    previous.x = next.x;
+    previous.y = next.y;
+    return true;
+  }
+  if (
+    previous.x !== next.x ||
+    previous.y !== next.y ||
+    Math.sign(previous.deltaX) !== Math.sign(next.deltaX) ||
+    Math.sign(previous.deltaY) !== Math.sign(next.deltaY)
+  )
+    return false;
+  previous.deltaX += next.deltaX;
+  previous.deltaY += next.deltaY;
+  return true;
+}
+
 const controllerFor = (state, viewerId) =>
   state.owner === viewerId ? "you" : state.owner !== null ? "another-viewer" : "agent";
 
@@ -220,6 +239,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
       session: null,
       control: controls.for(projectId),
       viewers: new Set(),
+      pendingMotion: null,
       dialog: null,
       fileChooser: null,
       unsubs: [],
@@ -298,6 +318,7 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
         .catch(() => {});
     const room = rec.room;
     if (!room) return;
+    if (room.pendingMotion?.rec === rec) room.pendingMotion = null;
     room.viewers.delete(rec);
     // Control belongs to the viewer id, not one socket. Release only when the
     // owner's last socket closes, so a reconnecting tab keeps control.
@@ -417,6 +438,10 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
     if (!msg || !room || rec.closed) return;
     if (!CLIENT_STREAM_MESSAGE_TYPES.includes(msg.type)) return;
     const { control, session } = room;
+    // Combine only adjacent motion waiting for Chromium. A click, tab
+    // switch, modifier change or new owner must start a fresh group.
+    const previousMotion = room.pendingMotion;
+    if (msg.type !== "ack") room.pendingMotion = null;
     switch (msg.type) {
       case "ack": {
         const ack = rec.unacked.shift();
@@ -512,9 +537,27 @@ export function createBrowserStreamServer({ hub, controls, originAllowed }) {
       default: {
         const input = inputFrom(msg);
         if (!input) return;
+        const hover = input.type === "mouse" && input.action === "move" && !input.buttons;
+        if (input.type === "wheel" || hover) {
+          const { generation, owner } = control.state();
+          if (owner !== rec.viewerId) return;
+          const previous = previousMotion?.input;
+          if (
+            previousMotion?.rec === rec &&
+            previousMotion.generation === generation &&
+            previous.type === input.type &&
+            previous.modifiers === input.modifiers &&
+            mergeMotion(previous, input)
+          ) {
+            room.pendingMotion = previousMotion;
+            return;
+          }
+          room.pendingMotion = { rec, generation, input };
+        }
         await guarded(
           rec,
           control.human(rec.viewerId, async () => {
+            if (room.pendingMotion?.input === input) room.pendingMotion = null;
             const result = await session.input(input);
             // A copy or cut key's text goes to this viewer's own clipboard.
             if (result?.copied) send(rec, { type: "clipboard", text: result.copied });
