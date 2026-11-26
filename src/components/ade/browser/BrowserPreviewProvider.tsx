@@ -27,6 +27,7 @@ import { useBrowserPlacement } from "./browserPresentationContext";
 import { BrowserPresentationProvider } from "./BrowserPresentationProvider";
 import { useBrowserCapture } from "./useBrowserCapture";
 import { useHiddenTabRest } from "./useHiddenTabRest";
+import { streamWanted } from "./streamWanted.mjs";
 import { browserPictureInPictureOpen } from "@/lib/ade/browser/pictureInPicture.mjs";
 import { feedbackScope, usePersistentFeedbackList } from "./usePersistentFeedbackList";
 import {
@@ -293,8 +294,7 @@ function BrowserPreviewStateProvider({
       ? controlState.value
       : null;
 
-  // The stream runs while a surface is painting (docked or floating), so a hidden preview does not
-  // keep a page-screencast open.
+  // The stream runs while a surface is painting; a CSS-hidden docked canvas is not painting.
   // Nor does a tab left in the background, unless something in it depends on the stream.
   const resting = useHiddenTabRest(
     () =>
@@ -306,8 +306,14 @@ function BrowserPreviewStateProvider({
       annotationMode !== "off" ||
       !!tabsRef.current?.tabs.some((tab) => tab.profileId === "incognito"),
   );
-  const wanted =
-    projectId !== null && !resting && (place === "float" || canvas !== null || capture.recording);
+  const wanted = streamWanted({
+    projectId,
+    resting,
+    place,
+    canvas,
+    visible,
+    recording: capture.recording,
+  });
   const streamUrl = wanted && status?.available ? (status.streamUrl ?? null) : null;
 
   const attachCanvas = useCallback((next: HTMLCanvasElement) => {
