@@ -6,7 +6,7 @@ const sessions = new Map();
 const MAX_SESSIONS = 4;
 const MAX_OUTPUT = 1024 * 1024;
 const MAX_BATCH = 64 * 1024;
-const IDLE_MS = 2 * 60 * 1000;
+export const IDLE_MS = 2 * 60 * 1000;
 
 export function terminalSize(cols, rows) {
   const c = Number(cols);
@@ -183,10 +183,15 @@ export function closeTerminal(id) {
   return true;
 }
 
+/** Close sessions whose lastSeen is older than IDLE_MS. `now` is injectable for tests. */
+export function reapIdleTerminals(now = Date.now()) {
+  for (const [id, session] of sessions) {
+    if (now - session.lastSeen > IDLE_MS) closeTerminal(id);
+  }
+}
+
 // An abandoned browser tab must not leave a shell running indefinitely.
 const cleanup = setInterval(() => {
-  for (const [id, session] of sessions) {
-    if (Date.now() - session.lastSeen > IDLE_MS) closeTerminal(id);
-  }
+  reapIdleTerminals();
 }, 30_000);
 cleanup.unref();

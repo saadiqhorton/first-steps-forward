@@ -4,6 +4,7 @@ import { useXTerm } from "react-xtermjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { request } from "@/lib/ade/api";
 import { requestPreviewOpen } from "@/lib/ade/browser/openInPreview.mjs";
+import { shouldPollTerminal } from "./shouldPollTerminal.mjs";
 
 type Props = {
   projectId: string;
@@ -90,6 +91,7 @@ export function HostTerminalPane({
   const addons = useMemo(() => [fitAddon], [fitAddon]);
   const sessionRef = useRef<string | null>(null);
   const openingRef = useRef<Promise<Session> | null>(null);
+  const cursorRef = useRef(0);
   const sendChain = useRef<Promise<unknown>>(Promise.resolve());
   const pendingInput = useRef("");
   const inputTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -160,16 +162,16 @@ export function HostTerminalPane({
     return () => registerClose(null);
   }, [registerClose]);
 
+  // Open the PTY once while the pane stays mounted (terminalOpened). Do not
+  // close on tab hide — only the poll below stops so the server idle reap can run.
   useEffect(() => {
     if (!instance || !projectId || !ref.current) return;
     let cancelled = false;
-    let pollTimer: ReturnType<typeof setTimeout> | undefined;
     let resizeTimer: ReturnType<typeof setTimeout> | undefined;
-    const pollAbort = new AbortController();
     let currentId: string | null = null;
-    let cursor = 0;
     setStatus("connecting");
     setMessage("");
+    cursorRef.current = 0;
 
     const fit = () => {
       if (!ref.current?.clientWidth || !ref.current?.clientHeight) return;
@@ -204,42 +206,6 @@ export function HostTerminalPane({
     };
     window.addEventListener("pagehide", closeOnPageHide);
 
-    const poll = async () => {
-      if (!currentId || cancelled) return;
-      const started = performance.now();
-      let output: Output;
-      try {
-        // The shell echoes each key. Hold this read until that echo arrives
-        // instead of sampling on a timer, which is what made typing lag.
-        output = await request<Output>(
-          `/api/terminal/${currentId}?cursor=${cursor}&wait=1000`,
-          "GET",
-          undefined,
-          { signal: pollAbort.signal },
-        );
-      } catch (error) {
-        if (cancelled || (error instanceof Error && error.name === "AbortError")) return;
-        setStatus("error");
-        setMessage(error instanceof Error ? error.message : String(error));
-        return;
-      }
-      if (cancelled) return;
-      if (output.truncated) instance.writeln("\r\n[Earlier output was discarded]\r");
-      if (output.data) instance.write(output.data);
-      cursor = output.cursor;
-      if (output.exited && !output.hasMore) {
-        const finishedId = currentId;
-        currentId = null;
-        sessionRef.current = null;
-        if (finishedId)
-          void request(`/api/terminal/${finishedId}/close`, "POST", {}).catch(() => undefined);
-        setStatus("exited");
-        setMessage(`Shell exited with code ${output.exitCode ?? "unknown"}.`);
-        return;
-      }
-      pollTimer = setTimeout(poll, nextPollDelay(output, performance.now() - started));
-    };
-
     const opening = request<Session>("/api/terminal", "POST", {
       projectId,
       cols: Math.max(20, instance.cols),
@@ -258,7 +224,6 @@ export function HostTerminalPane({
         setStatus("connected");
         instance.clear();
         fit();
-        void poll();
       })
       .catch((error) => {
         if (!cancelled) {
@@ -269,11 +234,9 @@ export function HostTerminalPane({
 
     return () => {
       cancelled = true;
-      pollAbort.abort();
       if (openingRef.current === opening) openingRef.current = null;
       observer.disconnect();
       window.removeEventListener("pagehide", closeOnPageHide);
-      clearTimeout(pollTimer);
       clearTimeout(resizeTimer);
       pendingInput.current = "";
       if (inputTimer.current) clearTimeout(inputTimer.current);
@@ -289,6 +252,59 @@ export function HostTerminalPane({
       }
     };
   }, [instance, projectId, generation, fitAddon, ref]);
+
+  // Long-poll only while the pane is visible. Hiding aborts the wait without /close.
+  useEffect(() => {
+    if (!shouldPollTerminal({ visible, status }) || !instance) return;
+    const id = sessionRef.current;
+    if (!id) return;
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    const pollAbort = new AbortController();
+
+    const poll = async () => {
+      const currentId = sessionRef.current;
+      if (!currentId || cancelled) return;
+      const started = performance.now();
+      let output: Output;
+      try {
+        // The shell echoes each key. Hold this read until that echo arrives
+        // instead of sampling on a timer, which is what made typing lag.
+        output = await request<Output>(
+          `/api/terminal/${currentId}?cursor=${cursorRef.current}&wait=1000`,
+          "GET",
+          undefined,
+          { signal: pollAbort.signal },
+        );
+      } catch (error) {
+        if (cancelled || (error instanceof Error && error.name === "AbortError")) return;
+        setStatus("error");
+        setMessage(error instanceof Error ? error.message : String(error));
+        return;
+      }
+      if (cancelled) return;
+      if (output.truncated) instance.writeln("\r\n[Earlier output was discarded]\r");
+      if (output.data) instance.write(output.data);
+      cursorRef.current = output.cursor;
+      if (output.exited && !output.hasMore) {
+        const finishedId = currentId;
+        if (sessionRef.current === finishedId) sessionRef.current = null;
+        if (finishedId)
+          void request(`/api/terminal/${finishedId}/close`, "POST", {}).catch(() => undefined);
+        setStatus("exited");
+        setMessage(`Shell exited with code ${output.exitCode ?? "unknown"}.`);
+        return;
+      }
+      pollTimer = setTimeout(poll, nextPollDelay(output, performance.now() - started));
+    };
+    void poll();
+
+    return () => {
+      cancelled = true;
+      pollAbort.abort();
+      clearTimeout(pollTimer);
+    };
+  }, [visible, status, instance]);
 
   useEffect(() => {
     if (visible && instance) {
