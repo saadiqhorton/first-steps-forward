@@ -59,3 +59,14 @@ test("a burst of log lines is one update, and other news is not held back for it
   assert.equal(sent("logs"), 1);
   hub.close();
 });
+
+test("diff interest is refcounted per project", () => {
+  const hub = createEventHub();
+  hub.watchDiff("p1");
+  hub.watchDiff("p1");
+  assert.deepEqual(hub.diffProjects(), ["p1"]);
+  hub.unwatchDiff("p1");
+  assert.deepEqual(hub.diffProjects(), ["p1"]);
+  hub.unwatchDiff("p1");
+  assert.deepEqual(hub.diffProjects(), []);
+});

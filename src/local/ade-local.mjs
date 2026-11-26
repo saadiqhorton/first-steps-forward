@@ -618,20 +618,32 @@ async function load() {
     await organizationService?.reconcile?.().catch(() => {});
   } catch {}
 }
+async function applyDiffToOpenSessions(project) {
+  const diff = await getDiff(project);
+  for (const s of state.sessions.filter(
+    (item) => item.projectId === project.id && item.status !== "complete",
+  ))
+    s.changes = diff.changes.map((c) =>
+      s.baselineFiles?.includes(c.path) ? { ...c, preExisting: true } : c,
+    );
+  return diff;
+}
+
 function refreshBootstrapInBackground(activeProjectIds = []) {
-  if (refreshingBootstrap) return;
+  if (refreshingBootstrap) return Promise.resolve();
   refreshingBootstrap = true;
-  void (async () => {
+  return (async () => {
     const beforeBootstrap = JSON.stringify(bootstrapPayload());
     const beforeChanges = new Map(
       state.sessions.map((session) => [session.id, JSON.stringify(session.changes ?? [])]),
     );
-    const needsDiff = new Set([
+    const needsInfo = new Set([
       ...state.sessions.filter((item) => item.status !== "complete").map((item) => item.projectId),
       ...activeProjectIds,
     ]);
+    const needsFullDiff = new Set(eventHub.diffProjects());
     let devStateChanged = false;
-    for (const p of state.projects.filter((project) => needsDiff.has(project.id))) {
+    for (const p of state.projects.filter((project) => needsInfo.has(project.id))) {
       try {
         await projectInfo(p);
         if (!p.missing) {
@@ -640,14 +652,8 @@ function refreshBootstrapInBackground(activeProjectIds = []) {
           const { changed } = isHiddenProject(p) ? { changed: false } : await refreshDevProcess(p);
           if (changed) devStateChanged = true;
         }
-        if (p.missing || !needsDiff.has(p.id)) continue;
-        const diff = await getDiff(p);
-        for (const s of state.sessions.filter(
-          (item) => item.projectId === p.id && item.status !== "complete",
-        ))
-          s.changes = diff.changes.map((c) =>
-            s.baselineFiles?.includes(c.path) ? { ...c, preExisting: true } : c,
-          );
+        if (p.missing || !needsFullDiff.has(p.id)) continue;
+        await applyDiffToOpenSessions(p);
       } catch (error) {
         console.warn(`ADE background project refresh failed for ${p.path}:`, error);
       }
@@ -989,6 +995,25 @@ export async function handle(req, res) {
       bootstrapPayload,
       bootstrapAgents,
       refreshBootstrapInBackground,
+      async refreshProjectDiff(projectId) {
+        const project = state.projects.find((item) => item.id === projectId);
+        if (!project || project.missing) return false;
+        const before = new Map(
+          state.sessions
+            .filter((item) => item.projectId === projectId && item.status !== "complete")
+            .map((session) => [session.id, JSON.stringify(session.changes ?? [])]),
+        );
+        await applyDiffToOpenSessions(project);
+        let changed = false;
+        for (const [sessionId, prior] of before) {
+          const session = state.sessions.find((item) => item.id === sessionId);
+          if (!session || prior === JSON.stringify(session.changes ?? [])) continue;
+          eventHub.emit(`session:${sessionId}`);
+          changed = true;
+        }
+        if (changed) saveSoon();
+        return true;
+      },
       sessionLogs,
       turns,
       customize,
@@ -1038,6 +1063,14 @@ export async function handle(req, res) {
     return json(res, 500, { error: error?.message ?? String(error) });
   }
 }
+/** Test-only: run the 10s bootstrap refresh once and await it. */
+export function _refreshBootstrapInBackgroundForTest(activeProjectIds = []) {
+  return refreshBootstrapInBackground(activeProjectIds);
+}
+/** Test-only: inspect/watch the live event hub (diff interest refcounts). */
+export function _eventHubForTest() {
+  return eventHub;
+}
 /** Test-only: pin agent rows so route tests are not raced by CLI probes. */
 export function _setAgentsForTest(agents) {
   state.agents = agents;
@@ -1049,6 +1082,10 @@ export function _setDevApprovalWaitForTest(ms) {
 /** Test-only: read a live session without the bootstrap route's CLI probes. */
 export function _getSessionForTest(sessionId) {
   return state.sessions.find((item) => item.id === sessionId);
+}
+/** Test-only: read a live project row (e.g. after background projectInfo). */
+export function _getProjectForTest(projectId) {
+  return state.projects.find((item) => item.id === projectId);
 }
 /** Test-only: move a seeded process into a status a real machine reaches over time. */
 export function _setProcessStatusForTest(processId, status) {

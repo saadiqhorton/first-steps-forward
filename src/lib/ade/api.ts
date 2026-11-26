@@ -40,3 +40,8 @@ export async function listDocuments(projectId: string): Promise<ProjectDocument[
   );
   return data.documents;
 }
+
+/** Register or clear Diff-tab interest so the 10s refresh runs full getDiff for this project. */
+export async function watchDiff(projectId: string, diff: boolean): Promise<void> {
+  await request("/api/events/interest", "POST", { projectId, diff });
+}

@@ -12,6 +12,8 @@ export function createEventHub({
   const pending = new Map();
   const versions = new Map();
   const clientListeners = new Set();
+  /** @type {Map<string, number>} projectId -> watch count for full getDiff */
+  const diffWatch = new Map();
   let heartbeat = null;
 
   const send = (client, event, data) => {
@@ -101,6 +103,17 @@ export function createEventHub({
     activeProjects: () => [
       ...new Set([...clients].map((client) => client.project).filter(Boolean)),
     ],
+    watchDiff(projectId) {
+      if (typeof projectId !== "string" || !projectId) return;
+      diffWatch.set(projectId, (diffWatch.get(projectId) ?? 0) + 1);
+    },
+    unwatchDiff(projectId) {
+      if (typeof projectId !== "string" || !projectId) return;
+      const count = (diffWatch.get(projectId) ?? 0) - 1;
+      if (count <= 0) diffWatch.delete(projectId);
+      else diffWatch.set(projectId, count);
+    },
+    diffProjects: () => [...diffWatch.keys()],
     onClientsChanged(listener) {
       clientListeners.add(listener);
       listener(clients.size);
@@ -109,6 +122,7 @@ export function createEventHub({
     close() {
       for (const timer of pending.values()) clearTimeout(timer);
       pending.clear();
+      diffWatch.clear();
       if (heartbeat) clearInterval(heartbeat);
       heartbeat = null;
       for (const client of clients) client.res.end();

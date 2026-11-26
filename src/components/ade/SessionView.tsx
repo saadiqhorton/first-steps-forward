@@ -13,6 +13,7 @@ import { PermissionRequestCard } from "@/components/ade/PermissionRequestCard";
 import { TextShimmer } from "@/components/arc/text-shimmer/text-shimmer";
 import { StatusPill } from "@/components/ade/StatusPill";
 import { useShell } from "@/components/ade/shellContext";
+import { watchDiff } from "@/lib/ade/api";
 import { writeLastModel } from "@/lib/ade/lastModels";
 import { currentActivity } from "@/lib/ade/formatLogs.mjs";
 import { scrollToEnd } from "@/lib/ade/scrollToEnd";
@@ -129,6 +130,15 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     session?.speed,
     session?.permission,
   ]);
+
+  const projectId = summary?.projectId;
+  useEffect(() => {
+    if (rightTab !== "diff" || !projectId) return undefined;
+    void watchDiff(projectId, true);
+    return () => {
+      void watchDiff(projectId, false);
+    };
+  }, [rightTab, projectId]);
 
   // Opening user turn duplicates session.request in the header — skip it so the
   // thread starts on agent work instead of a second wall of the same brief.
