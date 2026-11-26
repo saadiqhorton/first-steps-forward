@@ -1,4 +1,12 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   CircleAlert,
   Eye,
@@ -278,13 +286,46 @@ export function ActivityLogs({
     }
   }
 
-  const rows = useMemo(() => formatSessionLogs(current), [current]);
-  const groups = useMemo(() => groupActivityTurns(rows, lineOffset), [rows, lineOffset]);
-  const status = useMemo(
-    () => (live ? (activity ?? currentActivity(current)) : ""),
-    [live, activity, current],
-  );
   const rootRef = useRef<HTMLDivElement>(null);
+  // Gate formatting on a real box (Tailwind `hidden` → no client rects). Default false so a
+  // column that mounts already hidden does not format; useLayoutEffect flips true before paint
+  // when rects already exist (open assistant drawer / Activity tab).
+  const [hasBox, setHasBox] = useState(false);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const measure = () => root.getClientRects().length > 0;
+    setHasBox(measure());
+    const observer = new ResizeObserver(() => setHasBox(measure()));
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
+
+  // Last formatted tree while the column has no box. Logs keep updating via `tracked` so the
+  // transcript status line and computer line count still see fresh lines; only format is frozen.
+  const freezeRef = useRef<{
+    current: string[];
+    groups: TurnGroup[];
+    status: string;
+  } | null>(null);
+
+  const formatted = useMemo(() => {
+    if (!hasBox) {
+      return (
+        freezeRef.current ?? { current: [] as string[], groups: [] as TurnGroup[], status: "" }
+      );
+    }
+    const rows = formatSessionLogs(current);
+    const groups = groupActivityTurns(rows, lineOffset);
+    const status = live ? (activity ?? currentActivity(current)) : "";
+    const next = { current, groups, status };
+    freezeRef.current = next;
+    return next;
+  }, [hasBox, current, lineOffset, live, activity]);
+
+  const groups = formatted.groups;
+  const status = formatted.status;
+  const displayLines = formatted.current;
   const scrollerRef = useRef<HTMLElement | null>(null);
   // Follow new events only while the reader is already near the bottom.
   const stickToBottomRef = useRef(true);
@@ -301,27 +342,27 @@ export function ActivityLogs({
     return () => scroller.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Keyed on the log itself: once it holds 500 lines its length stops changing.
+  // Keyed on the formatted log: frozen while hidden, so scroll work waits for a box too.
   useEffect(() => {
     if (!stickToBottomRef.current) return undefined;
     return scrollToEnd(scrollerRef.current);
-  }, [current]);
+  }, [displayLines]);
 
   // A turn with nothing to show is left out, unless it is the live one (it says what is next).
   const lastIndex = groups.length - 1;
-  const shown = groups.filter(
+  const visibleGroups = groups.filter(
     (group, index) => group.items.length || (live && index === lastIndex),
   );
 
   let content: ReactNode;
-  if (!current.length) {
+  if (!displayLines.length) {
     content = <p className="text-ui text-dim">No CLI output yet.</p>;
-  } else if (!shown.length) {
+  } else if (!visibleGroups.length) {
     content = <p className="text-ui text-dim">No activity events yet.</p>;
   } else {
     content = (
       <div className="space-y-1.5">
-        {shown.map((group) => (
+        {visibleGroups.map((group) => (
           <TurnBlock
             key={group.id}
             group={group}
