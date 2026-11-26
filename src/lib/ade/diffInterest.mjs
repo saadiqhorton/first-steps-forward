@@ -16,15 +16,17 @@ export function createDiffInterestController(post) {
       let cancelled = false;
       let active = false;
 
-      chain = chain.catch(() => {}).then(async () => {
-        if (cancelled) return;
-        await post(projectId, true);
-        active = true;
-        if (cancelled) {
-          active = false;
-          await post(projectId, false);
-        }
-      });
+      chain = chain
+        .catch(() => {})
+        .then(async () => {
+          if (cancelled) return;
+          await post(projectId, true);
+          active = true;
+          if (cancelled) {
+            active = false;
+            await post(projectId, false);
+          }
+        });
 
       return () => {
         cancelled = true;
