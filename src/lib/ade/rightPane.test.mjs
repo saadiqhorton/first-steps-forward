@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { LUNA_HIDDEN_RIGHT_TABS, isAssistantPath, isRightTabVisible } from "./rightPane.mjs";
+import {
+  LUNA_HIDDEN_RIGHT_TABS,
+  isAssistantPath,
+  isRightRailTabActive,
+  isRightTabVisible,
+} from "./rightPane.mjs";
 
 const ALL_TABS = ["activity", "diff", "computer", "terminal", "processes"];
 
@@ -27,4 +32,18 @@ test("project conversations keep every right-pane tab", () => {
       ALL_TABS,
     );
   }
+});
+
+test("isRightRailTabActive: selected tab is inactive when the rail is collapsed", () => {
+  assert.equal(isRightRailTabActive("terminal", "terminal", true), false);
+  assert.equal(isRightRailTabActive("computer", "computer", true), false);
+});
+
+test("isRightRailTabActive: selected tab is active when the rail is expanded", () => {
+  assert.equal(isRightRailTabActive("terminal", "terminal", false), true);
+  assert.equal(isRightRailTabActive("computer", "computer", false), true);
+});
+
+test("isRightRailTabActive: non-selected tab is inactive even when expanded", () => {
+  assert.equal(isRightRailTabActive("diff", "terminal", false), false);
 });

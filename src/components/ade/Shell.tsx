@@ -33,7 +33,7 @@ import {
   type RightTab,
 } from "@/lib/ade/navigation";
 import { useAppPathname } from "@/lib/ade/useAppPathname";
-import { isRightTabVisible, isAssistantPath } from "@/lib/ade/rightPane.mjs";
+import { isRightRailTabActive, isRightTabVisible, isAssistantPath } from "@/lib/ade/rightPane.mjs";
 import { useActiveProjectSelection, useAdeState } from "@/lib/ade/store";
 import type { Project } from "@/lib/ade/types";
 import { AddProjectDialog } from "./AddProjectDialog";
@@ -639,7 +639,7 @@ function ShellInner({
             project={activeProject}
             session={activeSession}
             dock={effectiveDock}
-            active={rightTab === "computer" && !collapsedRight}
+            active={isRightRailTabActive(rightTab, "computer", collapsedRight)}
             onToneChange={setComputerTone}
           />
         ) : (
@@ -685,7 +685,7 @@ function ShellInner({
               projectId={activeProject.id}
               projectName={activeProject.name}
               projectPath={activeProject.path}
-              visible={rightTab === "terminal"}
+              visible={isRightRailTabActive(rightTab, "terminal", collapsedRight)}
               registerClose={registerTerminalClose}
             />
           ) : (

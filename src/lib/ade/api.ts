@@ -1,4 +1,5 @@
 import type { ProjectDocument, Workflow } from "./types";
+import { createDiffInterestController } from "./diffInterest.mjs";
 
 export type RequestError = Error & { status?: number; authRequired?: boolean; code?: string };
 
@@ -44,4 +45,14 @@ export async function listDocuments(projectId: string): Promise<ProjectDocument[
 /** Register or clear Diff-tab interest so the 10s refresh runs full getDiff for this project. */
 export async function watchDiff(projectId: string, diff: boolean): Promise<void> {
   await request("/api/events/interest", "POST", { projectId, diff });
+}
+
+const diffInterest = createDiffInterestController(watchDiff);
+
+/**
+ * Register Diff interest until cleanup runs. Sequences POSTs so a late watch
+ * cannot leave interest true after unmount / fast tab churn.
+ */
+export function beginDiffInterest(projectId: string): () => void {
+  return diffInterest.watch(projectId);
 }

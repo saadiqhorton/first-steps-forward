@@ -18,3 +18,11 @@ export function isAssistantPath(pathname) {
 export function isRightTabVisible(pathname, tab) {
   return !(isAssistantPath(pathname) && LUNA_HIDDEN_RIGHT_TABS.includes(tab));
 }
+
+/**
+ * Whether a right-rail tab's content should run (selected and rail expanded).
+ * Computer and Terminal both gate poll/stream work on this — keep them paired.
+ */
+export function isRightRailTabActive(rightTab, tab, collapsedRight) {
+  return rightTab === tab && !collapsedRight;
+}
